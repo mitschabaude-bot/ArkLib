@@ -158,19 +158,19 @@ theorem queryVerifier_toVerifier_verify (hs : (∑ j, (s j).val) ≤ n)
   rw [simulate_queryVerifier, map_pure]
   split_ifs <;> rfl
 
-/-- For a safe history with a valid final polynomial and input distance at least `δ`,
+/-- For a lossily safe history with a valid final polynomial and input distance at least `δ`,
 the executable query core accepts uniform subtype-valued queries with probability at most
-`(1 - min θ δ)^l`. -/
+`(1 - min (θ - k · loss) (δ - (k + 1) · loss))^l`. -/
 theorem verifyQueries_soundness (d : ℕ+) (hs : (∑ j, (s j).val) ≤ n)
     (o : ∀ j, FinalOracleStatement s ω j) (α : FinalStatement F k)
-    (θ δ : ℝ) (hsafe : SafeHistory s d o α θ)
+    (θ δ loss : ℝ) (hloss : 0 ≤ loss) (hsafe : SafeHistory s d o α θ loss)
     (hdegree : (finalPolynomial s o).natDegree < d.val)
     (hdist : ∀ u ∈ ReedSolomon.code ω (2 ^ (∑ j, (s j).val) * d.val),
       δ ≤ (Code.relHammingDist (initialWord s o) u : ℝ)) :
     Pr{let xs ←$ᵗ (Fin l → (ω.subdomain 0).toFinset)}[
       (simulateQ (OracleInterface.simOracle0 (FinalOracleStatement s ω) o)
         (verifyQueries s hs l α xs).run).run ≠ none] ≤
-      ENNReal.ofReal (1 - min θ δ) ^ l := by
+      ENNReal.ofReal (1 - min (θ - k * loss) (δ - ((k : ℝ) + 1) * loss)) ^ l := by
   classical
   let e : (Fin l → Fin (2 ^ n)) ≃ (Fin l → (ω.subdomain 0).toFinset) :=
     Equiv.arrowCongr (Equiv.refl _) (ω.subdomain 0).equivToFinset
@@ -185,6 +185,6 @@ theorem verifyQueries_soundness (d : ℕ+) (hs : (∑ j, (s j).val) ≤ n)
     rw [eval_verifyQueries]
     simp [acceptingQueries, he]
     rfl
-  simpa only [hpoint] using queryChecks_soundness s d hs o α θ δ l hsafe hdegree hdist
+  simpa only [hpoint] using queryChecks_soundness s d hs o α θ δ loss l hloss hsafe hdegree hdist
 
 end Fri.Spec.QueryRound

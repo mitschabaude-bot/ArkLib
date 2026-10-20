@@ -18,6 +18,10 @@ ordinary soundness game. Folding errors reuse ArkLib's powers-generator MCA erro
 term follows the March 27, 2026 revision of [GMW25]. See `docs/kb/audits/fri-soundness.md`
 for the source correspondence and credit to the earlier `zksecurity/simple-rbr-fri` development.
 
+The `_lossy` theorems generalize both terms to lossy MCA (`IsLossyMCA`); the lossless theorems
+are their `loss = 0` case. The derivation of the lossy query term is in
+`ArkLib.ProofSystem.Fri.QuerySoundness`.
+
 ## References
 
 * [Garreta, A., Mohnblatt, N., Wagner, B., *A Simplified Round-by-round Soundness Proof
@@ -39,6 +43,44 @@ variable (s : Fin (k + 1) → ℕ+) (d : ℕ+) (l : ℕ)
 noncomputable def soundnessError (θ δ : ℝ) : ℝ≥0 :=
   (∑ i, foldingError (ω := ω) s d θ i) + Real.toNNReal (1 - min θ δ) ^ l
 
+/-- The total FRI error from lossy MCA: one lossy MCA error per fold and one independent-query
+term, `(1 - min (θ - k · loss) (δ - (k + 1) · loss))^l`, with `k + 1` folds. -/
+noncomputable def soundnessErrorLossy (θ δ loss : ℝ) : ℝ≥0 :=
+  (∑ i, foldingErrorLossy (ω := ω) s d θ loss i) +
+    Real.toNNReal (1 - min (θ - k * loss) (δ - ((k : ℝ) + 1) * loss)) ^ l
+
+omit [DecidableEq F] in
+/-- At zero loss the lossy error is the MCA error. -/
+theorem soundnessErrorLossy_zero (θ δ : ℝ) :
+    soundnessErrorLossy (ω := ω) s d l θ δ 0 = soundnessError (ω := ω) s d l θ δ := by
+  simp [soundnessErrorLossy, soundnessError]
+
+/-- End-to-end ordinary soundness from lossy MCA, bounding any acceptance for inputs at relative
+distance at least `δ` from the initial Reed–Solomon code. -/
+theorem soundness_proximity_lossy (hdom : 2 ^ (∑ j, (s j).val) * d.val ≤ 2 ^ n)
+    (θ δ loss : ℝ) (hloss : 0 ≤ loss)
+    [∀ j, SampleableType ((pSpec k (ω := ω) s l).Challenge j)]
+    {σ : Type} (init : ProbComp σ)
+    (impl : QueryImpl (emptySpec.{0, 0}) (StateT σ ProbComp)) :
+    (reduction k s d hdom l).verifier.toVerifier.soundness init impl
+      ((initialOracle (ω := ω) s) ⁻¹' proximityLanguage s d δ) Set.univ
+      (soundnessErrorLossy (ω := ω) s d l θ δ loss) := by
+  apply Verifier.soundness_of_rejection_event (pSpec := pSpec k (ω := ω) s l) init impl _ _ _
+    (fun stmt tr ↦ queryBad s d l (round_bound hdom) (initialOracle s stmt)
+      (Transcript.restrict (b := Fin.last _)
+        (by simp only [Fin.val_succ, Fin.val_last]; omega) tr))
+  · intro stmt _ tr hbad
+    rw [reduction_run, ite_eq_right hbad]
+  · intro WitIn WitOut wit prover stmt hstmt os
+    have h := terminalEvent_prob_le s d l (round_bound hdom) θ δ loss hloss impl prover stmt
+      hstmt wit
+      (fun tr ↦ queryBad s d l (round_bound hdom) (initialOracle s stmt)
+        (Transcript.restrict (b := Fin.last _)
+          (by simp only [Fin.val_succ, Fin.val_last]; omega) tr))
+      (fun _ h ↦ h) os
+    simpa only [soundnessErrorLossy, ENNReal.coe_add, ENNReal.coe_pow,
+      ENNReal.ofNNReal_finsetSum, ENNReal.ofReal] using h
+
 /-- End-to-end ordinary soundness, in the stronger form of bounding any acceptance for
 inputs at relative distance at least `δ` from the initial Reed–Solomon code. -/
 theorem soundness_proximity (hdom : 2 ^ (∑ j, (s j).val) * d.val ≤ 2 ^ n)
@@ -48,20 +90,8 @@ theorem soundness_proximity (hdom : 2 ^ (∑ j, (s j).val) * d.val ≤ 2 ^ n)
     (reduction k s d hdom l).verifier.toVerifier.soundness init impl
       ((initialOracle (ω := ω) s) ⁻¹' proximityLanguage s d δ) Set.univ
       (soundnessError (ω := ω) s d l θ δ) := by
-  apply Verifier.soundness_of_rejection_event (pSpec := pSpec k (ω := ω) s l) init impl _ _ _
-    (fun stmt tr ↦ queryBad s d l (round_bound hdom) (initialOracle s stmt)
-      (Transcript.restrict (b := Fin.last _)
-        (by simp only [Fin.val_succ, Fin.val_last]; omega) tr))
-  · intro stmt _ tr hbad
-    rw [reduction_run, ite_eq_right hbad]
-  · intro WitIn WitOut wit prover stmt hstmt os
-    have h := terminalEvent_prob_le s d l (round_bound hdom) θ δ impl prover stmt hstmt wit
-      (fun tr ↦ queryBad s d l (round_bound hdom) (initialOracle s stmt)
-        (Transcript.restrict (b := Fin.last _)
-          (by simp only [Fin.val_succ, Fin.val_last]; omega) tr))
-      (fun _ h ↦ h) os
-    simpa only [soundnessError, ENNReal.coe_add, ENNReal.coe_pow,
-      ENNReal.ofNNReal_finsetSum, ENNReal.ofReal] using h
+  rw [← soundnessErrorLossy_zero]
+  exact soundness_proximity_lossy s d l hdom θ δ 0 le_rfl init impl
 
 /-- Soundness of the specified FRI oracle reduction, with its existing input and output
 relations. In fact, `soundness_proximity` bounds any acceptance, not only valid outputs. -/
@@ -82,25 +112,27 @@ theorem soundness (hdom : 2 ^ (∑ j, (s j).val) * d.val ≤ 2 ^ n)
   intro _ _
   exact Set.mem_univ _
 
-/-- Round-by-round soundness for the actual composed FRI verifier. Prover moves preserve
-the persistent bad-event state; each folding challenge incurs its MCA error and the final
-query vector incurs the independent-query error. -/
-theorem rbrSoundness (hdom : 2 ^ (∑ j, (s j).val) * d.val ≤ 2 ^ n)
-    (θ : ℝ) (δ : ℝ≥0) [∀ j, SampleableType ((pSpec k (ω := ω) s l).Challenge j)]
+/-- Round-by-round soundness for the actual composed FRI verifier from lossy MCA. Prover moves
+preserve the persistent bad-event state; each folding challenge incurs its lossy MCA error and
+the final query vector incurs `(1 - min (θ - k · loss) (δ - (k + 1) · loss))^l`. -/
+theorem rbrSoundness_lossy (hdom : 2 ^ (∑ j, (s j).val) * d.val ≤ 2 ^ n)
+    (θ : ℝ) (δ : ℝ≥0) (loss : ℝ) (hloss : 0 ≤ loss)
+    [∀ j, SampleableType ((pSpec k (ω := ω) s l).Challenge j)]
     {σ : Type} (init : ProbComp σ)
     (impl : QueryImpl (emptySpec.{0, 0}) (StateT σ ProbComp)) :
     (reduction k (ω := ω) s d hdom l).verifier.rbrSoundness init impl
       (inputRelation k s d hdom δ).language (outputRelation k s d hdom δ).language
-      (challengeError (ω := ω) s d l θ δ) := by
+      (challengeErrorLossy (ω := ω) s d l θ δ loss) := by
   apply Verifier.rbrSoundness_of_badEvents
-    (bad := fun j stmt tr ↦ badEvent s d l (round_bound hdom) θ j (initialOracle s stmt) tr)
+    (bad := fun j stmt tr ↦
+      badEvent s d l (round_bound hdom) θ loss j (initialOracle s stmt) tr)
   · intro stmt tr _ hsafe
     have hbad : ¬ queryBad s d l (round_bound hdom) (initialOracle s stmt)
         (Transcript.restrict (b := Fin.last _)
           (by simp only [Fin.val_succ, Fin.val_last]; omega) tr) := by
       intro hquery
       exact hsafe (queryChallenge s l)
-        ((badEvent_query s d l (round_bound hdom) θ (initialOracle s stmt) _).mpr hquery)
+        ((badEvent_query s d l (round_bound hdom) θ loss (initialOracle s stmt) _).mpr hquery)
     have hrun := reduction_run s l d hdom stmt tr
     rw [ite_eq_right hbad] at hrun
     have hv : (reduction k s d hdom l).verifier.toVerifier.run stmt tr = failure :=
@@ -112,10 +144,23 @@ theorem rbrSoundness (hdom : 2 ^ (∑ j, (s j).val) * d.val ≤ 2 ^ n)
     rw [OptionT.prEvent_mk]
     simp [StateT.run'_eq, StateT.run_pure]
   · intro stmt hstmt j tr hbefore
-    apply badEvent_prob_le s d l (round_bound hdom) θ δ (initialOracle s stmt)
+    apply badEvent_prob_le s d l (round_bound hdom) θ δ loss hloss (initialOracle s stmt)
     · exact fun h ↦ hstmt (mem_inputLanguage_of_proximity s d hdom δ stmt h)
     · rintro (hclose | hbad)
       · exact hstmt (mem_inputLanguage_of_proximity s d hdom δ stmt hclose)
       · exact hbefore (Or.inr hbad)
+
+/-- Round-by-round soundness for the actual composed FRI verifier. Prover moves preserve
+the persistent bad-event state; each folding challenge incurs its MCA error and the final
+query vector incurs the independent-query error. -/
+theorem rbrSoundness (hdom : 2 ^ (∑ j, (s j).val) * d.val ≤ 2 ^ n)
+    (θ : ℝ) (δ : ℝ≥0) [∀ j, SampleableType ((pSpec k (ω := ω) s l).Challenge j)]
+    {σ : Type} (init : ProbComp σ)
+    (impl : QueryImpl (emptySpec.{0, 0}) (StateT σ ProbComp)) :
+    (reduction k (ω := ω) s d hdom l).verifier.rbrSoundness init impl
+      (inputRelation k s d hdom δ).language (outputRelation k s d hdom δ).language
+      (challengeError (ω := ω) s d l θ δ) := by
+  rw [← challengeErrorLossy_zero]
+  exact rbrSoundness_lossy s d l hdom θ δ 0 le_rfl init impl
 
 end Fri.Spec

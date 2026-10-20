@@ -56,4 +56,57 @@ noncomputable def lossyMcaError {S : Type} [Nonempty S] [Fintype S] [SampleableT
     (G : Generator S ℓ F) (MC : ModuleCode ι F A) (δ loss : ℝ) : ENNReal :=
   ⨆ U : ℓ → (ι → A), Pr{let x ←$ᵗ S}[IsLossyMCA G MC x U δ loss]
 
+section Lemmas
+
+variable {S : Type} [Nonempty S] [Fintype S] {A : Type} [AddCommMonoid A] [Module F A]
+
+/-- Without loss, the only admissible subset of `T` is `T` itself, so lossy MCA is MCA. -/
+theorem isLossyMCA_zero_iff (G : Generator S ℓ F) (MC : ModuleCode ι F A) (x : S)
+    (U : ℓ → (ι → A)) (δ : ℝ) :
+    IsLossyMCA G MC x U δ 0 ↔ IsMCA G MC x U δ := by
+  constructor
+  · rintro ⟨T, hT, hv, hbad⟩
+    exact ⟨T, hT, hv, hbad T subset_rfl (by simp)⟩
+  · rintro ⟨T, hT, hv, j, hj⟩
+    refine ⟨T, hT, hv, fun T' hT' hcard ↦ ⟨j, ?_⟩⟩
+    rw [Finset.eq_of_subset_of_card_le hT' (by simpa using hcard)]
+    exact hj
+
+/-- A larger loss admits more subsets `T'`, each of which must fail, so the lossy MCA bad event
+shrinks as the loss grows. -/
+theorem IsLossyMCA.of_loss_le {G : Generator S ℓ F} {MC : ModuleCode ι F A} {x : S}
+    {U : ℓ → (ι → A)} {δ loss loss' : ℝ} (h : IsLossyMCA G MC x U δ loss')
+    (hloss : loss ≤ loss') : IsLossyMCA G MC x U δ loss := by
+  obtain ⟨T, hT, hv, hbad⟩ := h
+  refine ⟨T, hT, hv, fun T' hT' hcard ↦ hbad T' hT' ?_⟩
+  have : loss * Fintype.card ι ≤ loss' * Fintype.card ι :=
+    mul_le_mul_of_nonneg_right hloss (Nat.cast_nonneg _)
+  linarith
+
+variable [SampleableType S]
+
+/-- At zero loss the lossy MCA error is the MCA error. -/
+theorem lossyMcaError_zero (G : Generator S ℓ F) (MC : ModuleCode ι F A) (δ : ℝ) :
+    lossyMcaError G MC δ 0 = mcaError G MC δ := by
+  unfold lossyMcaError mcaError
+  simp only [isLossyMCA_zero_iff]
+
+/-- The lossy MCA error is antitone in the loss. -/
+theorem lossyMcaError_anti (G : Generator S ℓ F) (MC : ModuleCode ι F A) (δ : ℝ)
+    {loss loss' : ℝ} (hloss : loss ≤ loss') :
+    lossyMcaError G MC δ loss' ≤ lossyMcaError G MC δ loss :=
+  iSup_mono fun _ ↦ prEvent_mono _ _ _ fun _ h ↦ h.of_loss_le hloss
+
+/-- A nonnegative loss can only lower the MCA error. -/
+theorem lossyMcaError_le_mcaError (G : Generator S ℓ F) (MC : ModuleCode ι F A) (δ : ℝ)
+    {loss : ℝ} (hloss : 0 ≤ loss) : lossyMcaError G MC δ loss ≤ mcaError G MC δ :=
+  (lossyMcaError_anti G MC δ hloss).trans (lossyMcaError_zero G MC δ).le
+
+/-- The lossy MCA error is a probability, so it is finite. -/
+theorem lossyMcaError_ne_top (G : Generator S ℓ F) (MC : ModuleCode ι F A) (δ loss : ℝ) :
+    lossyMcaError G MC δ loss ≠ ⊤ :=
+  ne_top_of_le_ne_top ENNReal.one_ne_top (iSup_le fun _ ↦ prEvent_le_one _)
+
+end Lemmas
+
 end CoreDefinitions

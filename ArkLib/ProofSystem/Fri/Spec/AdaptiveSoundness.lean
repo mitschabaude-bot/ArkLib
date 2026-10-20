@@ -37,8 +37,9 @@ def initialOracle
     rfl) (stmt.2 0)
 
 /-- For an input outside the proximity language, any terminal event implying query acceptance
-has probability at most the sum of the folding MCA errors and `(1 - min θ δ)^l`. -/
-theorem terminalEvent_prob_le (hs : (∑ j, (s j).val) ≤ n) (θ δ : ℝ)
+has probability at most the sum of the folding lossy MCA errors and
+`(1 - min (θ - k · loss) (δ - (k + 1) · loss))^l`. -/
+theorem terminalEvent_prob_le (hs : (∑ j, (s j).val) ≤ n) (θ δ loss : ℝ) (hloss : 0 ≤ loss)
     [∀ j, SampleableType ((pSpec k (ω := ω) s l).Challenge j)]
     {σ WitIn WitOut StmtOut : Type}
     (impl : QueryImpl (emptySpec.{0, 0}) (StateT σ ProbComp))
@@ -54,22 +55,22 @@ theorem terminalEvent_prob_le (hs : (∑ j, (s j).val) ≤ n) (θ δ : ℝ)
     (os : σ) :
     Pr{let x ← (simulateQ (impl.addLift challengeQueryImpl : QueryImpl _ (StateT σ ProbComp))
         (prover.run stmt wit)).run os}[E x.1.1] ≤
-      (∑ i, (foldingError (ω := ω) s d θ i : ENNReal)) +
-        ENNReal.ofReal (1 - min θ δ) ^ l := by
+      (∑ i, (foldingErrorLossy (ω := ω) s d θ loss i : ENNReal)) +
+        ENNReal.ofReal (1 - min (θ - k * loss) (δ - ((k : ℝ) + 1) * loss)) ^ l := by
   let lang := (initialOracle (ω := ω) s) ⁻¹' proximityLanguage s d δ
-  let bad := fun j st tr ↦ badEvent (ω := ω) s d l hs θ j (initialOracle s st) tr
+  let bad := fun j st tr ↦ badEvent (ω := ω) s d l hs θ loss j (initialOracle s st) tr
   have hb : ∀ st ∉ lang, ∀ j, ∀ tr,
       ¬ Verifier.badEventState lang bad j.val.castSucc st tr →
       Pr{let c ← $ᵗ ((pSpec k (ω := ω) s l).Challenge j)}[bad j st (tr.concat c)] ≤
-        (challengeError (ω := ω) s d l θ δ j : ENNReal) := by
+        (challengeErrorLossy (ω := ω) s d l θ δ loss j : ENNReal) := by
     intro st hst j tr hbefore
-    exact badEvent_prob_le s d l hs θ δ (initialOracle s st) hst j tr hbefore
+    exact badEvent_prob_le s d l hs θ δ loss hloss (initialOracle s st) hst j tr hbefore
   have h := Verifier.prob_terminal_event_le_of_badEvents impl lang bad
-    (fun j ↦ (challengeError (ω := ω) s d l θ δ j : ENNReal)) hb
+    (fun j ↦ (challengeErrorLossy (ω := ω) s d l θ δ loss j : ENNReal)) hb
     prover stmt hstmt wit E (fun tr he ↦ ?_) os
-  · simpa only [← ENNReal.ofNNReal_finsetSum, sum_challengeError, ENNReal.coe_add,
+  · simpa only [← ENNReal.ofNNReal_finsetSum, sum_challengeErrorLossy, ENNReal.coe_add,
       ENNReal.coe_pow, ENNReal.ofReal] using h
   · exact Or.inr ⟨queryChallenge s l, (queryChallenge s l).val.isLt,
-      (badEvent_query s d l hs θ (initialOracle s stmt) _).mpr (hterminal tr he)⟩
+      (badEvent_query s d l hs θ loss (initialOracle s stmt) _).mpr (hterminal tr he)⟩
 
 end Fri.Spec
