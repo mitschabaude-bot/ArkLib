@@ -309,6 +309,7 @@ public import ArkLib.Data.CodingTheory.ProximityGap.LineDecoding
 public import ArkLib.Data.CodingTheory.ProximityGap.Separation
 public import ArkLib.Data.CodingTheory.ProximityGenerator.AffineGenerator
 public import ArkLib.Data.CodingTheory.ProximityGenerator.Basic
+public import ArkLib.Data.CodingTheory.ProximityGenerator.LossyMca
 public import ArkLib.Data.CodingTheory.ProximityGenerator.BinaryTensorFoldAgreement
 public import ArkLib.Data.CodingTheory.ProximityGenerator.BinaryTensorFoldProbability
 public import ArkLib.Data.CodingTheory.ProximityGenerator.ExceptionalSet
