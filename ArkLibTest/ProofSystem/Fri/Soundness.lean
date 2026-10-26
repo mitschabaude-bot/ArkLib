@@ -85,6 +85,41 @@ info: 'Fri.FoldTrace.interpolate_accepting_agrees' depends on axioms:
 #guard_msgs (whitespace := lax) in
 #print axioms Fri.FoldTrace.interpolate_accepting_agrees
 
+/--
+info: 'Fri.Spec.soundness_proximity_lossy' depends on axioms:
+[propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms Fri.Spec.soundness_proximity_lossy
+
+/--
+info: 'Fri.Spec.rbr_soundness_lossy' depends on axioms:
+[propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms Fri.Spec.rbr_soundness_lossy
+
+/--
+info: 'Fri.FoldTrace.query_soundness_lossy' depends on axioms:
+[propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms Fri.FoldTrace.query_soundness_lossy
+
+/--
+info: 'Fri.lossyFoldingAgreementFailure_prob_le_powers' depends on axioms:
+[propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms Fri.lossyFoldingAgreementFailure_prob_le_powers
+
+/--
+info: 'CoreDefinitions.isLossyMCA_zero_iff' depends on axioms:
+[propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms CoreDefinitions.isLossyMCA_zero_iff
+
 open OracleComp
 
 section SeparateParameters

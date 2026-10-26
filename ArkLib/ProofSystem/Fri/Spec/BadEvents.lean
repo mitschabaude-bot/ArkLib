@@ -14,6 +14,8 @@ public import ArkLib.ProofSystem.Fri.Spec.InputRelation
 
 Once all folding challenges are safe, an accepting query vector is the only remaining bad
 event. The final polynomial degree check is included, just as in the composed verifier.
+Folding challenges are bad in the lossy sense; the query error
+`(1 - min (θ - k · loss) (δ - (k + 1) · loss))^l` absorbs the accumulated loss.
 -/
 
 @[expose] public section
@@ -57,20 +59,21 @@ theorem queryBad_concat_iff (hs : (∑ j, (s j).val) ≤ n)
     le_rfl, Transcript.restrict_refl,
     Transcript.read_concat_last]
 
-/-- For an initial word at distance at least `δ`, safe preceding folding challenges bound
-the final query bad-event probability by `(1 - min θ δ)^l`. -/
+/-- For an initial word at distance at least `δ`, lossily safe preceding folding challenges
+bound the final query bad-event probability by `(1 - min (θ - k · loss) (δ - (k + 1) · loss))^l`.
+-/
 theorem queryBad_prob_le (hs : (∑ j, (s j).val) ≤ n)
-    (f : (ω.subdomain 0).toFinset → F) (θ δ : ℝ)
+    (f : (ω.subdomain 0).toFinset → F) (θ δ loss : ℝ) (hloss : 0 ≤ loss)
     [SampleableType ((pSpec k (ω := ω) s l).Challenge (queryChallenge s l))]
     (tr : (pSpec k (ω := ω) s l).Transcript (queryChallenge (ω := ω) s l).val.castSucc)
-    (hsafe : ∀ i : Fin (k + 1), ¬ foldingBad s d l f θ i
+    (hsafe : ∀ i : Fin (k + 1), ¬ foldingBad s d l f θ loss i
       (tr.restrict (by simp only [Fin.val_succ, Fin.val_castSucc,
         foldChallenge_val, queryChallenge_val]; omega)))
     (hdist : ∀ u ∈ code ω (2 ^ (∑ j, (s j).val) * d.val),
       δ ≤ (Code.relHammingDist (fun z ↦ f (initialQuery z)) u : ℝ)) :
     Pr{let xs ← $ᵗ ((pSpec k (ω := ω) s l).Challenge (queryChallenge s l))}[
       queryBad s d l hs f (tr.concat xs)] ≤
-      ENNReal.ofReal (1 - min θ δ) ^ l := by
+      ENNReal.ofReal (1 - min (θ - k * loss) (δ - ((k : ℝ) + 1) * loss)) ^ l := by
   classical
   simp only [queryBad_concat_iff]
   by_cases hd : (finalPolynomial s (queryHistory s l f tr)).natDegree < d.val
@@ -81,8 +84,8 @@ theorem queryBad_prob_le (hs : (∑ j, (s j).val) ≤ n)
         (OracleInterface.simOracle0 (FinalOracleStatement s ω) (queryHistory s l f tr))
         (QueryRound.verifyQueries s hs l (queryFoldChallenges s l tr) xs).run).run ≠ none)
       ).le.trans ?_
-    apply QueryRound.verifyQueries_soundness s d hs _ _ θ δ
-      (safeHistory_queryHistory s d l f θ tr hsafe) hd
+    apply QueryRound.verifyQueries_soundness s d hs _ _ θ δ loss hloss
+      (safeHistory_queryHistory s d l f θ loss tr hsafe) hd
     simpa only [show initialWord s (queryHistory s l f tr) = (fun z ↦ f (initialQuery z)) from
       funext (initialWord_queryHistory s l f tr)] using hdist
   · simp only [hd, false_and]
@@ -92,17 +95,17 @@ theorem queryBad_prob_le (hs : (∑ j, (s j).val) ≤ n)
 
 /-- Bad events indexed by challenges of the existing composed protocol. The equalities
 only transport prefixes; no alternative protocol or extra randomness is introduced. -/
-def badEvent (hs : (∑ j, (s j).val) ≤ n) (θ : ℝ)
+def badEvent (hs : (∑ j, (s j).val) ≤ n) (θ loss : ℝ)
     (j : (pSpec k (ω := ω) s l).ChallengeIdx) (f : (ω.subdomain 0).toFinset → F)
     (tr : (pSpec k (ω := ω) s l).Transcript j.val.succ) : Prop :=
-  (∃ i, ∃ h : j = foldChallenge s l i, foldingBad s d l f θ i (h ▸ tr)) ∨
+  (∃ i, ∃ h : j = foldChallenge s l i, foldingBad s d l f θ loss i (h ▸ tr)) ∨
     ∃ h : j = queryChallenge s l, queryBad s d l hs f (h ▸ tr)
 
 @[simp]
-theorem badEvent_fold (hs : (∑ j, (s j).val) ≤ n) (θ : ℝ)
+theorem badEvent_fold (hs : (∑ j, (s j).val) ≤ n) (θ loss : ℝ)
     (i : Fin (k + 1)) (f : (ω.subdomain 0).toFinset → F)
     (tr : (pSpec k (ω := ω) s l).Transcript (foldChallenge (ω := ω) s l i).val.succ) :
-    badEvent s d l hs θ (foldChallenge s l i) f tr ↔ foldingBad s d l f θ i tr := by
+    badEvent s d l hs θ loss (foldChallenge s l i) f tr ↔ foldingBad s d l f θ loss i tr := by
   constructor
   · rintro (⟨j, h, hb⟩ | ⟨h, _⟩)
     · have hij := foldChallenge_injective s l h
@@ -113,10 +116,10 @@ theorem badEvent_fold (hs : (∑ j, (s j).val) ≤ n) (θ : ℝ)
     exact Or.inl ⟨i, rfl, hb⟩
 
 @[simp]
-theorem badEvent_query (hs : (∑ j, (s j).val) ≤ n) (θ : ℝ)
+theorem badEvent_query (hs : (∑ j, (s j).val) ≤ n) (θ loss : ℝ)
     (f : (ω.subdomain 0).toFinset → F)
     (tr : (pSpec k (ω := ω) s l).Transcript (queryChallenge (ω := ω) s l).val.succ) :
-    badEvent s d l hs θ (queryChallenge s l) f tr ↔ queryBad s d l hs f tr := by
+    badEvent s d l hs θ loss (queryChallenge s l) f tr ↔ queryBad s d l hs f tr := by
   constructor
   · rintro (⟨i, h, _⟩ | ⟨h, hb⟩)
     · exact (foldChallenge_ne_query s l i h.symm).elim
@@ -169,29 +172,81 @@ theorem sum_challengeError [SampleableType F] (θ δ : ℝ) :
   · exact Fintype.sum_ite_eq' (queryChallenge (ω := ω) s l)
       (fun _ ↦ Real.toNNReal (1 - min θ δ) ^ l)
 
+/-- Per-challenge lossy error: the folding lossy MCA error, or
+`(1 - min (θ - k · loss) (δ - (k + 1) · loss))^l` for the query vector. -/
+noncomputable def challengeErrorLossy [SampleableType F] (θ δ loss : ℝ)
+    (j : (pSpec k (ω := ω) s l).ChallengeIdx) : ℝ≥0 :=
+  (∑ i, if j = foldChallenge s l i then foldingErrorLossy (ω := ω) s d θ loss i else 0) +
+    if j = queryChallenge s l then
+      Real.toNNReal (1 - min (θ - k * loss) (δ - ((k : ℝ) + 1) * loss)) ^ l else 0
+
+@[simp]
+theorem challengeErrorLossy_fold [SampleableType F] (θ δ loss : ℝ) (i : Fin (k + 1)) :
+    challengeErrorLossy (ω := ω) s d l θ δ loss (foldChallenge s l i) =
+      foldingErrorLossy (ω := ω) s d θ loss i := by
+  classical
+  simp only [challengeErrorLossy, foldChallenge_ne_query, ↓reduceIte, add_zero,
+    (foldChallenge_injective (ω := ω) s l).eq_iff]
+  simp
+
+@[simp]
+theorem challengeErrorLossy_query [SampleableType F] (θ δ loss : ℝ) :
+    challengeErrorLossy (ω := ω) s d l θ δ loss (queryChallenge s l) =
+      Real.toNNReal (1 - min (θ - k * loss) (δ - ((k : ℝ) + 1) * loss)) ^ l := by
+  classical
+  have hne (i : Fin (k + 1)) : queryChallenge (ω := ω) s l ≠ foldChallenge s l i :=
+    (foldChallenge_ne_query s l i).symm
+  unfold challengeErrorLossy
+  rw [ite_eq_left rfl, Finset.sum_eq_zero (fun i _ ↦ ite_eq_right (hne i)), zero_add]
+
+/-- Summing over the actual protocol challenges counts every folding lossy error exactly once,
+followed by the single query-vector error. -/
+theorem sum_challengeErrorLossy [SampleableType F] (θ δ loss : ℝ) :
+    ∑ j, challengeErrorLossy (ω := ω) s d l θ δ loss j =
+      (∑ i, foldingErrorLossy (ω := ω) s d θ loss i) +
+        Real.toNNReal (1 - min (θ - k * loss) (δ - ((k : ℝ) + 1) * loss)) ^ l := by
+  classical
+  simp only [challengeErrorLossy, Finset.sum_add_distrib]
+  rw [Finset.sum_comm]
+  congr 1
+  · apply Finset.sum_congr rfl
+    intro i _
+    exact Fintype.sum_ite_eq' (foldChallenge (ω := ω) s l i)
+      (fun _ ↦ foldingErrorLossy (ω := ω) s d θ loss i)
+  · exact Fintype.sum_ite_eq' (queryChallenge (ω := ω) s l)
+      (fun _ ↦ Real.toNNReal (1 - min (θ - k * loss) (δ - ((k : ℝ) + 1) * loss)) ^ l)
+
+/-- At zero loss the per-challenge lossy error is the per-challenge error. -/
+theorem challengeErrorLossy_zero [SampleableType F] (θ δ : ℝ) :
+    challengeErrorLossy (ω := ω) s d l θ δ 0 = challengeError (ω := ω) s d l θ δ := by
+  funext j
+  simp only [challengeErrorLossy, challengeError, foldingErrorLossy_zero, mul_zero, sub_zero]
+
 /-! ## Conditional challenge bound -/
 
 /-- Every fresh bad event obeys its bound, conditional on no earlier bad event. -/
-theorem badEvent_prob_le [SampleableType F] (hs : (∑ j, (s j).val) ≤ n) (θ δ : ℝ)
+theorem badEvent_prob_le [SampleableType F] (hs : (∑ j, (s j).val) ≤ n) (θ δ loss : ℝ)
+    (hloss : 0 ≤ loss)
     [∀ j, SampleableType ((pSpec k (ω := ω) s l).Challenge j)]
     (f : (ω.subdomain 0).toFinset → F) (hf : f ∉ proximityLanguage s d δ)
     (j : (pSpec k (ω := ω) s l).ChallengeIdx)
     (tr : (pSpec k (ω := ω) s l).Transcript j.val.castSucc)
     (hbefore : ¬ Verifier.badEventState (proximityLanguage s d δ)
-      (badEvent s d l hs θ) j.val.castSucc f tr) :
-    Pr{let c ← $ᵗ ((pSpec k (ω := ω) s l).Challenge j)}[badEvent s d l hs θ j f (tr.concat c)] ≤
-        (challengeError (ω := ω) s d l θ δ j : ENNReal) := by
+      (badEvent s d l hs θ loss) j.val.castSucc f tr) :
+    Pr{let c ← $ᵗ ((pSpec k (ω := ω) s l).Challenge j)}[
+      badEvent s d l hs θ loss j f (tr.concat c)] ≤
+        (challengeErrorLossy (ω := ω) s d l θ δ loss j : ENNReal) := by
   rcases challenge_cases s l j with ⟨i, rfl⟩ | rfl
-  · simpa only [badEvent_fold, challengeError_fold] using
-      foldingBad_prob_le s d l f θ i tr
-  · simp only [badEvent_query, challengeError_query, ENNReal.coe_pow]
-    apply queryBad_prob_le s d l hs f θ δ tr
+  · simpa only [badEvent_fold, challengeErrorLossy_fold] using
+      foldingBad_prob_le s d l f θ loss i tr
+  · simp only [badEvent_query, challengeErrorLossy_query, ENNReal.coe_pow]
+    apply queryBad_prob_le s d l hs f θ δ loss hloss tr
     · intro i hb
       apply hbefore
       refine Or.inr ⟨foldChallenge s l i, ?_, ?_⟩
       · simp only [foldChallenge_val, Fin.val_castSucc, queryChallenge_val]
         omega
-      · exact (badEvent_fold s d l hs θ i f _).mpr hb
+      · exact (badEvent_fold s d l hs θ loss i f _).mpr hb
     · intro u hu
       exact le_of_not_gt (fun h ↦ hf ⟨u, hu, h⟩)
 

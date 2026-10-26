@@ -32,6 +32,11 @@ author credit are recorded on the paper page.
 | End-to-end knowledge soundness with named extractor | `Fri.Spec.knowledge_soundness_with` | Every input statement; actual logged knowledge game; extraction failure includes `none` |
 | End-to-end existential knowledge soundness | `Fri.Spec.knowledge_soundness` | The same specific straightline extractor witnesses existence |
 | End-to-end round-by-round soundness | `Fri.Spec.rbr_soundness` | Existing `OracleVerifier.rbrSoundness` and original input/output relations |
+| Lossy folding failure implies lossy MCA failure | `Fri.isLossyMCA_of_lossyFoldingAgreementFailure` | Loss is the same fraction of the folded and original domains |
+| Lossy folding-round probability | `Fri.lossyFoldingAgreementFailure_prob_le_powers` | Powers-generator `lossyMcaError` |
+| Lossy agreement propagation | `Fri.FoldTrace.exists_codeword_agree_on_lossy` | Agreement off at most `numFolds · loss · 2^n` accepting queries |
+| Lossy query-round probability | `Fri.FoldTrace.query_soundness_lossy` | `(1 - min (θ - (numFolds - 1) · loss) (δ - numFolds · loss))^t` |
+| Lossy end-to-end soundness | `Fri.Spec.soundness_proximity_lossy`, `Fri.Spec.rbr_soundness_lossy` | `loss ≥ 0`; the lossless theorems are the `loss = 0` case |
 
 ## Parameters and conclusions
 
@@ -55,6 +60,8 @@ codeword within relative distance `δ` of the input. Interpolation on any `d` ac
 positions recovers that codeword, and any query at a disagreement position is rejected.
 The theorem permits real parameters outside the paper's unit intervals whenever its
 hypotheses hold, and in particular covers the paper's full parameter range.
+
+From lossy MCA, `Fri.Spec.soundnessErrorLossy θ δ loss` is the sum of the powers-generator lossy MCA errors over the `k + 1` folds, plus `Real.toNNReal (1 - min (θ - k · loss) (δ - (k + 1) · loss)) ^ l`. Each fold loses agreement on at most `loss · 2^n` accepting queries, so the agreement threshold must hold after the `k` losses of the inner folds and the final codeword agrees off at most `(k + 1) · loss · 2^n` of them. The derivation is in the module docs of `Fri/QuerySoundness.lean`. The decoding consequences of Corollary 5.6 are only stated for lossless safety.
 
 ## Specification properties
 

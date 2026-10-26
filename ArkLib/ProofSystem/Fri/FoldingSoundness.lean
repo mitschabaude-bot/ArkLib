@@ -7,7 +7,7 @@ Authors: Yoichi Hirai, Pietro Monticone, Aristotle (Harmonic), Alexander Hicks
 module
 
 public import ArkLib.Data.CodingTheory.ProximityGap.Folding
-public import ArkLib.Data.CodingTheory.ProximityGenerator.Basic
+public import ArkLib.Data.CodingTheory.ProximityGenerator.LossyMca
 
 /-!
 # Agreement preservation in FRI folding
@@ -23,6 +23,12 @@ distance, and the size threshold is non-strict. The proof strategy was also info
 to Yoichi Hirai and Harmonic's Aristotle, with subsequent work by Pietro Monticone.
 The author list credits that source formalization and Alexander Hicks's ArkLib adaptation.
 We reuse ArkLib's definitions throughout.
+
+With lossy MCA (`IsLossyMCA`), agreement lifts to the preimage of a subset `T' ⊆ T` that misses
+at most `loss · |L'|` points of `T`, where `L'` is the folded domain. The preimage of `T \ T'`
+then has at most `loss · |L|` points, since each point of `L'` has `|L| / |L'|` preimages: the
+loss is the same fraction of either domain. `LossyFoldingAgreementFailure` is this failure
+event; at `loss = 0` it is `FoldingAgreementFailure`.
 
 ## References
 
@@ -152,5 +158,72 @@ theorem foldingAgreementFailure_prob_le_of_isMCAGenerator [Fintype F] [Sampleabl
       (code (domain.subdomain k : Fin (2 ^ (n - k)) ↪ F) d)) (θ : unitInterval) :
     Pr{let α ←$ᵗ F}[FoldingAgreementFailure domain f k d θ α] ≤ (ε θ : ENNReal) :=
   (foldingAgreementFailure_prob_le_powers domain f hd θ).trans (hMCA θ)
+
+/-- A folding challenge is lossily bad if some large set admits a folded codeword, but agreement
+cannot be lifted to the positions above any subset of it missing at most `loss · |L'|` points,
+where `L'` is the folded domain. -/
+def LossyFoldingAgreementFailure (domain : SmoothCosetFftDomain n F)
+    (f : Fin (2 ^ n) → F) (k d : ℕ) (θ loss : ℝ) (α : F) : Prop :=
+  ∃ T : Finset (Fin (2 ^ (n - k))),
+    (Fintype.card (Fin (2 ^ (n - k))) : ℝ) * (1 - θ) ≤ T.card ∧
+    projectedWord (foldWord domain f k α) T ∈
+      projectedCodeSubmod (code (domain.subdomain k) d) T ∧
+    ∀ T' ⊆ T, (T'.card : ℝ) ≥ T.card - loss * Fintype.card (Fin (2 ^ (n - k))) →
+      ¬ ∃ u ∈ code domain (2 ^ k * d),
+        ∀ i x, x ∈ T' → domain i ^ (2 ^ k) = domain.subdomain k x → u i = f i
+
+/-- Without loss, the lossy folding failure is the folding failure. -/
+theorem lossyFoldingAgreementFailure_zero_iff (domain : SmoothCosetFftDomain n F)
+    (f : Fin (2 ^ n) → F) (θ : ℝ) (α : F) :
+    LossyFoldingAgreementFailure domain f k d θ 0 α ↔
+      FoldingAgreementFailure domain f k d θ α := by
+  constructor
+  · rintro ⟨T, hT, hfold, hbad⟩
+    exact ⟨T, hT, hfold, hbad T subset_rfl (by simp)⟩
+  · rintro ⟨T, hT, hfold, hbad⟩
+    refine ⟨T, hT, hfold, fun T' hT' hcard ↦ ?_⟩
+    rwa [Finset.eq_of_subset_of_card_le hT' (by simpa using hcard)]
+
+/-- The lossy folding bad event is contained in the lossy MCA event for the coefficient words. -/
+theorem isLossyMCA_of_lossyFoldingAgreementFailure [Fintype F]
+    (domain : SmoothCosetFftDomain n F) (f : Fin (2 ^ n) → F) (hd : 0 < d)
+    (θ loss : ℝ) (α : F) (h : LossyFoldingAgreementFailure domain f k d θ loss α) :
+    IsLossyMCA (fun α (j : Fin (2 ^ k)) ↦ α ^ (j : ℕ)) (code (domain.subdomain k) d) α
+      (fun j x ↦ foldWordAuxCoeff domain f k j (domain.subdomain k x)) θ loss := by
+  classical
+  obtain ⟨T, hT, hfold, hbad⟩ := h
+  refine ⟨T, hT, ?_, fun T' hT' hcard ↦ ?_⟩
+  · convert hfold using 1
+    ext x
+    simp only [projectedWord, Set.domRestrict_apply, smul_eq_mul, foldWord,
+      foldValue_eq_sum_of_foldAuxCoeff_mul_pow_alpha]
+    exact Finset.sum_congr rfl fun _ _ ↦ mul_comm _ _
+  · by_contra! h
+    exact hbad T' hT' hcard (exists_codeword_agree_of_coefficients domain f hd T' h)
+
+/-- FRI's single-fold lossy soundness error is bounded by the lossy MCA error, uniformly over
+all agreement sets. -/
+theorem lossyFoldingAgreementFailure_prob_le [Fintype F] [SampleableType F]
+    (domain : SmoothCosetFftDomain n F) (f : Fin (2 ^ n) → F) (hd : 0 < d) (θ loss : ℝ) :
+    Pr{let α ←$ᵗ F}[LossyFoldingAgreementFailure domain f k d θ loss α] ≤
+      lossyMcaError (fun α (j : Fin (2 ^ k)) ↦ α ^ (j : ℕ))
+        (code (domain.subdomain k : Fin (2 ^ (n - k)) ↪ F) d) θ loss := by
+  apply le_trans (prEvent_mono _ _ _
+    (isLossyMCA_of_lossyFoldingAgreementFailure domain f hd θ loss))
+  exact le_iSup (fun U ↦ Pr{let α ←$ᵗ F}[
+    IsLossyMCA (fun α (j : Fin (2 ^ k)) ↦ α ^ (j : ℕ))
+      (code (domain.subdomain k : Fin (2 ^ (n - k)) ↪ F) d) α U θ loss]) _
+
+/-- The lossy folding bound stated using the named powers generator. -/
+theorem lossyFoldingAgreementFailure_prob_le_powers [Fintype F] [SampleableType F]
+    (domain : SmoothCosetFftDomain n F) (f : Fin (2 ^ n) → F) (hd : 0 < d) (θ loss : ℝ) :
+    Pr{let α ←$ᵗ F}[LossyFoldingAgreementFailure domain f k d θ loss α] ≤
+      lossyMcaError (univariatePowersGenerator F (2 ^ k - 1))
+        (code (domain.subdomain k : Fin (2 ^ (n - k)) ↪ F) d) θ loss := by
+  have h := lossyFoldingAgreementFailure_prob_le (k := k) domain f hd θ loss
+  obtain ⟨m, hm⟩ : ∃ m, 2 ^ k = m + 1 := ⟨2 ^ k - 1, by have := Nat.one_le_two_pow (n := k); omega⟩
+  rw [hm, Nat.add_sub_cancel]
+  rw [hm] at h
+  exact h
 
 end Fri

@@ -325,6 +325,7 @@ public import ArkLib.Data.CodingTheory.ProximityGenerator.BinaryTensorFoldAgreem
 public import ArkLib.Data.CodingTheory.ProximityGenerator.BinaryTensorFoldProbability
 public import ArkLib.Data.CodingTheory.ProximityGenerator.ExceptionalSet
 public import ArkLib.Data.CodingTheory.ProximityGenerator.Interleaving
+public import ArkLib.Data.CodingTheory.ProximityGenerator.LossyMca
 public import ArkLib.Data.CodingTheory.ProximityGenerator.MCAGenerator
 public import ArkLib.Data.CodingTheory.ProximityGenerator.MDSGenerator
 public import ArkLib.Data.CodingTheory.ProximityGenerator.PolynomialGenerator

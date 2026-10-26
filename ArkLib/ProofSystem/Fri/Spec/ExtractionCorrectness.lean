@@ -102,7 +102,7 @@ with the initial word at every accepting position. -/
 private theorem interpolate_acceptingQueries_agrees
     (hs : (∑ j, (s j).val) ≤ n)
     (o : ∀ j, FinalOracleStatement s ω j) (α : FinalStatement F k)
-    (θ : ℝ) (hsafe : SafeHistory s d o α θ)
+    (θ : ℝ) (hsafe : SafeHistory s d o α θ 0)
     (hdegree : (finalPolynomial s o).natDegree < d.val)
     (hlarge : (2 ^ n : ℝ) * (1 - θ) ≤ (acceptingQueries s hs o α).card)
     (zs : Fin (2 ^ (∑ j, (s j).val) * d.val) → Fin (2 ^ n))
@@ -112,8 +112,9 @@ private theorem interpolate_acceptingQueries_agrees
     p ∈ Witness F s d 0 ∧ ∀ z ∈ acceptingQueries s hs o α,
       p.eval (ω z) = initialWord s o z := by
   classical
-  obtain ⟨u, hu, hagree⟩ := exists_codeword_agree_of_acceptingQueries s d hs o α θ
-    hsafe hdegree (acceptingQueries s hs o α) (fun _ h ↦ h) hlarge
+  obtain ⟨u, hu, S', hS', hcard, hagree⟩ := exists_codeword_agree_of_acceptingQueries s d hs o α
+    θ 0 le_rfl hsafe hdegree (acceptingQueries s hs o α) (fun _ h ↦ h) (by simpa using hlarge)
+  rw [Finset.eq_of_subset_of_card_le hS' (by simpa using hcard)] at hagree
   obtain ⟨q, hq, heval⟩ := ReedSolomon.mem_code_iff_eval.mp hu
   have hnodes : Set.InjOn (fun i ↦ ω (zs i)) (univ : Finset
       (Fin (2 ^ (∑ j, (s j).val) * d.val))) :=
@@ -189,7 +190,7 @@ variable (s : Fin (k + 1) → ℕ+) (d : ℕ+)
 
 private theorem interpolate_selection_agrees (hs : (∑ j, (s j).val) ≤ n)
     (o : ∀ j, FinalOracleStatement s ω j) (α : FinalStatement F k)
-    (θ : ℝ) (hsafe : SafeHistory s d o α θ)
+    (θ : ℝ) (hsafe : SafeHistory s d o α θ 0)
     (hdegree : (finalPolynomial s o).natDegree < d.val)
     (hlarge : (2 ^ n : ℝ) * (1 - θ) ≤ (acceptingQueries s hs o α).card)
     (hcard : 2 ^ (∑ j, (s j).val) * d.val ≤ (acceptingQueries s hs o α).card)
@@ -222,7 +223,7 @@ private theorem prepareInputs_eq_some (o : ∀ j, FinalOracleStatement s ω j)
 
 private theorem interpolateSelection_eq_some (hs : (∑ j, (s j).val) ≤ n)
     (o : ∀ j, FinalOracleStatement s ω j) (α : FinalStatement F k)
-    (θ : ℝ) (hsafe : SafeHistory s d o α θ)
+    (θ : ℝ) (hsafe : SafeHistory s d o α θ 0)
     (hdegree : (finalPolynomial s o).natDegree < d.val)
     (hlarge : (2 ^ n : ℝ) * (1 - θ) ≤ (acceptingQueries s hs o α).card)
     (hcard : 2 ^ (∑ j, (s j).val) * d.val ≤ (acceptingQueries s hs o α).card)
@@ -260,7 +261,7 @@ private theorem interpolateSelection_eq_some (hs : (∑ j, (s j).val) ≤ n)
 accepting position. -/
 theorem extractHistory_eq_some_of_safeHistory (hs : (∑ j, (s j).val) ≤ n)
     (o : ∀ j, FinalOracleStatement s ω j) (α : FinalStatement F k)
-    (θ : ℝ) (hsafe : SafeHistory s d o α θ)
+    (θ : ℝ) (hsafe : SafeHistory s d o α θ 0)
     (hdegree : (finalPolynomial s o).natDegree < d.val)
     (hlarge : (2 ^ n : ℝ) * (1 - θ) ≤ (acceptingQueries s hs o α).card)
     (hcard : 2 ^ (∑ j, (s j).val) * d.val ≤ (acceptingQueries s hs o α).card) :
@@ -289,7 +290,7 @@ variable (s : Fin (k + 1) → ℕ+) (d : ℕ+)
 /-- A safe history above the density threshold yields a witness within distance `τ`. -/
 theorem extractHistory_eq_some_of_density (hs : (∑ j, (s j).val) ≤ n)
     (o : ∀ j, FinalOracleStatement s ω j) (α : FinalStatement F k)
-    (θ τ : ℝ) (hsafe : SafeHistory s d o α θ)
+    (θ τ : ℝ) (hsafe : SafeHistory s d o α θ 0)
     (hdegree : (finalPolynomial s o).natDegree < d.val)
     (hτ : τ ≤ θ)
     (hrate : τ ≤ 1 - (2 ^ (∑ j, (s j).val) * d.val : ℕ) / (2 ^ n : ℝ))
