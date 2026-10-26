@@ -183,7 +183,7 @@ theorem weightedJohnsonFinMatrix_degree_le {F : Type*} [Field F] {n : ℕ}
       (johnsonColumns X D B j).y₀ - weightedJohnsonFinRowWeight m B i := by
   simpa [weightedJohnsonFinMatrix, weightedJohnsonConstraintMatrix,
     weightedJohnsonFinRowWeight] using
-    johnsonConstraintMatrix_degree_le X D B m centers w hw
+    johnsonConstraintMatrix_degree_le X D B m 1 centers w hw
       (((Fintype.equivFin (WeightedJohnsonRowIndex n m B)).symm i).1,
         weightedJohnsonLocalRowIndexToJohnson
           ((Fintype.equivFin (WeightedJohnsonRowIndex n m B)).symm i).2) j
