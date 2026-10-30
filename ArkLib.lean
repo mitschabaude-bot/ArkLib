@@ -887,6 +887,10 @@ public import ArkLib.ProofSystem.ConstraintSystem.Plonk
 public import ArkLib.ProofSystem.ConstraintSystem.R1CS
 public import ArkLib.ProofSystem.Fri.ErrorBounds
 public import ArkLib.ProofSystem.Fri.FoldingSoundness
+public import ArkLib.ProofSystem.Fri.Interaction.Completeness
+public import ArkLib.ProofSystem.Fri.Interaction.Inject
+public import ArkLib.ProofSystem.Fri.Interaction.Protocol
+public import ArkLib.ProofSystem.Fri.Interaction.Schedule
 public import ArkLib.ProofSystem.Fri.Projection
 public import ArkLib.ProofSystem.Fri.QuerySoundness
 public import ArkLib.ProofSystem.Fri.RoundConsistency
