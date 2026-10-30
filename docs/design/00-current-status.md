@@ -21,11 +21,16 @@ results:
   outputs, pre-sampled private coins and per-round errors;
 - measured extraction stages: operation-count budgets for the named backward witness maps;
 - Sumcheck with soundness, completeness, round-by-round soundness, and a computable verifier
-  and honest prover.
+  and honest prover;
+- FRI as Plonky3 runs it (folds of arity `2 ^ k`, injected inputs, a final polynomial, queries),
+  with completeness and a knowledge certificate built from per-round certificates by
+  `KnowledgeCertificate.append`, bounding acceptance of far inputs by the lossy MCA errors of the
+  folds and the query term (`ProofSystem/Fri/Interaction/`).
 
 The knowledge, state-restoration and measured-extraction results are generic certificates and
-theorems. What remains open is their use: no protocol under `ArkLib/ProofSystem/` instantiates
-them yet, there is no interaction-layer rewinding extractor, and state restoration does not yet
+theorems. FRI instantiates the knowledge certificates; no protocol under `ArkLib/ProofSystem/`
+instantiates the state-restoration or measured-extraction results yet, there is no
+interaction-layer rewinding extractor, and state restoration does not yet
 cover an adversary whose private randomness interleaves with its oracle queries (see
 [below](#interaction-layer-security)).
 
@@ -398,7 +403,10 @@ preserving each component's prover law and fixed-prefix bound with the same samp
 In `KnowledgeComposition` the suffix certificate may depend on the actual first-stage path and on
 the closed middle claim of that execution. `native_badChallenge_bound` applies a certificate's
 local bound to the actual interpreted receiver action when the verifier satisfies
-`SamplesChallenges`.
+`SamplesChallenges`. `KnowledgeSoundness` lifts that to the whole execution
+(`KnowledgeCertificate.executeStrategies_extraction_le`): a valid terminal witness extracts to an
+invalid input witness with probability at most the largest sum of local errors along a path of
+the challenge schedule.
 
 **State restoration.** The protocol is a fixed-round public-coin protocol on an interaction tree. Each
 restoration key holds the input, round, prover-message prefix and salt prefix, and challenges come

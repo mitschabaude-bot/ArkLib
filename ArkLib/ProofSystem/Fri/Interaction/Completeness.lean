@@ -253,27 +253,6 @@ end Fri.Interaction
 
 namespace Fri.Interaction
 
-namespace Schedule
-
-variable {K : Type} [Field K]
-
-/-- Every fold halves the domain at least once. -/
-def ArityPos : {n : ℕ} → Schedule n → Prop
-  | _, .final => True
-  | _, .fold k _ _ rest => 1 ≤ k ∧ rest.ArityPos
-
-/-- Every input the schedule injects is a codeword of its code, on the domain where the folds
-reach it. -/
-def InputsInCode (inputs : (m : ℕ) → Fin (2 ^ m) → K) (d : ℕ) :
-    {n : ℕ} → SmoothCosetFftDomain n K → Schedule n → Prop
-  | _, _, .final => True
-  | _, ω, .fold k _ false rest => rest.InputsInCode inputs d (ω.subdomain k)
-  | n, ω, .fold k _ true rest =>
-      inputs (n - k) ∈ ReedSolomon.code (ω.subdomain k : Fin (2 ^ (n - k)) ↪ K) (rest.degree d) ∧
-        rest.InputsInCode inputs d (ω.subdomain k)
-
-end Schedule
-
 variable {K : Type} [Field K] [DecidableEq K]
 variable {ι : Type} (ambient : OracleSpec ι) (top d t : ℕ)
 

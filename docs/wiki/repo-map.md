@@ -58,6 +58,13 @@ home_page/            site assets and assembled website root
   (`StateRestorationOracle`), pre-sampled private coins (`StateRestorationCoins`) and per-round
   errors (`StateRestorationBudget`). The measured forms are described under measured extraction
   below. `ProofSystem/Sumcheck/Interaction/RoundByRound.lean` is the interaction-layer Sumcheck client.
+  `KnowledgeSoundness.lean` bounds extraction failure of the actual executor by a certificate's
+  largest path error.
+- `ProofSystem/Fri/Interaction/` is FRI on the interaction layer, with Plonky3's folds and injected
+  inputs: `Protocol.lean` defines the tree, the query-reading verifier and the honest prover,
+  `Completeness.lean` proves probability-one completeness, `RoundKnowledge.lean` and
+  `QueryKnowledge.lean` the per-round knowledge certificates, and `Soundness.lean` composes them and
+  bounds acceptance of far inputs (`acceptance_le`, `acceptance_le_plonky3`).
 - `ArkLib/OracleReduction/` remains the conceptual center of the legacy reduction and security
   layer while protocol clients migrate. `FiatShamir/Basic.lean` owns the transform;
   `FiatShamir/Completeness.lean` adds fixed-table perfect completeness and shared lazy

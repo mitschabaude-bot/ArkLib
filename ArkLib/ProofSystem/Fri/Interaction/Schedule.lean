@@ -71,6 +71,21 @@ theorem InputsAgree.mono {inputs : (m : ℕ) → Fin (2 ^ m) → K} {d : ℕ} {�
   | _, _, .fold _ _ false rest, hs => InputsAgree.mono h (s := rest) hs
   | _, _, .fold _ _ true rest, hs => ⟨hs.1.mono h, InputsAgree.mono h (s := rest) hs.2⟩
 
+/-- Every fold halves the domain at least once. -/
+def ArityPos : {n : ℕ} → Schedule n → Prop
+  | _, .final => True
+  | _, .fold k _ _ rest => 1 ≤ k ∧ rest.ArityPos
+
+/-- Every input the schedule injects is a codeword of its code, on the domain where the folds
+reach it. -/
+def InputsInCode (inputs : (m : ℕ) → Fin (2 ^ m) → K) (d : ℕ) :
+    {n : ℕ} → SmoothCosetFftDomain n K → Schedule n → Prop
+  | _, _, .final => True
+  | _, ω, .fold k _ false rest => rest.InputsInCode inputs d (ω.subdomain k)
+  | n, ω, .fold k _ true rest =>
+      inputs (n - k) ∈ ReedSolomon.code (ω.subdomain k : Fin (2 ^ (n - k)) ↪ K) (rest.degree d) ∧
+        rest.InputsInCode inputs d (ω.subdomain k)
+
 variable [Fintype K] [DecidableEq K] [SampleableType K]
 
 /-- The error of a fold by `2 ^ k` onto the code `code (ω.subdomain k) d'`: the lossy MCA error of
