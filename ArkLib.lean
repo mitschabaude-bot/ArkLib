@@ -730,6 +730,7 @@ public import ArkLib.Interaction.Oracle.Security.Knowledge
 public import ArkLib.Interaction.Oracle.Security.KnowledgeAppend
 public import ArkLib.Interaction.Oracle.Security.KnowledgeComposition
 public import ArkLib.Interaction.Oracle.Security.KnowledgeResources
+public import ArkLib.Interaction.Oracle.Security.KnowledgeSoundness
 public import ArkLib.Interaction.Oracle.Security.RoundByRound
 public import ArkLib.Interaction.Oracle.Security.Soundness
 public import ArkLib.Interaction.Oracle.Security.StateRestoration
@@ -890,6 +891,7 @@ public import ArkLib.ProofSystem.Fri.FoldingSoundness
 public import ArkLib.ProofSystem.Fri.Interaction.Completeness
 public import ArkLib.ProofSystem.Fri.Interaction.Inject
 public import ArkLib.ProofSystem.Fri.Interaction.Protocol
+public import ArkLib.ProofSystem.Fri.Interaction.RoundKnowledge
 public import ArkLib.ProofSystem.Fri.Interaction.Schedule
 public import ArkLib.ProofSystem.Fri.Projection
 public import ArkLib.ProofSystem.Fri.QuerySoundness
