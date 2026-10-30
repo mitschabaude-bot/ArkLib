@@ -891,6 +891,13 @@ def hypercubeSum (H : CMvPolynomial m₀ F) (i : ℕ) (cs : Fin i → F) : F :=
   ∑ x : Fin (m₀ - i) → Fin 2, H.eval (hypercubePoint m₀ i cs x)
 
 omit [BEq F] [LawfulBEq F] in
+/-- The executable cube fold agrees with the mathematical product-domain sum. -/
+theorem hypercubeSum_eq_mathlib (H : CMvPolynomial m₀ F) (i : ℕ) (cs : Fin i → F) :
+    hypercubeSum m₀ H i cs = MvPolynomial.hypercubeSum m₀ (fromCMvPolynomial H) i cs := by
+  simp only [hypercubeSum, MvPolynomial.hypercubeSum, Fintype.piFinset_univ,
+    hypercubePoint, CPoly.eval_equiv]
+
+omit [BEq F] [LawfulBEq F] in
 /-- **Saturation of the partial sum.** Once the challenge prefix covers every cube coordinate
 (`m₀ ≤ i`), the trailing cube is a single point and `hypercubeSum` collapses to a plain evaluation
 at the prefix — in particular it stops depending on the coordinates beyond the `m₀`-th.
@@ -1441,7 +1448,7 @@ hypercube sums match the current targets.
 Both summands read the scalar-round challenges directly, with no derived evaluation-point encoding
 (no curve, no seed expansion). The `liftShort` conjunct is the commitment's shortness index: it is
 what makes a pair of colliding branch openings a member of `LiftCom.Collision`, hence a
-Module-SIS break, at the escape event of the sumcheck rounds. Its `RhoShort` half — the range
+Module-SIS break, at the escape event of the sumcheck rounds. Its `RhoDigitsShort` half — the range
 claim Lemma 10 exists to prove — is still *derived* from `H₀ ≡ 0`
 (`hZero_eq_zero_imp_liftShort`), never assumed. -/
 def nestedRoundRel (K : LiftCom (LiftedWitness Φ μ n) (liftShort Φ bound bDig))

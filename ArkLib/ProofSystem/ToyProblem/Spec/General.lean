@@ -38,8 +38,8 @@ ArkLib's `OracleReduction` framework, following the conventions used by
 The `prover` / `verifier` / `oracleReduction` triple is complete.
 Completeness (C6.2, `oracleReduction_perfectCompleteness`) and
 round-by-round knowledge soundness (L6.8,
-`oracleVerifier_rbrKnowledgeSoundnessWorstCase`, with
-`oracleVerifier_rbrKnowledgeSoundness` as its averaged corollary) are **fully proven** here. Plain
+`oracleVerifier_rbrKnowledgeSoundness`) are
+**fully proven** here. Plain
 knowledge soundness (L6.6, `oracleVerifier_knowledgeSoundness_winningSetUpperBound`) is **fully
 proven** in the sibling file `Spec/KnowledgeSoundness.lean`. The generic theorem
 uses the sharper Definition 6.11 winning-set expression
@@ -96,8 +96,7 @@ How each step of Construction 6.2 lands on an ArkLib / VCVio primitive:
   `OracleVerifier.knowledgeSoundness` / `OracleVerifier.rbrKnowledgeSoundness`.
   Two caveats: extraction **time** (the paper's `O(enc + ecor)` extractor
   cost) is outside ArkLib's cost-free model, and the verifier's query
-  complexity (`2t + 1`) is documented, not enforced
-  (`OracleVerifier.numQueries` is upstream-sorried).
+  complexity (`2t + 1`) is documented, not enforced.
 
 ## Codeword alphabet `A` (folding-generic)
 
@@ -115,7 +114,7 @@ values and the encoder `(Fin k → F) →ₗ[F] (ι → A)` range over `A`.
 Combination of codeword values is the module action `f₀ + γ • f₁` (it
 specializes to `f₀ + γ · f₁` when `A = F`).
 
-## Verified vs. admitted
+## Verified reduction and numeric bounds
 
 What is verified here is the **reduction**, with a **symbolic** error. Every theorem in
 `ProofSystem/ToyProblem/` is `sorry`-free, and the headline declarations (completeness, the plain
@@ -127,24 +126,19 @@ bounds, and the actual-vs-certified bridges) depend only on `propext`, `Classica
 `Code.Lambda`, not numerals. Nothing in this directory evaluates them.
 
 Numeric values for the bracket come from the MCA/CA capacity bounds under
-`Data/CodingTheory/ProximityGap/CapacityBounds`. Several of those are fully proven; the rest
-are **external admits** (each `sorry` is tagged with the primary source it stands in for) —
-in particular the Johnson-range MCA input `rs_mcaError_le_in_johnson_range`.
-That subtree is deliberately **not** in this directory's import cone, so the quarantine is
-structural rather than a convention: no toy-problem theorem can silently acquire a numeric
-claim, admit-backed or otherwise. Consequently the
-theorems apply at production parameter sizes — they are parametric in `C`, `δ`, and `t` — but
-no numeric error value is proven in-tree at any production shape. For the interleaved-RS profile
-the remaining distance is short and is spelled out in `Impl/IRS.lean`.
-
-One further admitted region sits outside every proof here and must not be read as backing any
-statement in this file: the generic `StateT` security-composition theorems of
-`OracleReduction/Composition/Sequential/Append.lean` (admitted, with no toy-problem
-consumer — the virtual-output *execution* lemmas that composition needs are proven
-separately).
+`Data/CodingTheory/ProximityGap/CapacityBounds`. Several of those are fully proven, including
+the Johnson-range MCA input `rs_mcaError_le_in_johnson_range`, proved via [DKT26] with the
+printed constant from [BCHKS25] Theorem 4.6. Other catalogue entries remain external assumptions.
+That subtree is deliberately outside this directory's import cone, so no toy-problem theorem
+can silently acquire a numeric claim. Consequently the theorems apply at production parameter
+sizes, since they are parametric in `C`, `δ`, and `t`, but no numeric error value is proven
+in-tree at any production shape. For the interleaved-RS profile, the remaining composition of
+proved inputs is spelled out in `Impl/IRS.lean`.
 
 ## References
 
+* [BCHKS25] Theorem 4.6 (Johnson-range printed constant).
+* [DKT26] (proof of the Johnson-range MCA bound).
 * [Arnon, G., Boneh, D., Fenzi, G., *Open Problems in List Decoding and
   Correlated Agreement*][ABF26] (§6).
 -/
@@ -451,11 +445,10 @@ failure (`extractedWitIn? = none`) is scored against the prover; an
 always-failing `OptionT` extractor therefore certifies nothing, and none of the
 knowledge-soundness statements below can be discharged vacuously through it.
 The generic existence theorems (`oracleVerifier_knowledgeSoundness_winningSetUpperBound`,
-`oracleVerifier_rbrKnowledgeSoundnessWorstCase` with its averaged corollary
 `oracleVerifier_rbrKnowledgeSoundness`, and the alphabet-generic
 `verifier_knowledgeSoundness` in `Spec/SimplifiedIOR.lean`) use the classical
 `chooseRelaxedWitness` selector; `Impl/IRS.lean` supplies the principal
-executable path — exact named straightline and worst-case/averaged RBR
+executable path — exact named straightline and RBR
 extractors for both the three-round protocol and the virtual-oracle reduction.
 -/
 
@@ -1211,7 +1204,7 @@ private noncomputable def rbrExtractor (encode : (Fin k → F) → (ι → A)) (
       (Statement (F := F) k × (∀ i, OracleStatement ι A i))
       (Witness (F := F) k) OutputWitness
       (pSpec (ι := ι) (F := F) k t) (rbrWitMid (F := F) k) where
-  eqIn := rfl
+  extractIn := fun _ w => w
   extractMid
   | ⟨0, _⟩ => fun stmtIn _ _ ↦ chooseRelaxedWitness k encode δ stmtIn
   | ⟨1, _⟩ => fun _ _ w ↦ w
@@ -1243,7 +1236,7 @@ private noncomputable def rbrKnowledgeStateFunction
       Accepts (k := k) (t := t) encode stmtIn.1 stmtIn.2
         (tr ⟨0, Nat.zero_lt_succ _⟩) (tr ⟨1, Nat.succ_lt_succ (Nat.zero_lt_succ _)⟩)
         (tr ⟨2, Nat.succ_lt_succ (Nat.succ_lt_succ (Nat.zero_lt_succ _))⟩)
-  toFun_empty := fun _ _ ↦ Iff.rfl
+  toFun_empty := fun _ _ h ↦ h
   toFun_next := fun m ↦ match m with
     | ⟨0, _⟩ => fun hDir ↦ absurd hDir (fun h ↦ Direction.noConfusion h)
     | ⟨1, _⟩ => fun _ _ _ _ _ h ↦ h
@@ -1364,11 +1357,11 @@ lemma spotcheck_round_game_bound [Nonempty ι]
     exact ENNReal.coe_le_coe.mpr hbase
 
 omit [DecidableEq ι] [Fintype A] in
-/-- Worst-case-per-fixed-prefix round-by-round knowledge soundness of
+/-- Round-by-round knowledge soundness of
 the toy protocol in the alphabet-generic classical-extractor form.  Concrete
-IRS clients should prefer `Impl.IRS.oracleVerifier_rbrKnowledgeSoundnessWorstCase`,
+IRS clients should prefer `Impl.IRS.oracleVerifier_rbrKnowledgeSoundness`,
 whose extractor is executable and named. -/
-theorem oracleVerifier_rbrKnowledgeSoundnessWorstCase
+theorem oracleVerifier_rbrKnowledgeSoundness
     [SampleableType F] [SampleableType ι] [Nonempty ι] [Finite A]
     {σ : Type} (init : ProbComp σ)
     (impl : QueryImpl []ₒ (StateT σ ProbComp))
@@ -1380,14 +1373,14 @@ theorem oracleVerifier_rbrKnowledgeSoundnessWorstCase
     (hδ_lt_min : δ <
       (minRelHammingDistCode (C : Set (ι → A)) : ℝ≥0)) :
     ((oracleVerifier (k := k) (t := t)
-      (encode : (Fin k → F) → (ι → A))).toVerifier).rbrKnowledgeSoundnessWorstCase
+      (encode : (Fin k → F) → (ι → A))).toVerifier).rbrKnowledgeSoundness
       (WitIn := Witness (F := F) k) (WitOut := OutputWitness)
       init impl (outputRelationFor k (encode : (Fin k → F) → (ι → A)) δ)
       (Set.univ : Set ((OutputStatement × ∀ i, OutputOracleStatement i) ×
         OutputWitness))
       (fun i ↦ if i.1 = 0 then certifiedGammaError C δ else (1 - δ) ^ t) := by
   let _ := Fintype.ofFinite A
-  unfold Verifier.rbrKnowledgeSoundnessWorstCase
+  unfold Verifier.rbrKnowledgeSoundness
   refine ⟨rbrWitMid (F := F) k,
     rbrExtractor k t (encode : (Fin k → F) → (ι → A)) δ,
     rbrKnowledgeStateFunction k t (encode : (Fin k → F) → (ι → A)) δ init impl, ?_⟩
@@ -1401,33 +1394,6 @@ theorem oracleVerifier_rbrKnowledgeSoundnessWorstCase
       (transcript ⟨0, Nat.zero_lt_succ _⟩)
       (transcript ⟨1, Nat.succ_lt_succ (Nat.zero_lt_succ _)⟩)
   · exact absurd hi (by omega)
-
-omit [DecidableEq ι] [Fintype A] in
-/-- Averaged round-by-round knowledge soundness, retained under the established
-public API name as a corollary of the stronger worst-case-per-prefix theorem. -/
-theorem oracleVerifier_rbrKnowledgeSoundness
-    [SampleableType F] [SampleableType ι] [Nonempty ι] [Finite A]
-    {σ : Type} (init : ProbComp σ)
-    (impl : QueryImpl []ₒ (StateT σ ProbComp))
-    (C : ModuleCode ι F A) (δ : ℝ≥0)
-    (encode : (Fin k → F) →ₗ[F] (ι → A))
-    (hinj : Function.Injective encode)
-    (hC : Set.range encode = (C : Set (ι → A)))
-    (hδ_pos : 0 < δ)
-    (hδ_lt_min : δ <
-      (minRelHammingDistCode (C : Set (ι → A)) : ℝ≥0)) :
-    (oracleVerifier (k := k) (t := t)
-      (encode : (Fin k → F) → (ι → A))).rbrKnowledgeSoundness
-      (WitOut := OutputWitness) init impl
-      (outputRelationFor k (encode : (Fin k → F) → (ι → A)) δ)
-      (Set.univ : Set ((OutputStatement × ∀ i, OutputOracleStatement i) ×
-        OutputWitness))
-      (fun i ↦ if i.1 = 0 then certifiedGammaError C δ else (1 - δ) ^ t) := by
-  let _ := Fintype.ofFinite A
-  unfold OracleVerifier.rbrKnowledgeSoundness
-  exact Verifier.rbrKnowledgeSoundnessWorstCase_implies_rbrKnowledgeSoundness
-    init impl (oracleVerifier_rbrKnowledgeSoundnessWorstCase k t init impl C δ encode
-      hinj hC hδ_pos hδ_lt_min)
 
 end Protocol
 

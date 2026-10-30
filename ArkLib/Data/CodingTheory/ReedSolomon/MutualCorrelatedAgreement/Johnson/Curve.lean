@@ -49,17 +49,17 @@ weighted cutoff of the line (`johnsonM`, `johnsonMu`, `johnsonH`, `johnsonXCutof
    (`ordinaryCurveFactorRaw_le_line_mul`), which is `johnsonExceptionCount n D A η`.
 
 The count is therefore exactly `ℓ` times the line count, and the closed form is
-`ℓ · (8/3) n t³ / ρ₋` with `t = m + 1/2` (`johnsonExceptionCount_lt_closed`).
+`ℓ · (8/3) n t³ / ρ₋` with `t = m + 1/2` (`johnsonExceptionCount_lt_closed`). This is half the
+`2ℓ` times the line count of `exists_johnson_curve_exactPowerAgreement`, which interpolates at the
+challenge height `ℓ (h + 1) - 1` instead of `ℓ h`.
 
 ## Main statements
 
 * `ReedSolomon.exists_johnson_curve_equation`: the interpolated equation for a received curve.
-* `ReedSolomon.exists_johnson_curve_exactPowerAgreement`: the exceptional-set bound
+* `ReedSolomon.exists_johnson_curve_exactPowerAgreement_line_mul`: the exceptional-set bound
   `ℓ · johnsonExceptionCount n D A η`.
 * `ReedSolomon.exists_johnson_curve_exactPowerAgreement_closed`: the closed bound
   `ℓ · (8/3) n t³ / ρ₋`.
-* `ReedSolomon.uniformExactPowerAgreement_johnson`: the statement as
-  `UniformExactPowerAgreement` with count `⌊ℓ · johnsonExceptionCount n D A η⌋₊`.
 
 ## References
 
@@ -180,7 +180,7 @@ words `values t`, `0 ≤ t ≤ ℓ`, with `ℓ ≥ 1`, one set of at most
 Outside it, every polynomial of degree at most `D` agreeing with `∑ t, z ^ t values t` on at least
 `A ≥ (√(D / n) + η) n` points has exact power agreement: it is `∑ t, z ^ t P_t` for polynomials
 `P_t` of degree at most `D`, and its agreement set is the common agreement set of the `P_t`. -/
-theorem exists_johnson_curve_exactPowerAgreement
+theorem exists_johnson_curve_exactPowerAgreement_line_mul
     {F : Type*} [Field F] {n D A ℓ : ℕ} {eta : ℝ}
     (domain : Fin n ↪ F) (values : Fin (ℓ + 1) → Fin n → F)
     (hD : 1 ≤ D) (hDn : D ≤ n - 2) (heta : 0 < eta) (hℓ : 0 < ℓ)
@@ -217,8 +217,8 @@ theorem exists_johnson_curve_exactPowerAgreement
 
 open Classical in
 /-- **Johnson exact power agreement, closed bound.** Under the hypotheses of
-`exists_johnson_curve_exactPowerAgreement`, fewer than `ℓ · (8/3) n t³ / ρ₋` challenges are
-exceptional, with `t = johnsonT n D η` and `ρ₋ = D / n`. -/
+`exists_johnson_curve_exactPowerAgreement_line_mul`, fewer than `ℓ · (8/3) n t³ / ρ₋`
+challenges are exceptional, with `t = johnsonT n D η` and `ρ₋ = D / n`. -/
 theorem exists_johnson_curve_exactPowerAgreement_closed
     {F : Type*} [Field F] {n D A ℓ : ℕ} {eta : ℝ}
     (domain : Fin n ↪ F) (values : Fin (ℓ + 1) → Fin n → F)
@@ -231,26 +231,9 @@ theorem exists_johnson_curve_exactPowerAgreement_closed
         A ≤ (polynomialAgreementSet domain (powerBatchedWord values z) P).card →
         HasExactPowerAgreement domain values (RingHom.id F) (D + 1) z P := by
   obtain ⟨ex, hcard, hgood⟩ :=
-    exists_johnson_curve_exactPowerAgreement domain values hD hDn heta hℓ hthreshold hAn
+    exists_johnson_curve_exactPowerAgreement_line_mul domain values hD hDn heta hℓ hthreshold hAn
   refine ⟨ex, hcard.trans_lt ?_, hgood⟩
   exact mul_lt_mul_of_pos_left (johnsonExceptionCount_lt_closed hD hDn heta hthreshold)
     (by exact_mod_cast hℓ)
-
-/-- **Johnson uniform exact power agreement.** Under the hypotheses of
-`exists_johnson_curve_exactPowerAgreement` with a decidable field, every tuple of received words
-has uniform exact power agreement for degree-`≤ D` candidates at threshold `A`, with at most
-`⌊ℓ · johnsonExceptionCount n D A η⌋₊` exceptional challenges. -/
-theorem uniformExactPowerAgreement_johnson
-    {F : Type*} [Field F] [DecidableEq F] {n D A ℓ : ℕ} {eta : ℝ}
-    (domain : Fin n ↪ F) (values : Fin (ℓ + 1) → Fin n → F)
-    (hD : 1 ≤ D) (hDn : D ≤ n - 2) (heta : 0 < eta) (hℓ : 0 < ℓ)
-    (hthreshold : johnsonAgreement n D eta * n ≤ A) (hAn : A ≤ n) :
-    UniformExactPowerAgreement domain values (D + 1) A
-      ⌊(ℓ : ℝ) * johnsonExceptionCount n D A eta⌋₊ := by
-  classical
-  obtain ⟨ex, hcard, hgood⟩ :=
-    exists_johnson_curve_exactPowerAgreement domain values hD hDn heta hℓ hthreshold hAn
-  refine ⟨ex, Nat.le_floor hcard, fun z hz P hP hagree ↦ ?_⟩
-  convert hgood z hz P hP (by convert hagree) using 1
 
 end ReedSolomon

@@ -507,7 +507,7 @@ theorem knowledgeSoundnessWith_of_transition_failure_prob_le
   unfold OracleVerifier.knowledgeSoundnessWith
   rw [oracleVerifier_toVerifier_eq_verifier (k := k)]
   unfold Verifier.knowledgeSoundnessWith
-  rintro ⟨stmt, oStmt⟩ witIn prover
+  rintro Aux ⟨stmt, oStmt⟩ witIn prover
   refine ProtocolSpec.prEvent_optionT_simulateQ_addLift_getChallenge_bind_some_le
     init impl _ ⟨0, rfl⟩
     (fun γ ↦ (liftComp (prover.receiveChallenge ⟨0, rfl⟩
@@ -554,7 +554,7 @@ therefore is not the deterministic round-by-round Definition A.5 result.
 The executable exact-extractor contracts are
 `Impl.IRS.simplifiedOracleVerifier_knowledgeSoundnessWith_straightlineExtractor`
 and
-`Impl.IRS.simplifiedOracleVerifier_rbrKnowledgeSoundnessWorstCaseWith_rbrExtractor`;
+`Impl.IRS.simplifiedOracleVerifier_rbrKnowledgeSoundnessWith_rbrExtractor`;
 existential knowledge soundness is a corollary there. -/
 theorem verifier_knowledgeSoundness
     [SampleableType F] [Nonempty ι] [Finite A]
@@ -580,7 +580,7 @@ theorem verifier_knowledgeSoundness
   -- input statement alone (always-`some`; cf. `Spec.chooseRelaxedWitness`).
   refine ⟨fun stmtIn _ _ _ _ ↦
     pure (Spec.chooseRelaxedWitness k ((encode : (Fin k → F) → (ι → A))) δ stmtIn), ?_⟩
-  rintro ⟨stmt, oStmt⟩ witIn prover
+  rintro Aux ⟨stmt, oStmt⟩ witIn prover
   refine ProtocolSpec.prEvent_optionT_simulateQ_addLift_getChallenge_bind_some_le
     init impl _ ⟨0, rfl⟩
     (fun γ ↦ (liftComp (prover.receiveChallenge ⟨0, rfl⟩

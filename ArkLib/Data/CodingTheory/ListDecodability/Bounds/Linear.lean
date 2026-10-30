@@ -677,13 +677,13 @@ theorem linear_card_le_of_rate_radius
 
 omit [DecidableEq ι] [DecidableEq F] in
 /-- **The generalized Singleton bound for list decoding** ([ABF26] Theorem 3.9, after
-[ST20, Theorem 1.2]). For a finite field `F`, `0 < ℓ < |F|`, `δ ∈ (0, 1)` with `δ·n` an integer, and
-a linear code `C ⊆ F^n` with `|Λ(C, δ)| ≤ ℓ`:
+[ST20, Theorem 1.2]). For a finite field `F`, `0 < ℓ < |F|`, `δ ∈ (0, 1)` with `δ·n` an integer,
+`⌊(ℓ+1)/ℓ · δ · n⌋ ≤ n`, and a linear code `C ⊆ F^n` with `|Λ(C, δ)| ≤ ℓ`:
 
   `|C| ≤ |F|^{n - ⌊(ℓ+1)/ℓ · δ · n⌋}` ,
 
-whence `δ ≤ ℓ/(ℓ+1) · (1-ρ)` via `linear_card_le_of_rate_radius`'s converse arithmetic. The content
-is the *implication* from list decodability; the arithmetic step is `linear_card_le_of_rate_radius`.
+Equivalently, `⌊(ℓ+1)/ℓ · δ · n⌋ ≤ n − dim C`. If `(ℓ+1)/ℓ · δ · n` is an integer, this gives
+`δ ≤ ℓ/(ℓ+1) · (1-ρ)`, where `ρ = dim C / n`.
 
 **`_hδn_int` is [ST20]'s own hypothesis, not an ArkLib convenience.** Their proof of Theorem 1.2
 opens "Let `a := ⌊(L+1)rn/L⌋ = rn + ⌊rn/L⌋` (**assuming `rn` is an integer**)", and the identity it
@@ -923,7 +923,10 @@ high-probability content; that weaker form is *derived* below as
 
 **Dimension pin.** The source's code has rate exactly `ρ`, with dimension `ρ·n` treated as an
 integer for exposition. Exact real equality is unsatisfiable at irrational `ρ`, so the dimension is
-pinned two-sidedly into `ρ ≤ k/n ≤ ρ + 1/n`, admitting `k = ⌈ρ·n⌉` up to the boundary case. -/
+pinned two-sidedly into `ρ ≤ k/n ≤ ρ + 1/n`, admitting `k = ⌈ρ·n⌉` up to the boundary case.
+
+Solicited proof: see
+<https://github.com/Verified-zkEVM/ArkLib/issues/1352>. -/
 theorem random_linear_lambda_lower
     (q : ℕ) (_hq_pp : IsPrimePow q)
     (δ : ℝ) (_hδ_pos : 0 < δ) (_hδ_lt : δ < 1 - 1 / q)
@@ -957,7 +960,10 @@ The bad-event count is below the whole family's, the family `{C | finrank C = �
 The hypothesis `hρ0 : 0 ≤ ρ` is trivially true in the source's regime, where rates approach
 capacity `1 − H_q(δ)` from below with small `γ`. It is needed here only because
 `Basic/Entropy.lean` does not yet prove `H_q(δ) < 1` for `δ < 1 − 1/q`, which would let `γ` be
-shrunk below `1 − H_q(δ)`. -/
+shrunk below `1 − H_q(δ)`.
+
+Solicited proof: see
+<https://github.com/Verified-zkEVM/ArkLib/issues/1352>. -/
 theorem random_linear_lambda_lower_exists
     (q : ℕ) (hq_pp : IsPrimePow q)
     (δ : ℝ) (hδ_pos : 0 < δ) (hδ_lt : δ < 1 - 1 / q)

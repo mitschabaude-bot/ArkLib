@@ -77,9 +77,9 @@ private lemma even_add_odd_eq_of_2_ne_0
   (x y z : F) (hz : z ≠ 0) (hchar : (2 : F) ≠ 0) :
   x = (x + y) / 2 + (x - y) / (2 * z) * z := by grind
 
-/-- An explicit formula to compute `foldWordAux` when `k = 2`
+/-- An explicit formula to compute `foldWordAux` when `k = 1`
   not involving Lagrange interpolation. -/
-lemma foldWordAux_of_k_2 [NeZero n] {i : Fin (2 ^ (n - 1))} :
+lemma foldWordAux_of_k_1 [NeZero n] {i : Fin (2 ^ (n - 1))} :
     foldWordAux domain f 1 (domain.subdomain 1 i) =
     let x : domain := CosetFftDomain.twoNthRoot (i := 1)
       ⟨domain.subdomain 1 i, by simp⟩
@@ -208,7 +208,7 @@ lemma foldValue_k_1 [NeZero n] {i : Fin (2 ^ (n - 1))} {α : F} :
     let i := domain.log x
     let i' := domain.log ⟨-x.1, by obtain ⟨x, hx⟩ := x; simpa using hx⟩
     ((f i + f i') / 2) + α * ((f i - f i') / (2 * x)) := by
-  simp [foldValue, foldWordAux_of_k_2]
+  simp [foldValue, foldWordAux_of_k_1]
   ring
 
 /-- Fold a word. Takes a word `f` over `Fin (2 ^ n)` and randomness
@@ -912,7 +912,7 @@ theorem folding_preserves_distance
       correlatedAgreement_affine_curves (F := F) (ι := Fin (2 ^ (n - k)))
         (k := 2 ^ k - 1) (deg := 2 ^ (d - k))
         (domain := domain.subdomain k) (δ := δ)
-        (hδ_pos := _δ_gt_0) (hδ := bound_tighter)
+        (hdeg_pos := by positivity) (hδ_pos := _δ_gt_0) (hδ := bound_tighter)
     unfold foldWord δ_ε_correlatedAgreementCurves at *
     by_contra contra
     simp only [not_le, foldValue_eq_sum_of_foldAuxCoeff_mul_pow_alpha,

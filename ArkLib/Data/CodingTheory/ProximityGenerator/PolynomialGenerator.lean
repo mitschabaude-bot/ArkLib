@@ -8,9 +8,8 @@ module
 public import ArkLib.Data.CodingTheory.ReedSolomon
 public import ArkLib.Data.CodingTheory.ProximityGenerator.MDSGenerator
 public import ArkLib.Data.CodingTheory.ProximityGenerator.TensorGenerator
-public import
-  ArkLib.Data.CodingTheory.ReedSolomon.MutualCorrelatedAgreement.Johnson.CurveProbability
-public import ArkLib.Data.CodingTheory.ReedSolomon.MutualCorrelatedAgreement.Johnson.FullCode
+import ArkLib.Data.CodingTheory.ProximityGap.BCIKS20.CurveExplicit
+import ArkLib.Data.CodingTheory.ReedSolomon.MutualCorrelatedAgreement.Johnson.FullCode
 
 /-!
 # Mutual correlated agreement for polynomial generators
@@ -27,14 +26,12 @@ by right multiplication with a coefficient matrix that has a left inverse.
 - `PolynomialGenIsMCA.isMCAGenerator_tensorGeneratorPi` and
   `PolynomialGenIsMCA.isMCAGenerator_tensorGeneratorPi_tight`: iterated tensor products of MCA
   generators have MCA with the factors' errors adding; the `tight` variant is proved, from a
-  factor hypothesis quantified over a class of module codes closed under interleaving.
+  factor hypothesis quantified over module codes of a fixed relative distance.
 - `PolynomialGenIsMCA.isMCAGenerator_of_isPolynomialGeneratorOf`: a polynomial generator over
-  restricted seed sets has MCA for every linear code. Its only unproved input is
-  `isMCAGenerator_of_isMDSGenerator`.
+  restricted seed sets has MCA for every linear code, using the proved MDS-generator bound.
 - `RSCode.reedSolomonMCAError`: the MCA error function for Reed-Solomon codes.
-- `RSCode.isMCAGenerator_univariatePowersGenerator`: the univariate powers generator has MCA for
-  Reed-Solomon codes up to the Johnson bound, from the Johnson power-curve bound
-  `ReedSolomon.mcaError_univariatePowers_le_of_uniformExactPowerAgreement` of [DKT26].
+- `RSCode.isMCAGenerator_univariatePowersGenerator`: exact power agreement gives MCA for
+  Reed-Solomon codes up to the Johnson bound, with the BCGM25 explicit error.
 - `RSCode.isMCAGenerator_of_isPolynomialGeneratorOfFull`: a full-field polynomial generator has
   MCA for Reed-Solomon codes up to the Johnson bound.
 
@@ -46,7 +43,6 @@ Theorem 9.2); the per-declaration correspondence is catalogued in
 
 * [Bordage, S., Chiesa, A., Guan, Z., Manzur, I., *All Polynomial Generators Preserve Distance
   with Mutual Correlated Agreement*][BCGM25]. https://eprint.iacr.org/2025/2051
-* [DKT26]
 -/
 
 @[expose] public section
@@ -114,10 +110,10 @@ def tensorGeneratorPi {s : ℕ} {α : Fin s → Type} {ℓ : Fin s → Type}
 
 omit [Nonempty ι] in
 /-- The iterated tensor product of a family of MCA generators has MCA for any module code `MC`,
-with error the sum `∑ᵢ εᵢ` of the factors' errors. The inductive step is the open
-`isMCAGenerator_tensorGenerator_tight`, which this lemma therefore inherits; see
-`isMCAGenerator_tensorGeneratorPi_tight` for the proved variant with a stronger factor
-hypothesis.
+with error the sum `∑ᵢ εᵢ` of the factors' errors. The inductive step is
+`isMCAGenerator_tensorGenerator_tight` (BCGM25 Lemma 4.4); see
+`isMCAGenerator_tensorGeneratorPi_tight` for the variant whose factor hypothesis is anchored on a
+relative distance.
 
 The seeds and generator entries stay over `F` — it is only the code alphabet that is a general
 `F`-module, which is all the induction needs: both `isMCAGenerator_tensorGenerator_tight` and
@@ -183,34 +179,27 @@ lemma isMCAGenerator_tensorGeneratorPi {A : Type} [AddCommMonoid A] [Module F A]
     rw [hgen, herr] at hR
     exact hR
 
-omit [Nonempty ι] in
 /-- Proved variant of `isMCAGenerator_tensorGeneratorPi`, with the factor hypothesis anchored on
-a class `Good` of module codes over `ι` that is closed under row-wise interleaving by nonempty
-finite row types: each factor must have MCA, with its fixed error `ε i`, for *every* code in the
-class, over every alphabet.
+a relative-distance value `δ₀` and quantified over alphabets: each factor must have MCA, with
+its fixed error `ε i`, for *every* module code over `ι` of relative distance `δ₀`.
 
-Closure under interleaving makes the hypothesis available at the interleavings the induction
-steps through, so the inductive step can use the proved
-`TensorMCA.isMCAGenerator_tensorGenerator_of_moduleInterleavedCode` instead of the open
-`isMCAGenerator_tensorGenerator_tight`. Two classes supply it: the codes of a fixed relative
-distance (`Code.minRelHammingDistCode_moduleInterleavedCode`), for generators whose MCA error
-reads the code only through its block length and relative distance, such as
-`isMCAGenerator_of_isMDSGenerator`; and the codes whose MCA error is at most that of a fixed code
-(`mcaError_moduleInterleavedCode_le_of_card_le`), for generators with at most `|F|` seeds. -/
-lemma isMCAGenerator_tensorGeneratorPi_tight
-    (Good : ∀ (A : Type) [AddCommMonoid A] [Module F A] [DecidableEq A], ModuleCode ι F A → Prop)
-    (hGood : ∀ (A : Type) [AddCommMonoid A] [Module F A] [DecidableEq A] (κ : Type) [Fintype κ]
-      [Nonempty κ] (MC : ModuleCode ι F A),
-      Good A MC → Good _ (Code.ModuleCode.moduleInterleavedCode F A κ ι MC)) :
+That hypothesis is closed under the interleavings the induction steps through
+(`Code.minRelHammingDistCode_moduleInterleavedCode`), so the inductive step can use the proved
+`TensorMCA.isMCAGenerator_tensorGenerator_of_moduleInterleavedCode` instead of
+`isMCAGenerator_tensorGenerator_tight`. The hypothesis is supplied by any generator whose MCA
+error reads the code only through its block length and relative distance — in particular by
+`isMCAGenerator_of_isMDSGenerator`, whose error `mdsMCAError` does (`mdsMCAError_congr`). -/
+lemma isMCAGenerator_tensorGeneratorPi_tight {δ₀ : ℚ≥0} :
     ∀ {s : ℕ} {α : Fin s → Type} {ℓ : Fin s → Type}
       [∀ i, Fintype (α i)] [∀ i, Nonempty (α i)] [∀ i, SampleableType (α i)]
       [SampleableType (∀ i, α i)]
       [∀ i, Fintype (ℓ i)] [∀ i, Nonempty (ℓ i)]
       (G : ∀ i, Generator (α i) (ℓ i) F) (ε : Fin s → I → ℝ≥0),
       (∀ i, ∀ {A : Type} [AddCommMonoid A] [Module F A] [DecidableEq A]
-        (MC : ModuleCode ι F A), Good A MC → IsMCAGenerator (G i) (ε i) MC) →
+        (MC : ModuleCode ι F A), Code.minRelHammingDistCode MC.carrier = δ₀ →
+        IsMCAGenerator (G i) (ε i) MC) →
       ∀ {A : Type} [AddCommMonoid A] [Module F A] [DecidableEq A]
-        (MC : ModuleCode ι F A), Good A MC →
+        (MC : ModuleCode ι F A), Code.minRelHammingDistCode MC.carrier = δ₀ →
         IsMCAGenerator (tensorGeneratorPi G) (fun γ => ∑ i, ε i γ) MC := by
   intro s
   induction s with
@@ -238,8 +227,10 @@ lemma isMCAGenerator_tensorGeneratorPi_tight
       (Fin.consEquiv α).symm with heS
     set eL : (ℓ 0 × (∀ i : Fin s, Fin.tail ℓ i)) ≃ (∀ i : Fin (s + 1), ℓ i) :=
       Fin.consEquiv ℓ with heL
-    -- the (ℓ 0)-fold interleaving stays in the class, so the anchored hypotheses apply there
-    have hδI := hGood A (ℓ 0) MC hδ
+    -- the (ℓ 0)-fold interleaving has the same δᵣ, so the anchored hypotheses apply there
+    have hδI : Code.minRelHammingDistCode
+        (Code.ModuleCode.moduleInterleavedCode F A (ℓ 0) ι MC).carrier = δ₀ := by
+      rw [Code.minRelHammingDistCode_moduleInterleavedCode]; exact hδ
     have hTail := ih (α := Fin.tail α) (ℓ := Fin.tail ℓ) (Fin.tail G) (Fin.tail ε)
       (fun i {A'} _ _ _ MC' hMC' => hmca i.succ MC' hMC')
       (Code.ModuleCode.moduleInterleavedCode F A (ℓ 0) ι MC) hδI
@@ -295,175 +286,64 @@ noncomputable def reedSolomonMCAError [Fintype F] [NeZero k] (d m : ℕ) : I →
       else
         1
 
-/-- The Johnson multiplicity at slack `η = √ρ / (2m)` is at most `m` when `√ρ₋ ≤ √ρ` and
-`m ≥ 3`. -/
-private lemma johnsonM_le_of_slack {n deg m : ℕ} {s : ℝ} (hs : 0 < s)
-    (hsqrt : √(ReedSolomon.HiddenDerivative.johnsonRhoMinus n deg) ≤ s) (hm : 3 ≤ m) :
-    ReedSolomon.HiddenDerivative.johnsonM n deg (s / (2 * (m : ℝ))) ≤ m := by
-  unfold ReedSolomon.HiddenDerivative.johnsonM
-  refine max_le (Nat.ceil_le.mpr ?_) hm
-  have hmR : (0 : ℝ) < m := by exact_mod_cast (show 0 < m by omega)
-  rw [div_le_iff₀ (by positivity)]
-  calc √(ReedSolomon.HiddenDerivative.johnsonRhoMinus n deg) ≤ s := hsqrt
-    _ = (m : ℝ) * (2 * (s / (2 * (m : ℝ)))) := by field_simp
-
-/-- The closed Johnson count `(8/3) n t³ / ρ₋`, with `t ≤ m + 1/2`, is at most the
-[BCIKS20]-shape coefficient `(m + 1/2)⁷ n² / (3 ρ^{3/2})` of `reedSolomonMCAError`, where
-`ρ₋ = deg / n` and `ρ = (deg + 1) / n = s²`. -/
-private lemma johnsonClosed_le_reedSolomonCoefficient {n deg m : ℕ} {s t : ℝ}
-    (hdeg : 1 ≤ deg) (hs0 : 0 < s) (hs2 : s ^ 2 = ((deg + 1 : ℕ) : ℝ) / n) (hs1 : s ≤ 1)
-    (ht0 : 0 ≤ t) (htT : t ≤ m + 1 / 2) (hm : 3 ≤ m) (hn : 0 < n) :
-    (8 / 3 : ℝ) * n * t ^ 3 / ((deg : ℝ) / n) ≤ ((m : ℝ) + 1 / 2) ^ 7 * (3 * s ^ 3)⁻¹ * n ^ 2 := by
-  set T : ℝ := (m : ℝ) + 1 / 2
-  have hnR : (0 : ℝ) < n := by exact_mod_cast hn
-  have hdegR : (1 : ℝ) ≤ deg := by exact_mod_cast hdeg
-  have hT : (7 / 2 : ℝ) ≤ T := by
-    have : (3 : ℝ) ≤ m := by exact_mod_cast hm
-    simp only [T]; linarith
-  have hT0 : 0 < T := by linarith
-  have hs3 : s ^ 3 ≤ ((deg + 1 : ℕ) : ℝ) / n := by
-    rw [← hs2, pow_succ]
-    exact mul_le_of_le_one_right (by positivity) hs1
-  have hinv : (n : ℝ) / (3 * ((deg + 1 : ℕ) : ℝ)) ≤ (3 * s ^ 3)⁻¹ := by
-    have h3 : 3 * s ^ 3 ≤ 3 * (((deg + 1 : ℕ) : ℝ) / n) := by linarith
-    calc (n : ℝ) / (3 * ((deg + 1 : ℕ) : ℝ)) = (3 * (((deg + 1 : ℕ) : ℝ) / n))⁻¹ := by
-          field_simp
-      _ ≤ (3 * s ^ 3)⁻¹ := inv_anti₀ (by positivity) h3
-  have ht3 : t ^ 3 ≤ T ^ 3 := pow_le_pow_left₀ ht0 htT 3
-  have hT4 : (16 : ℝ) ≤ T ^ 4 := by nlinarith [pow_le_pow_left₀ (by norm_num) hT 4]
-  have hnum : 8 * (((deg + 1 : ℕ) : ℝ)) ≤ T ^ 4 * n * deg := by
-    push_cast
-    have hn1 : (1 : ℝ) ≤ n := by exact_mod_cast hn
-    nlinarith [mul_le_mul hT4 hn1 (by norm_num) (by positivity)]
-  calc (8 / 3 : ℝ) * n * t ^ 3 / ((deg : ℝ) / n) ≤ (8 / 3 : ℝ) * n * T ^ 3 / ((deg : ℝ) / n) := by
-        gcongr
-    _ = T ^ 3 * n ^ 2 * (8 / (3 * deg)) := by field_simp
-    _ ≤ T ^ 3 * n ^ 2 * (T ^ 4 * n / (3 * ((deg + 1 : ℕ) : ℝ))) := by
-        have hfrac : 8 / (3 * (deg : ℝ)) ≤ T ^ 4 * n / (3 * ((deg + 1 : ℕ) : ℝ)) := by
-          rw [div_le_div_iff₀ (by positivity) (by positivity)]
-          nlinarith
-        exact mul_le_mul_of_nonneg_left hfrac (by positivity)
-    _ = T ^ 7 * ((n : ℝ) / (3 * ((deg + 1 : ℕ) : ℝ))) * n ^ 2 := by ring
-    _ ≤ T ^ 7 * (3 * s ^ 3)⁻¹ * n ^ 2 := by gcongr
+/-- A constant powers generator returns its sole input word, so its MCA error is zero. -/
+theorem mcaError_zeroPowers_eq_zero [Fintype F] [SampleableType F]
+    {A : Type} [AddCommMonoid A] [Module F A] (MC : ModuleCode ι F A) (radius : ℝ) :
+    mcaError (univariatePowersGenerator F 0) MC radius = 0 := by
+  classical
+  have : Subsingleton (Fin (0 + 1)) := inferInstanceAs (Subsingleton (Fin 1))
+  apply le_antisymm _ bot_le
+  refine iSup_le fun U ↦ ?_
+  have hfalse : ∀ x : F, ¬ IsMCA (univariatePowersGenerator F 0) MC x U radius := by
+    rintro x ⟨T, -, hmem, j, hj⟩
+    apply hj
+    have hvec : (fun i ↦ ∑ j', univariatePowersGenerator F 0 x j' • U j' i) = U j := by
+      funext i
+      rw [Fintype.sum_subsingleton _ j]
+      simp [univariatePowersGenerator]
+    rwa [hvec] at hmem
+  exact le_of_eq (prEvent_eq_zero_of_forall_not _ _ hfalse)
 
 /-- The univariate powers generator of degree `d` has MCA for the Reed-Solomon code of degree
-`k` over the domain `D`, with error `reedSolomonMCAError k D d m`, for every `m ≥ 3`, over every
-finite field and every evaluation domain.
+`k` over the domain `D`, with error `reedSolomonMCAError k D d m`, for every `m ≥ 3`.
 
-The main case `2 ≤ k < |ι|`, `d ≥ 1` is the Johnson power-curve bound
-`ReedSolomon.mcaError_univariatePowers_le_of_uniformExactPowerAgreement` at slack
-`η = √ρ / (2m)`, whose count `d · johnsonExceptionCount` is below `d · (8/3) n t³ / ρ₋` with
-`t ≤ m + 1/2`, which is at most the [BCIKS20]-shape error. The remaining cases are the full code
-(`k ≥ |ι|`, error `0`), degree `d = 0` (error `0`) and the constant code `k = 1` (error at most
-`d n² / |F|`). -/
+A single Johnson exceptional set controls every agreeing polynomial and every MCA witness
+subset. The finite count fits the explicit multiplicity budget. Constant codes use the
+pair-collision bound; full codes and degree-zero generators have no MCA failure event. -/
 lemma isMCAGenerator_univariatePowersGenerator [Fintype F] [SampleableType F] [NeZero k]
     (d m : ℕ) (hm : 3 ≤ m) :
     IsMCAGenerator (univariatePowersGenerator F d) (reedSolomonMCAError k D d m)
       (ReedSolomon.code D k) := by
   classical
   intro γ
-  have hγ0 : (0 : ℝ) ≤ γ := γ.2.1
-  have hγ1 : (γ : ℝ) ≤ 1 := γ.2.2
-  have hk0 : 0 < k := Nat.pos_of_ne_zero (NeZero.ne k)
-  simp only [reedSolomonMCAError]
-  split_ifs with hthr
+  by_cases hfull : Fintype.card ι ≤ k
+  · rw [ReedSolomon.mcaError_eq_zero_of_card_le _ D hfull]
+    exact bot_le
+  have hproper : k < Fintype.card ι := by omega
+  have hkpos : 0 < k := NeZero.pos k
+  have hn : 0 < Fintype.card ι := by omega
+  let : Nonempty ι := Fintype.card_pos_iff.mp hn
+  by_cases hd : d = 0
+  · subst d
+    rw [mcaError_zeroPowers_eq_zero]
+    exact bot_le
+  unfold reedSolomonMCAError
+  split_ifs with hγ
   swap
-  · simpa using mcaError_le_one (univariatePowersGenerator F d) (ReedSolomon.code D k) γ
-  change _ ≤ ENNReal.ofReal _
-  set n := Fintype.card ι with hn_def
-  rcases le_or_gt n k with hkn | hkn
-  · rw [ReedSolomon.mcaError_eq_zero_of_card_le _ D hkn]
-    exact bot_le
-  rcases Nat.eq_zero_or_pos d with rfl | hd
-  · rw [ReedSolomon.mcaError_univariatePowers_zero]
-    exact bot_le
-  have hn : 0 < n := by omega
-  have hnR : (0 : ℝ) < n := by exact_mod_cast hn
-  have hq : (0 : ℝ) < Fintype.card F := by exact_mod_cast Fintype.card_pos
-  set s : ℝ := (ReedSolomon.sqrtRate k D : ℝ) with hs_def
-  have hs2 : s ^ 2 = (k : ℝ) / n := by
-    rw [hs_def, ReedSolomon.sqrtRate_sq, ← hn_def,
-      min_eq_left (by exact_mod_cast hkn.le : (k : ℝ) ≤ n)]
-  have hs0 : 0 < s := by
-    have : 0 < s ^ 2 := by rw [hs2]; positivity
-    rcases (ReedSolomon.sqrtRate_nonneg k D).lt_or_eq with h | h
-    · exact h
-    · rw [hs_def, ← h] at this; simp at this
-  have hs1 : s ≤ 1 := by
-    have : s ^ 2 ≤ 1 := by
-      rw [hs2, div_le_one hnR]; exact_mod_cast hkn.le
-    nlinarith
-  have hcoe : (((3 * ReedSolomon.sqrtRate k D ^ 3)⁻¹ : ℝ≥0) : ℝ) = (3 * s ^ 3)⁻¹ := by
-    simp only [NNReal.coe_inv, NNReal.coe_mul, NNReal.coe_pow, NNReal.coe_ofNat]
-    rfl
-  rw [hcoe]
-  have hTpos : (0 : ℝ) < (m : ℝ) + 1 / 2 := by positivity
-  rcases Nat.lt_or_ge k 2 with hk1 | hk2
-  · -- the constant code
-    have hk : k = 1 := by omega
-    subst hk
-    refine (ReedSolomon.mcaError_univariatePowers_code_one_le D γ).trans
-      (ENNReal.ofReal_le_ofReal ?_)
-    have hs3 : s ^ 3 ≤ 1 := pow_le_one₀ hs0.le hs1
-    have hK : 1 ≤ ((m : ℝ) + 1 / 2) ^ 7 * (3 * s ^ 3)⁻¹ := by
-      have hT : (7 / 2 : ℝ) ≤ (m : ℝ) + 1 / 2 := by
-        have : (3 : ℝ) ≤ m := by exact_mod_cast hm
-        linarith
-      have h7 : (3 : ℝ) ≤ ((m : ℝ) + 1 / 2) ^ 7 := by
-        nlinarith [pow_le_pow_left₀ (by norm_num) hT 7]
-      rw [← div_eq_mul_inv, le_div_iff₀ (by positivity)]
-      nlinarith
-    calc (d : ℝ) * n ^ 2 / (Fintype.card F : ℝ) =
-          (Fintype.card F : ℝ)⁻¹ * 1 * (d * n ^ 2) := by ring
-      _ ≤ (Fintype.card F : ℝ)⁻¹ * (((m : ℝ) + 1 / 2) ^ 7 * (3 * s ^ 3)⁻¹) * (d * n ^ 2) := by
-          gcongr
-      _ = _ := by ring
-  -- the main case `2 ≤ k < n`
-  obtain ⟨deg, rfl⟩ : ∃ deg, k = deg + 1 := ⟨k - 1, by omega⟩
-  have hdeg : 1 ≤ deg := by omega
-  have hDn : deg ≤ n - 2 := by omega
-  set eta : ℝ := s / (2 * (m : ℝ)) with heta_def
-  have hmR : (0 : ℝ) < m := by exact_mod_cast (show 0 < m by omega)
-  have heta : 0 < eta := by positivity
-  have hsqrt : √(ReedSolomon.HiddenDerivative.johnsonRhoMinus n deg) ≤ s := by
-    have hs' : s = √((((deg + 1 : ℕ) : ℝ)) / n) := by
-      rw [← hs2, Real.sqrt_sq hs0.le]
-    rw [hs']
-    apply Real.sqrt_le_sqrt
-    unfold ReedSolomon.HiddenDerivative.johnsonRhoMinus
-    gcongr
-    linarith
-  set A := ⌈(n : ℝ) * (1 - γ)⌉₊ with hA_def
-  have hthreshold : ReedSolomon.HiddenDerivative.johnsonAgreement n deg eta * n ≤ A := by
-    refine le_trans ?_ (Nat.le_ceil _)
-    unfold ReedSolomon.HiddenDerivative.johnsonAgreement
-    have hle : √(ReedSolomon.HiddenDerivative.johnsonRhoMinus n deg) + eta ≤ 1 - γ := by
-      have : eta = 1 / (2 * m) * s := by rw [heta_def]; ring
-      rw [this]
-      linarith
-    nlinarith
-  have hAn : A ≤ n := Nat.ceil_le.mpr (by nlinarith)
-  refine (ReedSolomon.mcaError_univariatePowers_le_of_uniformExactPowerAgreement D
-    (fun w ↦ ReedSolomon.uniformExactPowerAgreement_johnson_of_fintype D w hdeg hDn heta hd
-      hthreshold hAn) γ le_rfl).trans (ENNReal.ofReal_le_ofReal ?_)
-  have hE := ReedSolomon.HiddenDerivative.johnsonExceptionCount_lt_closed hdeg hDn heta hthreshold
-  have hM : ReedSolomon.HiddenDerivative.johnsonM n deg eta ≤ m :=
-    johnsonM_le_of_slack hs0 hsqrt hm
-  have htT : ReedSolomon.HiddenDerivative.johnsonT n deg eta ≤ m + 1 / 2 := by
-    unfold ReedSolomon.HiddenDerivative.johnsonT
-    have : (ReedSolomon.HiddenDerivative.johnsonM n deg eta : ℝ) ≤ m := by exact_mod_cast hM
-    linarith
-  have hkey := johnsonClosed_le_reedSolomonCoefficient hdeg hs0 hs2 hs1
-    (by unfold ReedSolomon.HiddenDerivative.johnsonT; positivity) htT hm hn
-  have hfloor : (⌊(d : ℝ) * ReedSolomon.HiddenDerivative.johnsonExceptionCount n deg A eta⌋₊ : ℝ)
-      ≤ d * (((m : ℝ) + 1 / 2) ^ 7 * (3 * s ^ 3)⁻¹ * n ^ 2) := by
-    refine (Nat.floor_le (mul_nonneg (Nat.cast_nonneg _)
-      (ReedSolomon.johnsonExceptionCount_nonneg _ _ _ _))).trans ?_
-    gcongr
-    exact hE.le.trans hkey
-  rw [div_le_iff₀ hq]
-  calc _ ≤ _ := hfloor
-    _ = _ := by field_simp
+  · simpa using mcaError_le_one (univariatePowersGenerator F d) (ReedSolomon.code D k) (γ : ℝ)
+  let A : ℕ := ⌈(Fintype.card ι : ℝ) * (1 - (γ : ℝ))⌉₊
+  let B : ℝ := (m + 1 / 2 : ℝ) ^ 7 * (Fintype.card ι : ℝ) ^ 2 /
+    (3 * (ReedSolomon.sqrtRate k D : ℝ) ^ 3)
+  have hexact := ProximityGap.exists_curve_exactPowerAgreement_explicit_budget
+    k D d m (γ : ℝ) hkpos hproper hm γ.2.1 hγ
+  have hbound := ProximityGap.mcaError_powers_le_of_exactPowerAgreement k D d A
+    (d * B) (γ : ℝ) le_rfl hexact
+  apply hbound.trans
+  change ENNReal.ofReal _ ≤ ENNReal.ofReal _
+  apply ENNReal.ofReal_le_ofReal
+  dsimp [B]
+  ring_nf
+  exact le_rfl
 
 /-- The multi-index (as a finitely supported function) associated to a bounded exponent vector. -/
 noncomputable def exponentFinsupp {s : ℕ} {d : Fin s → ℕ} (e : (i : Fin s) → Fin (d i + 1)) :
@@ -494,10 +374,7 @@ def tensorGeneratorPiUnivariate {s : ℕ} (d : Fin s → ℕ) :
 
 /-- The `s`-fold tensor product of univariate powers generators has MCA for any module code
 `MC`, with error the sum `∑ i, ε (d i)` of the factors' errors, provided each univariate powers
-generator has MCA for `MC` with error `ε e`. Proved through
-`isMCAGenerator_tensorGeneratorPi_tight` with the class of module codes whose powers MCA errors
-are at most those of `MC`: the seed space of a univariate powers generator is `F`, so
-interleaving does not increase its MCA error (`mcaError_moduleInterleavedCode_le_of_card_le`).
+generator has MCA for `MC` with error `ε e`. Routed through `isMCAGenerator_tensorGeneratorPi`.
 
 Only the code alphabet is generalised: the generator `x ↦ (1, x, …, x^e)` is still over `F`.
 At `A := F` this is the linear-code statement. -/
@@ -507,16 +384,9 @@ lemma isMCAGenerator_tensorGeneratorPiUnivariate [Fintype F] [SampleableType F]
     (huniv : ∀ e : ℕ, IsMCAGenerator (univariatePowersGenerator F e) (ε e) MC) :
     ∀ {s : ℕ} [SampleableType (Fin s → F)] (d : Fin s → ℕ),
       IsMCAGenerator (tensorGeneratorPiUnivariate d) (fun γ => ∑ i, ε (d i) γ) MC := by
-  classical
   intro s _ d
-  exact isMCAGenerator_tensorGeneratorPi_tight
-    (fun _ _ _ _ MC' => ∀ e (δ : ℝ), mcaError (univariatePowersGenerator F e) MC' δ ≤
-      mcaError (univariatePowersGenerator F e) MC δ)
-    (fun _ _ _ _ _ _ _ MC' hMC' e δ =>
-      (mcaError_moduleInterleavedCode_le_of_card_le _ MC' δ le_rfl).trans (hMC' e δ))
-    (fun i => univariatePowersGenerator F (d i)) (fun i => ε (d i))
-    (fun i _ _ _ _ MC' hMC' γ => (hMC' (d i) γ).trans (huniv (d i) γ)) MC
-    (fun _ _ => le_rfl)
+  exact isMCAGenerator_tensorGeneratorPi MC (fun i => univariatePowersGenerator F (d i))
+    (fun i => ε (d i)) (fun i => huniv (d i))
 
 /-- The coefficient matrix expressing the polynomial generator `G` as a right multiplication of
 the tensor generator of powers: the entry at `(e, j)` is the coefficient of the monomial
@@ -589,9 +459,8 @@ lemma hasLeftPseudoInverse_coeffMatrix {s : ℕ} {ℓ : Type} [Fintype ℓ] [Dec
 /-- A full-field polynomial generator has MCA for the Reed-Solomon code of degree `k` over the
 domain `D`, with error `∑ i, reedSolomonMCAError k D (maxDegreeOf P i) m`, for every `m ≥ 3`.
 
-The proof factors the generator through `tensorGeneratorPiUnivariate` via `coeffMatrix`, with
-`isMCAGenerator_univariatePowersGenerator` for each factor and
-`isMCAGenerator_tensorGeneratorPiUnivariate` for the tensor stage. -/
+The proof factors the generator through `tensorGeneratorPiUnivariate` via `coeffMatrix`. Its
+only unproved input is `isMCAGenerator_univariatePowersGenerator` (Lemma 9.3) for each factor. -/
 lemma isMCAGenerator_of_isPolynomialGeneratorOfFull [Fintype F] [SampleableType F] [NeZero k]
     (m : ℕ) (hm : 3 ≤ m)
     {ℓ : Type} [Fintype ℓ] {s : ℕ} [SampleableType (Fin s → F)]
@@ -651,7 +520,7 @@ lemma isMDSGenerator_univariatePowersGeneratorOn [DecidableEq F] (s : Set F) [Fi
 every module code over `ι` whose relative distance equals that of `LC` — in particular for `LC`
 itself (`MC := LC`, `hδ := rfl`) and for every iterated interleaving of `LC`.
 
-For `d ≥ 1` this is `isMCAGenerator_of_isMDSGenerator` (sorried) together with the
+For `d ≥ 1` this is `isMCAGenerator_of_isMDSGenerator` together with the
 identifications `mdsMCAError_congr` (as `mdsMCAError` reads the code only through `δᵣ`) and
 `mdsMCAError_eq_powersMCAError`; for `d = 0` the MCA event is vacuous at any alphabet, so the
 error `0 ≤ powersMCAError` suffices. -/
@@ -700,8 +569,7 @@ def tensorGeneratorPiUnivariateOn {s : ℕ} (S : Fin s → Set F) (d : Fin s →
 code `LC`, with error the sum `∑ᵢ powersMCAError LC dᵢ` of the factors' errors. Proved through
 `isMCAGenerator_tensorGeneratorPi_tight`: `isMCAGenerator_univariatePowersGeneratorOn` supplies
 each factor's MCA at every module code of relative distance `δᵣ LC`, which covers the iterated
-interleavings the induction routes through, so the open `isMCAGenerator_tensorGenerator_tight`
-is not needed. -/
+interleavings the induction routes through. -/
 lemma isMCAGenerator_tensorGeneratorPiUnivariateOn {ι : Type} [Fintype ι] [Nonempty ι]
     [DecidableEq F] (LC : LinearCode ι F) (η : ℝ) (hη : 0 < η ∧ η < 1)
     {s : ℕ} (S : Fin s → Set F) [∀ i, Fintype ↥(S i)] [∀ i, Inhabited ↥(S i)]
@@ -711,9 +579,7 @@ lemma isMCAGenerator_tensorGeneratorPiUnivariateOn {ι : Type} [Fintype ι] [Non
     IsMCAGenerator (tensorGeneratorPiUnivariateOn S d)
       (fun γ => ∑ i, powersMCAError LC (d i) (Fintype.card ↥(S i)) η γ) LC :=
   isMCAGenerator_tensorGeneratorPi_tight
-    (fun _ _ _ _ MC =>
-      Code.minRelHammingDistCode MC.carrier = Code.minRelHammingDistCode LC.carrier)
-    (fun _ _ _ _ _ _ _ MC hMC => (Code.minRelHammingDistCode_moduleInterleavedCode MC).trans hMC)
+    (δ₀ := Code.minRelHammingDistCode LC.carrier)
     (fun i => univariatePowersGeneratorOn (S i) (d i))
     (fun i => powersMCAError LC (d i) (Fintype.card ↥(S i)) η)
     (fun i {_A} _ _ _ MC hMC =>
@@ -744,10 +610,9 @@ lemma generatorByRightMul_coeffMatrix_on {s : ℕ} {ℓ : Type} [Fintype ℓ]
 /-- A polynomial generator over restricted seed sets `Sᵢ` with `|Sᵢ| ≥ dᵢ + 1` has MCA for
 every linear code `LC`, with error `∑ᵢ powersMCAError LC dᵢ |Sᵢ| η`, for every `0 < η < 1`.
 
-Its only unproved input is `isMCAGenerator_of_isMDSGenerator`: the tensor stage is
+The base case is `isMCAGenerator_of_isMDSGenerator`; the tensor stage is
 `isMCAGenerator_tensorGeneratorPi_tight`, which reaches the unscaled error sum through the
-proved interleaved-hypothesis lemma rather than the open
-`isMCAGenerator_tensorGenerator_tight`. -/
+proved interleaved-hypothesis lemma. -/
 theorem isMCAGenerator_of_isPolynomialGeneratorOf {ι : Type} [Fintype ι] [Nonempty ι]
     [DecidableEq F] {ℓ : Type} [Fintype ℓ] (LC : LinearCode ι F)
     (η : ℝ) (hη : 0 < η ∧ η < 1)

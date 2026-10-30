@@ -31,7 +31,7 @@ example : ∃ exceptional : Finset ℚ,
     (exceptional.card : ℝ) ≤ 2 * johnsonExceptionCount 4 1 3 (1 / 4) ∧
     ∃ z ∉ exceptional, HasExactPowerAgreement (natDomain 4) (0 : Fin 3 → Fin 4 → ℚ)
       (RingHom.id ℚ) 2 z 0 := by
-  obtain ⟨exceptional, hcard, hgood⟩ := exists_johnson_curve_exactPowerAgreement
+  obtain ⟨exceptional, hcard, hgood⟩ := exists_johnson_curve_exactPowerAgreement_line_mul
     (n := 4) (D := 1) (A := 3) (ℓ := 2) (eta := 1 / 4) (natDomain 4) 0 le_rfl (by norm_num)
     (by norm_num) (by norm_num) (by rw [johnsonAgreement_four_one]; norm_num) (by norm_num)
   obtain ⟨z, hz⟩ := Finset.exists_notMem exceptional
