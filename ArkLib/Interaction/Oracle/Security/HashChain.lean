@@ -198,7 +198,8 @@ theorem knownPrefix_eq_none_iff {s₀ s : S} {P : List (List I × (S × O))} :
   · simp [h, List.find?_eq_none]
 
 theorem knownPrefix_eq_some {s₀ s : S} {P : List (List I × (S × O))} {p : List I}
-    (h : knownPrefix s₀ P s = some p) : (s = s₀ ∧ p = []) ∨ (s ≠ s₀ ∧ ∃ v, (p, v) ∈ P ∧ v.1 = s) := by
+    (h : knownPrefix s₀ P s = some p) :
+    (s = s₀ ∧ p = []) ∨ (s ≠ s₀ ∧ ∃ v, (p, v) ∈ P ∧ v.1 = s) := by
   unfold knownPrefix at h
   split_ifs at h with hs
   · exact .inl ⟨hs, (Option.some.inj h).symm⟩
@@ -332,7 +333,8 @@ theorem view_init (s₀ : S) : view s₀ ((SimState.init, ∅) : IdealState S I 
       simp [view, SimState.init, hp]
   · rfl
 
-theorem view_extra [DecidableEq ι] (s₀ : S) (σ : IdealState S I O extra) (t : ι) (u : extra.Range t) :
+theorem view_extra [DecidableEq ι] (s₀ : S) (σ : IdealState S I O extra) (t : ι)
+    (u : extra.Range t) :
     view s₀ (σ.1, σ.2.cacheQuery (.inr t) u) = (view s₀ σ).cacheQuery (.inr t) u := by
   ext t'
   rcases t' with q | t'
@@ -344,7 +346,8 @@ theorem view_extra [DecidableEq ι] (s₀ : S) (σ : IdealState S I O extra) (t 
     · rw [QueryCache.cacheQuery_of_ne _ _ (by simpa using h), view_inr, view_inr,
         QueryCache.cacheQuery_of_ne _ _ (by simpa using h)]
 
-theorem view_unknown_fresh [DecidableEq ι] {s₀ : S} {σ : IdealState S I O extra} {q : S × I} (v : S × O)
+theorem view_unknown_fresh [DecidableEq ι] {s₀ : S} {σ : IdealState S I O extra} {q : S × I}
+    (v : S × O)
     (hp : knownPrefix s₀ σ.1.prefixes q.1 = none) :
     view s₀ (⟨σ.1.prefixes, (q, v) :: σ.1.priv⟩, σ.2) = (view s₀ σ).cacheQuery (.inl q) v := by
   refine QueryCache.ext fun t => ?_
@@ -358,7 +361,8 @@ theorem view_unknown_fresh [DecidableEq ι] {s₀ : S} {σ : IdealState S I O ex
       | some p => simp [view, hp']
   · rfl
 
-theorem view_known_fresh [DecidableEq ι] {s₀ : S} {σ : IdealState S I O extra} {q : S × I} {p : List I}
+theorem view_known_fresh [DecidableEq ι] {s₀ : S} {σ : IdealState S I O extra} {q : S × I}
+    {p : List I}
     {v : S × O} (hI : Inv σ) (hp : knownPrefix s₀ σ.1.prefixes q.1 = some p)
     (hv : findVal σ.1.prefixes (q.2 :: p) = none)
     (hG : Good s₀ ⟨(q.2 :: p, v) :: σ.1.prefixes, σ.1.priv⟩) :
@@ -441,7 +445,8 @@ theorem findVal_eq_some_of_mem {P : List (List I × (S × O))} (hP : WellFormed 
     rw [this]
 
 /-- **Decoding inverts encoding**, off a collision: the chain key of a prefix decodes to it. -/
-theorem decode_encode {s₀ : S} {st : SimState S I O} (hG : Good s₀ st) {k : List I} {q : S × I} (h : chainKey s₀ st.prefixes k = some q) :
+theorem decode_encode {s₀ : S} {st : SimState S I O} (hG : Good s₀ st) {k : List I} {q : S × I}
+    (h : chainKey s₀ st.prefixes k = some q) :
     decodeKey s₀ st.prefixes q = some k := by
   rcases k with _ | ⟨x, p⟩
   · cases h
@@ -476,7 +481,7 @@ theorem encode_of_decode {s₀ : S} {P : List (List I × (S × O))} (hP : WellFo
 
 /-- Off a collision, the chain's answer at the chain key of a prefix is the prefix oracle's answer
 at the prefix. -/
-theorem view_encode [DecidableEq ι] {s₀ : S} {σ : IdealState S I O extra} (hI : Inv σ)
+theorem view_encode {s₀ : S} {σ : IdealState S I O extra} (hI : Inv σ)
     (hG : Good s₀ σ.1) {k : List I} {q : S × I} (h : chainKey s₀ σ.1.prefixes k = some q) :
     view s₀ σ (.inl q) = σ.2 (.inl k) := by
   obtain ⟨p, hp, rfl⟩ := Option.map_eq_some_iff.mp (decode_encode hG h)
@@ -489,7 +494,8 @@ theorem view_of_decode_eq_none {s₀ : S} {σ : IdealState S I O extra} {q : S �
 
 end View
 
-variable [DecidableEq S] [DecidableEq I] [SampleableType S] [SampleableType O] {ι : Type} {extra : OracleSpec ι}
+variable [DecidableEq S] [DecidableEq I] [SampleableType S] [SampleableType O] {ι : Type}
+  {extra : OracleSpec ι}
 
 /-- One simulator step on a chain query. -/
 def simChain (s₀ : S) (q : S × I) (st : SimState S I O) :
@@ -572,7 +578,8 @@ theorem idealImpl_run_unif (s₀ : S) (n : ℕ) (σ : IdealState S I O extra) :
 
 theorem idealImpl_run_extra (s₀ : S) (t : ι) (σ : IdealState S I O extra) :
     (idealImpl s₀ (.inr (.inr t))).run σ =
-      (fun z => (z.1, (σ.1, z.2))) <$> ((prefixSpec S I O + extra).randomOracle (.inr t)).run σ.2 := by
+      (fun z => (z.1, (σ.1, z.2))) <$>
+        ((prefixSpec S I O + extra).randomOracle (.inr t)).run σ.2 := by
   simp [idealImpl, sim]
 
 theorem idealImpl_run_chain (s₀ : S) (q : S × I) (σ : IdealState S I O extra) :
@@ -721,7 +728,8 @@ theorem preservesInv_inv (s₀ : S) :
 
 /-- A collision or prediction, once it happens, persists. -/
 theorem preservesInv_bad (s₀ : S) :
-    QueryImpl.PreservesInv (idealImpl (I := I) (O := O) (extra := extra) s₀) fun σ => ¬ Good s₀ σ.1 := by
+    QueryImpl.PreservesInv (idealImpl (I := I) (O := O) (extra := extra) s₀)
+      fun σ => ¬ Good s₀ σ.1 := by
   intro t σ hσ z hz hG
   rcases mem_support_idealImpl hz with h | ⟨-, ⟨e, h⟩ | ⟨r, h⟩⟩
   · exact hσ (h ▸ hG)
@@ -790,7 +798,8 @@ theorem dominated_chain (s₀ : S) (q : S × I) (σ : IdealState S I O extra) (h
       exact prEvent_pure_le_of_eq (γ := S × O) (v, σ) (v, view s₀ σ) (view s₀)
         (fun σ => ¬ Good s₀ σ.1) rfl Q
     | none =>
-      rw [idealImpl_run_unknown_fresh hp hv, romImpl_run_of_none ((view_inl_of_unknown hp).trans hv)]
+      rw [idealImpl_run_unknown_fresh hp hv,
+        romImpl_run_of_none ((view_inl_of_unknown hp).trans hv)]
       exact prEvent_map_le_of_eq (γ := S × O) ($ᵗ (S × O))
         (fun v => (v, (⟨σ.1.prefixes, (q, v) :: σ.1.priv⟩, σ.2)))
         (fun v => (v, (view s₀ σ).cacheQuery (.inl q) v)) (view s₀) (fun σ => ¬ Good s₀ σ.1)
