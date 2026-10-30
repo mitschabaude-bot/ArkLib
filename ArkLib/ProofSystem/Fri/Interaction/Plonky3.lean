@@ -19,7 +19,9 @@ For heights strictly decreasing, all below `n` and at least `logFinal` (`Fits`),
 the final height exactly (`degree_plonky3`: the code before them has degree bound
 `2 ^ (n - logFinal) d`), each fold halves the domain at least once (`arityPos_plonky3`), and every
 input is injected: inputs agreeing in the schedule means each input agrees with its code, on a
-domain the folds reach from the first (`agrees_of_inputsAgree`).
+domain the folds reach from the first (`agrees_of_inputsAgree`). Conversely, inputs that are
+codewords on every domain the folds may reach are in their codes in the schedule
+(`inputsInCode_plonky3`).
 -/
 
 @[expose] public section
@@ -197,6 +199,48 @@ theorem agrees_of_inputsAgree {maxLogArity logFinal : ℕ} (ha : 0 < maxLogArity
       · simp only [ite_eq_right hm, InputsAgree] at hin
         exact agrees_of_inputsAgree ha inputs d ρ P hP fuel _ _ _ (by omega) (by omega)
           (fits_cons_of_ne hfit h3 hm) (hP ω _ hω) hin m' hm'
+
+/-- Every input is injected where it is in its code: if each input is a codeword of its code on
+every domain of its height with a property `P` that subdomains keep, and `ω` has it, the
+schedule's inputs are in their codes. -/
+theorem inputsInCode_plonky3 {maxLogArity logFinal : ℕ} (ha : 0 < maxLogArity)
+    (inputs : (m : ℕ) → Fin (2 ^ m) → K) (d : ℕ)
+    (P : ∀ {m : ℕ}, SmoothCosetFftDomain m K → Prop)
+    (hP : ∀ {m : ℕ} (D : SmoothCosetFftDomain m K) (k : ℕ), P D → P (D.subdomain k)) :
+    ∀ (fuel n : ℕ) (ω : SmoothCosetFftDomain n K) (heights : List ℕ),
+      logFinal ≤ n → n - logFinal ≤ fuel → Fits logFinal n heights → P ω →
+      (∀ m ∈ heights, ∀ D : SmoothCosetFftDomain m K, P D →
+        inputs m ∈ ReedSolomon.code (D : Fin (2 ^ m) ↪ K) (2 ^ (m - logFinal) * d)) →
+      (plonky3 maxLogArity logFinal fuel n heights).InputsInCode inputs d ω
+  | 0, _, _, _, _, _, _, _, _ => trivial
+  | fuel + 1, n, ω, heights, hn, hfuel, hfit, hω, hin => by
+    by_cases hfin : n ≤ logFinal
+    · rw [plonky3, ite_eq_left hfin]
+      trivial
+    have h1 := one_le_logArity ha (by omega) hfit
+    have h2 := logArity_le maxLogArity logFinal n heights
+    rw [plonky3, ite_eq_right hfin]
+    match heights, hfit, h1, h2, hin with
+    | [], _, _, h2, _ =>
+      exact inputsInCode_plonky3 ha inputs d P hP fuel _ _ [] (by omega) (by omega)
+        (fits_nil _ _) (hP ω _ hω) fun _ hm ↦ absurd hm List.not_mem_nil
+    | m :: rest, hfit, h1, h2, hin =>
+      have h3 := logArity_le_cons maxLogArity logFinal n m rest
+      by_cases hm : m = n - logArity maxLogArity logFinal n (m :: rest)
+      · simp only [ite_eq_left hm, InputsInCode]
+        have hdeg := degree_plonky3 ha d fuel _ rest (by omega) (by omega) (fits_of_eq hfit hm)
+        refine ⟨?_, inputsInCode_plonky3 ha inputs d P hP fuel _ _ rest (by omega) (by omega)
+          (fits_of_eq hfit hm) (hP ω _ hω) fun m' hm' ↦ hin m' (List.mem_cons_of_mem _ hm')⟩
+        have key : ∀ m' : ℕ, m = m' → ∀ D : SmoothCosetFftDomain m' K, P D →
+            inputs m' ∈ ReedSolomon.code (D : Fin (2 ^ m') ↪ K) (2 ^ (m' - logFinal) * d) := by
+          intro m' h
+          subst h
+          exact hin m List.mem_cons_self
+        rw [hdeg]
+        exact key _ hm _ (hP ω _ hω)
+      · simp only [ite_eq_right hm, InputsInCode]
+        exact inputsInCode_plonky3 ha inputs d P hP fuel _ _ _ (by omega) (by omega)
+          (fits_cons_of_ne hfit h3 hm) (hP ω _ hω) hin
 
 end Schedule
 
