@@ -24,6 +24,35 @@ erasure-detection interpretation in the March 27, 2026 revision of [GMW25].
 Corollary 5.6 with separate distance and tradeoff parameters. Interpolation is proved
 for every subset of accepting positions of the required size; no complexity bound is asserted.
 
+## Lossy MCA
+
+With lossy MCA (`IsLossyMCA`), agreement no longer propagates upward through the whole green
+subgraph of [GMW25, §5.1], only through all but a `loss` fraction of each layer. A fold is
+exploitable (`LossyFoldingAgreementFailure`) when the folded word agrees with a codeword on a set
+`T` of at least `(1 - θ)` of its domain `L'`, yet the previous word agrees with a codeword on the
+blocks above no `T' ⊆ T` with `|T \ T'| ≤ loss · |L'|`. Its probability is at most the lossy MCA
+error of the coefficient words (`lossyFoldingAgreementFailure_prob_le`).
+
+Every point of `L'` has `|L| / |L'|` preimages in the domain `L` of the previous word, so the
+blocks above `T \ T'` cover at most `loss · |L|` points: the loss is the same fraction of every
+layer. On the original domain `L₀` with `N = |L₀|`, take the accepting set `S` and `m` folds,
+none of them exploitable. Going down from the final word (which agrees with its code on all of
+`S`), the fold into layer `j` receives agreement on the projection of `S_j ⊆ S`, where `S_j`
+has lost at most `(m - j) · loss · N` points of `S` to the folds below. A projection never
+shrinks density, so the fold applies once `|S_j| ≥ (1 - θ) N`; this holds for every fold if
+`|S| ≥ (1 - θ + (m - 1) · loss) N`, the outermost fold receiving the smallest set. It returns
+agreement on `S_{j-1} ⊆ S_j` with `|S_j \ S_{j-1}| ≤ loss · N`. After all `m` folds, a codeword
+of the original code agrees with `f₀` on `S₀ ⊆ S` with `|S \ S₀| ≤ m · loss · N`
+(`exists_codeword_agree_on_lossy`).
+
+If `f₀` has distance at least `δ` from its code, then `|S₀| ≤ (1 - δ) N`. Hence either
+`|S| < (1 - θ + (m - 1) · loss) N` or `|S| ≤ (1 - δ + m · loss) N`, so the accepting density
+is at most `1 - min (θ - (m - 1) · loss) (δ - m · loss)` (`accepting_density_le_lossy`), and
+`t` independent queries all accept with probability at most its `t`-th power
+(`query_soundness_lossy`). This is at most `(1 - min θ δ + m · loss)^t`. With the `k + 1` folds
+of `Fri.Spec`, the query term is `(1 - min (θ - k · loss) (δ - (k + 1) · loss))^l`. At
+`loss = 0` everything reduces to the lossless statements.
+
 ## References
 
 * [Garreta, A., Mohnblatt, N., Wagner, B., *A Simplified Round-by-round Soundness Proof
@@ -79,6 +108,19 @@ def Safe (θ : ℝ) : {n d : ℕ} → {domain : SmoothCosetFftDomain n F} →
   | _, _, domain, .step (k := k) (d := d) _ _ f α tail =>
       ¬ FoldingAgreementFailure domain f k d θ α ∧ tail.Safe θ
 
+/-- The number of folding steps. -/
+def numFolds : {n d : ℕ} → {domain : SmoothCosetFftDomain n F} → FoldTrace domain d → ℕ
+  | _, _, _, .terminal _ => 0
+  | _, _, _, .step _ _ _ _ tail => tail.numFolds + 1
+
+/-- No folding challenge is lossily bad: every large agreement set of each fold lifts to the
+preimage of a subset missing at most a `loss` fraction of the folded domain. -/
+def SafeLossy (θ loss : ℝ) : {n d : ℕ} → {domain : SmoothCosetFftDomain n F} →
+    FoldTrace domain d → Prop
+  | _, _, _, .terminal _ => True
+  | _, _, domain, .step (k := k) (d := d) _ _ f α tail =>
+      ¬ LossyFoldingAgreementFailure domain f k d θ loss α ∧ tail.SafeLossy θ loss
+
 /-- Initial positions at which every local folding check accepts. -/
 noncomputable def accepting : {n d : ℕ} → {domain : SmoothCosetFftDomain n F} →
     FoldTrace domain d → Finset (Fin (2 ^ n))
@@ -124,6 +166,90 @@ theorem accepting_card_ge_of_query_probability (tr : FoldTrace domain d)
   have := (le_div_iff₀ (show (0 : ℝ) < 2 ^ n by positivity)).mp hreal
   simpa [mul_comm] using this
 
+/-- Without loss, lossy safety is safety. -/
+theorem safeLossy_zero_iff (tr : FoldTrace domain d) (θ : ℝ) :
+    tr.SafeLossy θ 0 ↔ tr.Safe θ := by
+  induction tr with
+  | terminal f => exact Iff.rfl
+  | step hk hd f α tail ih =>
+    simp only [SafeLossy, Safe, lossyFoldingAgreementFailure_zero_iff, ih]
+
+/-- On a lossily safe trace with a valid final word, a large subset `S` of accepting queries
+agrees with one original codeword off at most `numFolds · loss · 2 ^ n` of its positions. Every
+fold loses `loss` relative to its domain, which is the same fraction of the initial domain. The
+size threshold accounts for the losses of all but the outermost fold. -/
+theorem exists_codeword_agree_on_lossy (tr : FoldTrace domain d) (θ loss : ℝ)
+    (hloss : 0 ≤ loss) (hsafe : tr.SafeLossy θ loss) (hfinal : tr.FinalInCode)
+    (S : Finset (Fin (2 ^ n))) (hS : S ⊆ tr.accepting)
+    (hlarge : (2 ^ n : ℝ) * (1 - θ) + ((tr.numFolds : ℝ) - 1) * loss * 2 ^ n ≤ S.card) :
+    ∃ u ∈ code domain d, ∃ S' ⊆ S, (S.card : ℝ) ≤ S'.card + tr.numFolds * loss * 2 ^ n ∧
+      ∀ i ∈ S', u i = tr.initial i := by
+  classical
+  induction tr with
+  | terminal f => exact ⟨f, hfinal, S, subset_rfl, by simp [numFolds], fun _ _ ↦ rfl⟩
+  | @step n k d domain hk hd f α tail ih =>
+    simp only [numFolds, Nat.cast_add, Nat.cast_one, add_sub_cancel_right] at hlarge ⊢
+    set m : ℝ := (tail.numFolds : ℝ)
+    let T := S.image (sqFoldMapGen (i := k))
+    have hT : T ⊆ tail.accepting := by
+      rintro x hx
+      obtain ⟨i, hi, rfl⟩ := Finset.mem_image.mp hx
+      exact (Finset.mem_filter.mp (hS hi)).2.2
+    set N : ℝ := 2 ^ (n - k)
+    have hn : (2 : ℝ) ^ n = 2 ^ k * N := by
+      rw [← pow_add, Nat.add_sub_of_le hk]
+    have hkpos : (0 : ℝ) < 2 ^ k := by positivity
+    have hTlarge : N * (1 - θ) + m * loss * N ≤ T.card := by
+      have hc : (S.card : ℝ) ≤ 2 ^ k * (T.card : ℝ) := by
+        exact_mod_cast card_le_mul_card_sqFoldMapGen_image domain k S
+      rw [hn] at hlarge
+      have : 2 ^ k * (N * (1 - θ) + m * loss * N) ≤ 2 ^ k * T.card := by linarith
+      exact le_of_mul_le_mul_left this hkpos
+    have hmloss : 0 ≤ loss * N := by positivity
+    obtain ⟨u, hu, T₂, hT₂, hT₂card, hagree⟩ := ih hsafe.2 hfinal T hT (by nlinarith)
+    have hfold : projectedWord (foldWord domain f k α) T₂ ∈
+        projectedCodeSubmod (code (domain.subdomain k) d) T₂ := by
+      rw [mem_projectedCodeSubmod_iff]
+      refine ⟨u, hu, ?_⟩
+      funext x
+      obtain ⟨i, hi, hix⟩ := Finset.mem_image.mp (hT₂ x.property)
+      have hcheck := (Finset.mem_filter.mp (hS hi)).2.1
+      exact (hix ▸ hcheck).trans (hagree x x.property).symm
+    obtain ⟨T₃, hT₃, hT₃card, v, hv, hvagree⟩ : ∃ T₃ ⊆ T₂,
+        (T₃.card : ℝ) ≥ T₂.card - loss * Fintype.card (Fin (2 ^ (n - k))) ∧
+        ∃ v ∈ code domain (2 ^ k * d),
+          ∀ i x, x ∈ T₃ → domain i ^ (2 ^ k) = domain.subdomain k x → v i = f i := by
+      by_contra h
+      exact hsafe.1 ⟨T₂, by simp only [Fintype.card_fin, Nat.cast_pow, Nat.cast_ofNat]; linarith,
+        hfold, fun T' hT' hc hex ↦ h ⟨T', hT', hc, hex⟩⟩
+    simp only [Fintype.card_fin, Nat.cast_pow, Nat.cast_ofNat] at hT₃card
+    refine ⟨v, hv, S.filter fun i ↦ sqFoldMapGen (i := k) i ∈ T₃, Finset.filter_subset _ _,
+      ?_, fun i hi ↦ hvagree i _ (Finset.mem_filter.mp hi).2
+        (CosetFftDomainClass.pow_eq_subdomain_sqFoldMapGen (ω := domain) i).symm⟩
+    have hsplit := Finset.card_filter_add_card_filter_not
+      (s := S) (fun i ↦ sqFoldMapGen (i := k) i ∈ T₃)
+    have hrest : (S.filter fun i ↦ ¬ sqFoldMapGen (i := k) i ∈ T₃).card ≤
+        2 ^ k * (T \ T₃).card := by
+      refine le_trans (Finset.card_le_card ?_) (card_filter_sqFoldMapGen_mem_le domain k S _)
+      intro i hi
+      obtain ⟨hiS, hiT⟩ := Finset.mem_filter.mp hi
+      exact Finset.mem_filter.mpr ⟨hiS, Finset.mem_sdiff.mpr
+        ⟨Finset.mem_image_of_mem _ hiS, hiT⟩⟩
+    have hsdiff : ((T \ T₃).card : ℝ) = T.card - T₃.card := by
+      rw [Finset.card_sdiff_of_subset (hT₃.trans hT₂)]
+      exact Nat.cast_sub (Finset.card_le_card (hT₃.trans hT₂))
+    have hrest' : ((S.filter fun i ↦ ¬ sqFoldMapGen (i := k) i ∈ T₃).card : ℝ) ≤
+        2 ^ k * (T.card - T₃.card) := by
+      rw [← hsdiff]
+      exact_mod_cast hrest
+    have hsplit' : (S.card : ℝ) = (S.filter fun i ↦ sqFoldMapGen (i := k) i ∈ T₃).card +
+        (S.filter fun i ↦ ¬ sqFoldMapGen (i := k) i ∈ T₃).card := by
+      exact_mod_cast hsplit.symm
+    rw [hn]
+    have : 2 ^ k * ((T.card : ℝ) - T₃.card) ≤ 2 ^ k * ((m + 1) * loss * N) :=
+      mul_le_mul_of_nonneg_left (by linarith) hkpos.le
+    nlinarith
+
 /-- On a safe trace with a valid final word, any sufficiently large subset of accepting
 queries agrees with one original codeword. This also covers zero folding steps. -/
 theorem exists_codeword_agree_on (tr : FoldTrace domain d) (θ : ℝ)
@@ -131,39 +257,22 @@ theorem exists_codeword_agree_on (tr : FoldTrace domain d) (θ : ℝ)
     (S : Finset (Fin (2 ^ n))) (hS : S ⊆ tr.accepting)
     (hlarge : (2 ^ n : ℝ) * (1 - θ) ≤ S.card) :
     ∃ u ∈ code domain d, ∀ i ∈ S, u i = tr.initial i := by
-  classical
-  induction tr with
-  | terminal f => exact ⟨f, hfinal, fun _ _ ↦ rfl⟩
-  | @step n k d domain hk hd f α tail ih =>
-    let T := S.image (sqFoldMapGen (i := k))
-    have hT : T ⊆ tail.accepting := by
-      rintro x hx
-      obtain ⟨i, hi, rfl⟩ := Finset.mem_image.mp hx
-      exact (Finset.mem_filter.mp (hS hi)).2.2
-    have hTlarge : (2 ^ (n - k) : ℝ) * (1 - θ) ≤ T.card := by
-      have hc : (S.card : ℝ) ≤ 2 ^ k * (T.card : ℝ) := by
-        exact_mod_cast card_le_mul_card_sqFoldMapGen_image domain k S
-      have hn : (2 : ℝ) ^ n = 2 ^ k * 2 ^ (n - k) := by
-        rw [← pow_add, Nat.add_sub_of_le hk]
-      rw [hn] at hlarge
-      have hkpos : (0 : ℝ) < 2 ^ k := by positivity
-      nlinarith
-    obtain ⟨u, hu, hagree⟩ := ih hsafe.2 hfinal T hT hTlarge
-    have hfold : projectedWord (foldWord domain f k α) T ∈
-        projectedCodeSubmod (code (domain.subdomain k) d) T := by
-      rw [mem_projectedCodeSubmod_iff]
-      refine ⟨u, hu, ?_⟩
-      funext x
-      obtain ⟨i, hi, hix⟩ := Finset.mem_image.mp x.property
-      have hcheck := (Finset.mem_filter.mp (hS hi)).2.1
-      exact (hix ▸ hcheck).trans (hagree x x.property).symm
-    have hlift : ∃ v ∈ code domain (2 ^ k * d),
-        ∀ i x, x ∈ T → domain i ^ (2 ^ k) = domain.subdomain k x → v i = f i := by
-      by_contra h
-      exact hsafe.1 ⟨T, by simpa using hTlarge, hfold, h⟩
-    obtain ⟨v, hv, hvagree⟩ := hlift
-    exact ⟨v, hv, fun i hi ↦ hvagree i _ (Finset.mem_image_of_mem _ hi)
-      (CosetFftDomainClass.pow_eq_subdomain_sqFoldMapGen (ω := domain) i).symm⟩
+  obtain ⟨u, hu, S', hS', hcard, hagree⟩ := tr.exists_codeword_agree_on_lossy θ 0 le_rfl
+    ((tr.safeLossy_zero_iff θ).mpr hsafe) hfinal S hS (by simpa using hlarge)
+  rw [Finset.eq_of_subset_of_card_le hS' (by simpa using hcard)] at hagree
+  exact ⟨u, hu, hagree⟩
+
+/-- On a lossily safe trace, the accepting-query density is at most
+`1 - min (θ - (numFolds - 1) · loss) (δ - numFolds · loss)`, where `δ` is any lower bound on the
+initial word's distance to its code. -/
+theorem accepting_density_le_lossy (tr : FoldTrace domain d) (θ δ loss : ℝ) (hloss : 0 ≤ loss)
+    (hsafe : tr.SafeLossy θ loss) (hfinal : tr.FinalInCode)
+    (hdist : ∀ u ∈ code domain d, δ ≤ (Code.relHammingDist tr.initial u : ℝ)) :
+    (tr.accepting.card : ℝ) / 2 ^ n ≤
+      1 - min (θ - ((tr.numFolds : ℝ) - 1) * loss) (δ - tr.numFolds * loss) :=
+  accepting_density_le_of_lossy_agreement domain tr.initial tr.accepting θ δ _ _
+    (fun h ↦ tr.exists_codeword_agree_on_lossy θ loss hloss hsafe hfinal tr.accepting
+      (fun _ h ↦ h) (by linarith)) hdist
 
 /-- The accepting-query density is bounded by the tradeoff threshold or by the initial
 word's agreement with its code, whichever is larger. `δ` may be any lower bound on distance. -/
@@ -171,8 +280,29 @@ theorem accepting_density_le (tr : FoldTrace domain d) (θ δ : ℝ)
     (hsafe : tr.Safe θ) (hfinal : tr.FinalInCode)
     (hdist : ∀ u ∈ code domain d, δ ≤ (Code.relHammingDist tr.initial u : ℝ)) :
     (tr.accepting.card : ℝ) / 2 ^ n ≤ 1 - min θ δ := by
-  exact accepting_density_le_of_agreement domain tr.initial tr.accepting θ δ
-    (tr.exists_codeword_agree_on θ hsafe hfinal tr.accepting (fun _ h ↦ h)) hdist
+  simpa using tr.accepting_density_le_lossy θ δ 0 le_rfl ((tr.safeLossy_zero_iff θ).mpr hsafe)
+    hfinal hdist
+
+/-- A lossily safe trace accepts independent uniform queries with probability at most
+`(1 - min (θ - (numFolds - 1) · loss) (δ - numFolds · loss))^t`, where `δ` is a lower bound on
+the initial word's distance to its code. -/
+theorem query_soundness_lossy (tr : FoldTrace domain d) (θ δ loss : ℝ) (t : ℕ)
+    (hloss : 0 ≤ loss) (hsafe : tr.SafeLossy θ loss)
+    (hdist : ∀ u ∈ code domain d, δ ≤ (Code.relHammingDist tr.initial u : ℝ)) :
+    Pr{let xs ←$ᵗ (Fin t → Fin (2 ^ n))}[tr.Accepts xs] ≤
+      ENNReal.ofReal (1 - min (θ - ((tr.numFolds : ℝ) - 1) * loss)
+        (δ - tr.numFolds * loss)) ^ t := by
+  classical
+  by_cases hfinal : tr.FinalInCode
+  · rw [tr.query_acceptance_probability t hfinal]
+    apply pow_le_pow_left' _ t
+    have h := ENNReal.ofReal_le_ofReal
+      (tr.accepting_density_le_lossy θ δ loss hloss hsafe hfinal hdist)
+    simpa [ENNReal.ofReal_div_of_pos, show (0 : ℝ) < 2 ^ n by positivity] using h
+  · rw [prEvent_congr _ _ (fun _ ↦ False)
+      (fun xs ↦ by simp only [Accepts, hfinal, false_and])]
+    rw [prEvent_const_of_not _ not_false]
+    exact zero_le
 
 /-- A safe trace accepts independent uniform queries with probability at most
 `(1 - min θ δ)^t`, where `δ` is a lower bound on the initial word's distance to its code. -/
@@ -181,16 +311,7 @@ theorem query_soundness (tr : FoldTrace domain d) (θ δ : ℝ) (t : ℕ)
     (hdist : ∀ u ∈ code domain d, δ ≤ (Code.relHammingDist tr.initial u : ℝ)) :
     Pr{let xs ←$ᵗ (Fin t → Fin (2 ^ n))}[tr.Accepts xs] ≤
       ENNReal.ofReal (1 - min θ δ) ^ t := by
-  classical
-  by_cases hfinal : tr.FinalInCode
-  · rw [tr.query_acceptance_probability t hfinal]
-    apply pow_le_pow_left' _ t
-    have h := ENNReal.ofReal_le_ofReal (tr.accepting_density_le θ δ hsafe hfinal hdist)
-    simpa [ENNReal.ofReal_div_of_pos, show (0 : ℝ) < 2 ^ n by positivity] using h
-  · rw [prEvent_congr _ _ (fun _ ↦ False)
-      (fun xs ↦ by simp only [Accepts, hfinal, false_and])]
-    rw [prEvent_const_of_not _ not_false]
-    exact zero_le
+  simpa using tr.query_soundness_lossy θ δ 0 t le_rfl ((tr.safeLossy_zero_iff θ).mpr hsafe) hdist
 
 /-- The query bound at the actual relative distance to the original Reed–Solomon code. -/
 theorem query_soundness_distance (tr : FoldTrace domain d) (θ : ℝ) (t : ℕ)

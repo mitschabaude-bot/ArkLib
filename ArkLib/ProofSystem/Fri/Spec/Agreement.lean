@@ -14,6 +14,9 @@ public import ArkLib.ProofSystem.Fri.Spec.SingleRound
 
 The specification records all domains relative to the original domain, rather than as
 nested subdomains. We lift a certificate backwards along that precise folding schedule.
+Each lossily safe fold drops at most `loss · 2 ^ n` original queries from the agreement set, so
+after the `k + 1` folds the certificate holds off at most `(k + 1) · loss · 2 ^ n` of them; the
+agreement set must start `k · loss · 2 ^ n` above the threshold for the outermost fold to apply.
 -/
 
 @[expose] public section
@@ -65,16 +68,18 @@ theorem foldingDegree_castSucc (i : Fin (k + 1)) :
 @[simp] theorem foldingDegree_last : foldingDegree s d (Fin.last (k + 1)) = d.val := by
   simp [foldingDegree]
 
-/-- Agreement with a terminal polynomial lifts to every preceding word on all the
-projected original queries, provided no folding challenge is bad. -/
+/-- Agreement with a terminal polynomial lifts to every preceding word, provided no folding
+challenge is lossily bad. At stage `i` it holds on the projections of a subset of the original
+queries `S` missing at most `(k + 1 - i) · loss · 2 ^ n` of them. -/
 theorem exists_polynomial_agree_on_schedule
     (domain : SmoothCosetFftDomain n F) (hs : (∑ j, (s j).val) ≤ n)
-    (w : Fin (k + 2) → F → F) (α : Fin (k + 1) → F) (θ : ℝ)
-    (hsafe : ∀ i : Fin (k + 1), ¬ FoldingAgreementFailure
+    (w : Fin (k + 2) → F → F) (α : Fin (k + 1) → F) (θ loss : ℝ) (hloss : 0 ≤ loss)
+    (hsafe : ∀ i : Fin (k + 1), ¬ LossyFoldingAgreementFailure
       (domain.subdomain (foldingPrefix s i.castSucc))
       (fun z ↦ w i.castSucc (domain.subdomain (foldingPrefix s i.castSucc) z))
-      (s i).val (foldingDegree s d i.succ) θ (α i))
-    (S : Finset (Fin (2 ^ n))) (hlarge : (2 ^ n : ℝ) * (1 - θ) ≤ S.card)
+      (s i).val (foldingDegree s d i.succ) θ loss (α i))
+    (S : Finset (Fin (2 ^ n)))
+    (hlarge : (2 ^ n : ℝ) * (1 - θ) + k * loss * 2 ^ n ≤ S.card)
     (p : F[X]) (hp : p.natDegree < d.val)
     (hfinal : ∀ z ∈ S, p.eval (domain z ^ (2 ^ foldingPrefix s (Fin.last (k + 1)))) =
       w (Fin.last (k + 1)) (domain z ^ (2 ^ foldingPrefix s (Fin.last (k + 1)))))
@@ -84,13 +89,14 @@ theorem exists_polynomial_agree_on_schedule
         (s i).val (α i) (domain z ^ (2 ^ foldingPrefix s i.succ)) =
       w i.succ (domain z ^ (2 ^ foldingPrefix s i.succ))) :
     ∀ i : Fin (k + 2), ∃ q : F[X], q.natDegree < foldingDegree s d i ∧
-      ∀ z ∈ S, q.eval (domain z ^ (2 ^ foldingPrefix s i)) =
-        w i (domain z ^ (2 ^ foldingPrefix s i)) := by
+      ∃ S' ⊆ S, (S.card : ℝ) ≤ S'.card + ((k : ℝ) + 1 - i) * loss * 2 ^ n ∧
+        ∀ z ∈ S', q.eval (domain z ^ (2 ^ foldingPrefix s i)) =
+          w i (domain z ^ (2 ^ foldingPrefix s i)) := by
   intro i
   induction i using Fin.reverseInduction with
-  | last => exact ⟨p, by simpa using hp, hfinal⟩
+  | last => exact ⟨p, by simpa using hp, S, subset_rfl, by simp, hfinal⟩
   | @cast i ih =>
-    obtain ⟨p', hp', hagree⟩ := ih
+    obtain ⟨p', hp', S₁, hS₁, hS₁card, hagree⟩ := ih
     have hi : foldingPrefix s i.castSucc + (s i).val ≤ n := by
       rw [← foldingPrefix_succ]
       exact (foldingPrefix_le s i.succ).trans hs
@@ -98,10 +104,15 @@ theorem exists_polynomial_agree_on_schedule
         (domain z ^ (2 ^ foldingPrefix s i.castSucc)) ^ (2 ^ (s i).val) =
           domain z ^ (2 ^ foldingPrefix s i.succ) := by
       rw [foldingPrefix_succ, pow_add, pow_mul]
-    obtain ⟨q, hq, hqagree⟩ := exists_polynomial_agree_on_projection domain hi
-      (foldingDegree_pos s d i.succ) _ (α i) θ (hsafe i) S hlarge p' hp'
-      (fun z hz ↦ by rw [hpow]; exact (hcheck z hz i).trans (hagree z hz).symm)
-    refine ⟨q, by rwa [foldingDegree_castSucc], fun z hz ↦ ?_⟩
+    simp only [Fin.val_succ, Nat.cast_add, Nat.cast_one, Fin.val_castSucc] at hS₁card ⊢
+    have hik : (i : ℝ) ≤ k := by exact_mod_cast Nat.lt_succ_iff.mp i.isLt
+    have hS₁large : (2 ^ n : ℝ) * (1 - θ) ≤ S₁.card := by
+      have : 0 ≤ (i : ℝ) * loss * 2 ^ n := by positivity
+      linarith
+    obtain ⟨q, hq, S₂, hS₂, hS₂card, hqagree⟩ := exists_polynomial_agree_on_projection domain hi
+      (foldingDegree_pos s d i.succ) _ (α i) θ loss (hsafe i) S₁ hS₁large p' hp'
+      (fun z hz ↦ by rw [hpow]; exact (hcheck z (hS₁ hz) i).trans (hagree z hz).symm)
+    refine ⟨q, by rwa [foldingDegree_castSucc], S₂, hS₂.trans hS₁, by linarith, fun z hz ↦ ?_⟩
     simpa only [CosetFftDomainClass.pow_eq_subdomain_sqFoldMapGen] using hqagree z hz
 
 end Fri.Spec

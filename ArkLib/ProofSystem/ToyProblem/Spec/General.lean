@@ -38,8 +38,8 @@ ArkLib's `OracleReduction` framework, following the conventions used by
 The `prover` / `verifier` / `oracleReduction` triple is complete.
 Completeness (C6.2, `oracleReduction_perfectCompleteness`) and
 round-by-round knowledge soundness (L6.8,
-`oracleVerifier_rbrKnowledgeSoundnessWorstCase`, with
-`oracleVerifier_rbrKnowledgeSoundness` as its averaged corollary) are **fully proven** here. Plain
+`oracleVerifier_rbrKnowledgeSoundness`) are
+**fully proven** here. Plain
 knowledge soundness (L6.6, `oracleVerifier_knowledgeSoundness_winningSetUpperBound`) is **fully
 proven** in the sibling file `Spec/KnowledgeSoundness.lean`. The generic theorem
 uses the sharper Definition 6.11 winning-set expression
@@ -134,12 +134,6 @@ can silently acquire a numeric claim. Consequently the theorems apply at product
 sizes, since they are parametric in `C`, `δ`, and `t`, but no numeric error value is proven
 in-tree at any production shape. For the interleaved-RS profile, the remaining composition of
 proved inputs is spelled out in `Impl/IRS.lean`.
-
-One further admitted region sits outside every proof here and must not be read as backing any
-statement in this file: the generic `StateT` security-composition theorems of
-`OracleReduction/Composition/Sequential/Append.lean` (admitted, with no toy-problem
-consumer — the virtual-output *execution* lemmas that composition needs are proven
-separately).
 
 ## References
 
@@ -451,11 +445,10 @@ failure (`extractedWitIn? = none`) is scored against the prover; an
 always-failing `OptionT` extractor therefore certifies nothing, and none of the
 knowledge-soundness statements below can be discharged vacuously through it.
 The generic existence theorems (`oracleVerifier_knowledgeSoundness_winningSetUpperBound`,
-`oracleVerifier_rbrKnowledgeSoundnessWorstCase` with its averaged corollary
 `oracleVerifier_rbrKnowledgeSoundness`, and the alphabet-generic
 `verifier_knowledgeSoundness` in `Spec/SimplifiedIOR.lean`) use the classical
 `chooseRelaxedWitness` selector; `Impl/IRS.lean` supplies the principal
-executable path — exact named straightline and worst-case/averaged RBR
+executable path — exact named straightline and RBR
 extractors for both the three-round protocol and the virtual-oracle reduction.
 -/
 
@@ -1364,11 +1357,11 @@ lemma spotcheck_round_game_bound [Nonempty ι]
     exact ENNReal.coe_le_coe.mpr hbase
 
 omit [DecidableEq ι] [Fintype A] in
-/-- Worst-case-per-fixed-prefix round-by-round knowledge soundness of
+/-- Round-by-round knowledge soundness of
 the toy protocol in the alphabet-generic classical-extractor form.  Concrete
-IRS clients should prefer `Impl.IRS.oracleVerifier_rbrKnowledgeSoundnessWorstCase`,
+IRS clients should prefer `Impl.IRS.oracleVerifier_rbrKnowledgeSoundness`,
 whose extractor is executable and named. -/
-theorem oracleVerifier_rbrKnowledgeSoundnessWorstCase
+theorem oracleVerifier_rbrKnowledgeSoundness
     [SampleableType F] [SampleableType ι] [Nonempty ι] [Finite A]
     {σ : Type} (init : ProbComp σ)
     (impl : QueryImpl []ₒ (StateT σ ProbComp))
@@ -1380,14 +1373,14 @@ theorem oracleVerifier_rbrKnowledgeSoundnessWorstCase
     (hδ_lt_min : δ <
       (minRelHammingDistCode (C : Set (ι → A)) : ℝ≥0)) :
     ((oracleVerifier (k := k) (t := t)
-      (encode : (Fin k → F) → (ι → A))).toVerifier).rbrKnowledgeSoundnessWorstCase
+      (encode : (Fin k → F) → (ι → A))).toVerifier).rbrKnowledgeSoundness
       (WitIn := Witness (F := F) k) (WitOut := OutputWitness)
       init impl (outputRelationFor k (encode : (Fin k → F) → (ι → A)) δ)
       (Set.univ : Set ((OutputStatement × ∀ i, OutputOracleStatement i) ×
         OutputWitness))
       (fun i ↦ if i.1 = 0 then certifiedGammaError C δ else (1 - δ) ^ t) := by
   let _ := Fintype.ofFinite A
-  unfold Verifier.rbrKnowledgeSoundnessWorstCase
+  unfold Verifier.rbrKnowledgeSoundness
   refine ⟨rbrWitMid (F := F) k,
     rbrExtractor k t (encode : (Fin k → F) → (ι → A)) δ,
     rbrKnowledgeStateFunction k t (encode : (Fin k → F) → (ι → A)) δ init impl, ?_⟩
@@ -1401,33 +1394,6 @@ theorem oracleVerifier_rbrKnowledgeSoundnessWorstCase
       (transcript ⟨0, Nat.zero_lt_succ _⟩)
       (transcript ⟨1, Nat.succ_lt_succ (Nat.zero_lt_succ _)⟩)
   · exact absurd hi (by omega)
-
-omit [DecidableEq ι] [Fintype A] in
-/-- Averaged round-by-round knowledge soundness, retained under the established
-public API name as a corollary of the stronger worst-case-per-prefix theorem. -/
-theorem oracleVerifier_rbrKnowledgeSoundness
-    [SampleableType F] [SampleableType ι] [Nonempty ι] [Finite A]
-    {σ : Type} (init : ProbComp σ)
-    (impl : QueryImpl []ₒ (StateT σ ProbComp))
-    (C : ModuleCode ι F A) (δ : ℝ≥0)
-    (encode : (Fin k → F) →ₗ[F] (ι → A))
-    (hinj : Function.Injective encode)
-    (hC : Set.range encode = (C : Set (ι → A)))
-    (hδ_pos : 0 < δ)
-    (hδ_lt_min : δ <
-      (minRelHammingDistCode (C : Set (ι → A)) : ℝ≥0)) :
-    (oracleVerifier (k := k) (t := t)
-      (encode : (Fin k → F) → (ι → A))).rbrKnowledgeSoundness
-      (WitOut := OutputWitness) init impl
-      (outputRelationFor k (encode : (Fin k → F) → (ι → A)) δ)
-      (Set.univ : Set ((OutputStatement × ∀ i, OutputOracleStatement i) ×
-        OutputWitness))
-      (fun i ↦ if i.1 = 0 then certifiedGammaError C δ else (1 - δ) ^ t) := by
-  let _ := Fintype.ofFinite A
-  unfold OracleVerifier.rbrKnowledgeSoundness
-  exact Verifier.rbrKnowledgeSoundnessWorstCase_implies_rbrKnowledgeSoundness
-    init impl (oracleVerifier_rbrKnowledgeSoundnessWorstCase k t init impl C δ encode
-      hinj hC hδ_pos hδ_lt_min)
 
 end Protocol
 

@@ -103,10 +103,10 @@ private theorem extractionQueryBad_prob_le (hs : (∑ j, (s j).val) ≤ n)
     (f : (ω.subdomain 0).toFinset → F) (θ δ : ℝ)
     [SampleableType ((pSpec k (ω := ω) s l).Challenge (queryChallenge s l))]
     (tr : (pSpec k (ω := ω) s l).Transcript (queryChallenge (ω := ω) s l).val.castSucc)
-    (hsafe : ∀ i : Fin (k + 1), ¬ foldingBad s d l f θ i
+    (hsafe : ∀ i : Fin (k + 1), ¬ foldingBad s d l f θ 0 i
       (tr.restrict (by simp only [Fin.val_succ, Fin.val_castSucc,
         foldChallenge_val, queryChallenge_val]; omega)))
-    (hrecover : SafeHistory s d (queryHistory s l f tr) (queryFoldChallenges s l tr) θ →
+    (hrecover : SafeHistory s d (queryHistory s l f tr) (queryFoldChallenges s l tr) θ 0 →
       (finalPolynomial s (queryHistory s l f tr)).natDegree < d.val →
       (2 ^ n : ℝ) * (1 - min θ δ) ≤
         (acceptingQueries s hs (queryHistory s l f tr) (queryFoldChallenges s l tr)).card →
@@ -129,7 +129,7 @@ private theorem extractionQueryBad_prob_le (hs : (∑ j, (s j).val) ≤ n)
       apply verifyQueries_probability_le_of_density
       apply le_of_lt
       apply (div_lt_iff₀ (show (0 : ℝ) < 2 ^ n by positivity)).mpr
-      have hn := mt (hrecover (safeHistory_queryHistory s d l f θ tr hsafe) hd) (not_not.mpr hf)
+      have hn := mt (hrecover (safeHistory_queryHistory s d l f θ 0 tr hsafe) hd) (not_not.mpr hf)
       exact lt_of_not_ge (by simpa [mul_comm] using hn)
     · simp only [hd, false_and]
       simp
@@ -141,7 +141,7 @@ private def extractionBadEvent (hs : (∑ j, (s j).val) ≤ n) (θ : ℝ)
       (pSpec k (ω := ω) s l).Transcript (queryChallenge (ω := ω) s l).val.castSucc → Prop)
     (j : (pSpec k (ω := ω) s l).ChallengeIdx) (f : (ω.subdomain 0).toFinset → F)
     (tr : (pSpec k (ω := ω) s l).Transcript j.val.succ) : Prop :=
-  (∃ i, ∃ h : j = foldChallenge s l i, foldingBad s d l f θ i (h ▸ tr)) ∨
+  (∃ i, ∃ h : j = foldChallenge s l i, foldingBad s d l f θ 0 i (h ▸ tr)) ∨
     ∃ h : j = queryChallenge s l, extractionQueryBad s d l hs fails f (h ▸ tr)
 
 private theorem extractionBadEvent_fold (hs : (∑ j, (s j).val) ≤ n) (θ : ℝ)
@@ -150,7 +150,7 @@ private theorem extractionBadEvent_fold (hs : (∑ j, (s j).val) ≤ n) (θ : �
     (i : Fin (k + 1)) (f : (ω.subdomain 0).toFinset → F)
     (tr : (pSpec k (ω := ω) s l).Transcript (foldChallenge (ω := ω) s l i).val.succ) :
     extractionBadEvent s d l hs θ fails (foldChallenge s l i) f tr ↔
-      foldingBad s d l f θ i tr := by
+      foldingBad s d l f θ 0 i tr := by
   constructor
   · rintro (⟨j, h, hb⟩ | ⟨h, _⟩)
     · have hij := foldChallenge_injective s l h
@@ -180,7 +180,7 @@ private theorem extractionBadEvent_prob_le [SampleableType F]
     (fails : (f : (ω.subdomain 0).toFinset → F) →
       (pSpec k (ω := ω) s l).Transcript (queryChallenge (ω := ω) s l).val.castSucc → Prop)
     (hrecover : ∀ f tr,
-      SafeHistory s d (queryHistory s l f tr) (queryFoldChallenges s l tr) θ →
+      SafeHistory s d (queryHistory s l f tr) (queryFoldChallenges s l tr) θ 0 →
       (finalPolynomial s (queryHistory s l f tr)).natDegree < d.val →
       (2 ^ n : ℝ) * (1 - min θ δ) ≤
         (acceptingQueries s hs (queryHistory s l f tr) (queryFoldChallenges s l tr)).card →
@@ -195,8 +195,8 @@ private theorem extractionBadEvent_prob_le [SampleableType F]
       extractionBadEvent s d l hs θ fails j f (tr.concat c)] ≤
         (challengeError (ω := ω) s d l θ δ j : ENNReal) := by
   rcases challenge_cases s l j with ⟨i, rfl⟩ | rfl
-  · simpa only [extractionBadEvent_fold, challengeError_fold] using
-      foldingBad_prob_le s d l f θ i tr
+  · simpa only [extractionBadEvent_fold, challengeError_fold, foldingErrorLossy_zero] using
+      foldingBad_prob_le s d l f θ 0 i tr
   · simp only [extractionBadEvent_query, challengeError_query, ENNReal.coe_pow]
     apply extractionQueryBad_prob_le s d l hs fails f θ δ tr
     · intro i hb
@@ -213,7 +213,7 @@ private theorem extractionTerminalEvent_prob_le [SampleableType F]
     (fails : (f : (ω.subdomain 0).toFinset → F) →
       (pSpec k (ω := ω) s l).Transcript (queryChallenge (ω := ω) s l).val.castSucc → Prop)
     (hrecover : ∀ f tr,
-      SafeHistory s d (queryHistory s l f tr) (queryFoldChallenges s l tr) θ →
+      SafeHistory s d (queryHistory s l f tr) (queryFoldChallenges s l tr) θ 0 →
       (finalPolynomial s (queryHistory s l f tr)).natDegree < d.val →
       (2 ^ n : ℝ) * (1 - min θ δ) ≤
         (acceptingQueries s hs (queryHistory s l f tr) (queryFoldChallenges s l tr)).card →
@@ -273,7 +273,7 @@ private theorem knowledge_soundness_with_of_history_extractor
       (pSpec k (ω := ω) s l).Transcript (queryChallenge (ω := ω) s l).val.castSucc →
         Option (Witness F s d (0 : Fin (k + 2))))
     (hrecover : ∀ f tr,
-      SafeHistory s d (queryHistory s l f tr) (queryFoldChallenges s l tr) θ →
+      SafeHistory s d (queryHistory s l f tr) (queryFoldChallenges s l tr) θ 0 →
       (finalPolynomial s (queryHistory s l f tr)).natDegree < d.val →
       (2 ^ n : ℝ) * (1 - min θ δ) ≤
         (acceptingQueries s (round_bound hdom) (queryHistory s l f tr)
@@ -310,7 +310,7 @@ private theorem knowledge_soundness_with_of_history_extractor
     exact hfail p hp (mem_inputRelation_of_relHammingDist_le s d hdom δ stmt p hdist)
   · intro Aux stmt wit prover os
     have hrec : ∀ f tr,
-        SafeHistory s d (queryHistory s l f tr) (queryFoldChallenges s l tr) θ →
+        SafeHistory s d (queryHistory s l f tr) (queryFoldChallenges s l tr) θ 0 →
         (finalPolynomial s (queryHistory s l f tr)).natDegree < d.val →
         (2 ^ n : ℝ) * (1 - min θ δ) ≤
           (acceptingQueries s (round_bound hdom) (queryHistory s l f tr)
@@ -347,7 +347,13 @@ theorem knowledge_soundness_with
     funext (initialWord_queryHistory s l f tr)
   simpa only [hf] using hdist.trans (min_le_right θ (δ : ℝ))
 
-/-- The measured prefix extractor witnesses straightline knowledge soundness. -/
+/-- The measured prefix extractor witnesses straightline knowledge soundness.
+
+The existential statement forgets the extractor, and with it the operation-count bounds proved for
+its measured program `Extractor.extractProgram`; it has the content of relation soundness
+(`Verifier.knowledgeSoundness_iff_relationSoundness`). The extraction guarantee is
+`knowledge_soundness_with` together with those bounds, which do not charge the history
+reconstruction outside that program. -/
 theorem knowledge_soundness
     (hdom : 2 ^ (∑ j, (s j).val) * d.val ≤ 2 ^ n)
     (θ : ℝ) (δ : ℝ≥0)

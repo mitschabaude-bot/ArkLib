@@ -150,7 +150,7 @@ theorem core_ineq (ρ : ℝ) (hρ0 : 0 < ρ) (_hρ1 : ρ < 1) (cp : ℕ) (_hcp :
 
 /-- For every rate `ρ ∈ (0,1)` and `c ∈ ℕ`, there is a constant `Kc > 0` and a threshold
 `b₀` such that
-for every `b ≥ b₀` the parameters `a`, `k = ⌈ρ·2^{a+b}⌉`, `khat = ⌈k/2^a⌉` satisfy the
+for every `b ≥ b₀` the parameters `a`, `k = ⌊ρ·2^{a+b}⌋ + 1`, `khat = ⌈k/2^a⌉` satisfy the
 hypotheses of `choose_le_Lambda_rs_vanilla_of_smooth` at `d = 2^a`, `h = 2^b`,
 `n = 2^{a+b}`, together with the rate
 band, the `O(1/log n)` slack bound, and the list target `n^c ≤ C(2^b, khat)`. -/
@@ -192,7 +192,7 @@ theorem exists_asymptotic_params (ρ : ℝ) (hρ0 : 0 < ρ) (hρ1 : ρ < 1) (c :
   obtain ⟨b₀, hb₀⟩ := eventually_atTop.mp (ev1.and (ev2.and (ev3.and ev4)))
   refine ⟨b₀, fun b hbge => ?_⟩
   obtain ⟨P1, P2, P3, P4⟩ := hb₀ b hbge
-  -- opaque definitions (avoid `set`-let whnf blowups).
+  -- definitions that are opaque (avoid `set`-let whnf blowups).
   obtain ⟨Kf, hKfdef⟩ : ∃ Kf : ℕ, Kf = ⌊Kc * (2 : ℝ) ^ b⌋₊ := ⟨_, rfl⟩
   have hbKf : b ≤ Kf := by rw [hKfdef]; exact Nat.le_floor P1
   obtain ⟨a, hadef⟩ : ∃ a : ℕ, a = Kf - b := ⟨_, rfl⟩

@@ -28,8 +28,9 @@ This directory contains various utility scripts for the ArkLib project.
 - **`FriExtractorRuntime.lean`** (`lake exe fri-extractor-runtime`) - Compiled checks of the
   measured FRI extractor, immutable-input guards, and exact arithmetic and word-read counts.
 - **`SumcheckRuntime.lean`** (`lake exe sumcheck-runtime`) - Compiled checks of CompPoly-backed
-  round messages and the honest multivariate prover in the shared native Sumcheck executor,
-  including continuation effects, abort, original-oracle evaluation and zero remaining rounds.
+  round messages and the honest multivariate prover in the shared interaction-layer Sumcheck
+  executor, including continuation effects, abort, original-oracle evaluation and zero remaining
+  rounds.
 - **`HachiRuntime.lean`** (`lake exe hachi-runtime`) - Compiled small-parameter checks that the
   nonrecursive Hachi honest-prover path executes: the balanced committer, the computable honest
   lift quotient, the concrete Ajtai lift commitment, and the terminal reveal-and-check. `--full`
@@ -39,8 +40,11 @@ This directory contains various utility scripts for the ArkLib project.
 - **`check-docs-integrity.py`** - Check the canonical agent guide and local documentation links
 - **`LintStyle.lean`** and **`LintStyle/Checks.lean`** (`lake exe lint-style`) - Lean-native,
   exception-free source policy, including import discipline, whitespace, headers, line/file size,
-  and hazardous-Unicode checks. It verifies that every tracked Lean file under `ArkLib/` and `ArkLibTest/` file is in the
-  `ArkLib.lean` closure, and independently rejects forbidden option and `nolint`-attribute syntax
+  hazardous-Unicode checks, and commented-out declarations (`ERR_COMMENT_DECL`). Delete commented
+  declaration code or restore it; keyword-led prose, strings, and block comments remain allowed.
+  The comment fixtures in `LintStyleFixtures/` run with `lake exe lint-style --self-test` and
+  `test-lint-plugin.sh`. It verifies that every tracked Lean file under `ArkLib/` and `ArkLibTest/`
+  is in the `ArkLib.lean` closure, and independently rejects forbidden option and `nolint`-attribute syntax
   even if module code captures diagnostics or mutates Lean's in-process linter registry. The same
   lexical pass rejects raised elaboration budgets (`set_option maxHeartbeats`, `maxRecDepth`, and
   `synthInstance.*`, code `ERR_BUDGET`): make the proof cheaper instead. This

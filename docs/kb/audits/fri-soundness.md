@@ -31,7 +31,12 @@ author credit are recorded on the paper page.
 | Literal measured extractor | `Fri.Spec.Extractor.extractHistory_eq_profile` | Public result is the first projection of the measured program |
 | End-to-end knowledge soundness with named extractor | `Fri.Spec.knowledge_soundness_with` | Every input statement; actual logged knowledge game; extraction failure includes `none` |
 | End-to-end existential knowledge soundness | `Fri.Spec.knowledge_soundness` | The same specific straightline extractor witnesses existence |
-| End-to-end round-by-round soundness | `Fri.Spec.rbr_soundness` | Existing `OracleVerifier.rbrSoundness` and original input/output relations |
+| End-to-end round-by-round soundness | `Fri.Spec.rbr_soundness` | Fixed-prefix `OracleVerifier.rbrSoundness` and original input/output relations |
+| Lossy folding failure implies lossy MCA failure | `Fri.isLossyMCA_of_lossyFoldingAgreementFailure` | Loss is the same fraction of the folded and original domains |
+| Lossy folding-round probability | `Fri.lossyFoldingAgreementFailure_prob_le_powers` | Powers-generator `lossyMcaError` |
+| Lossy agreement propagation | `Fri.FoldTrace.exists_codeword_agree_on_lossy` | Agreement off at most `numFolds · loss · 2^n` accepting queries |
+| Lossy query-round probability | `Fri.FoldTrace.query_soundness_lossy` | `(1 - min (θ - (numFolds - 1) · loss) (δ - numFolds · loss))^t` |
+| Lossy end-to-end soundness | `Fri.Spec.soundness_proximity_lossy`, `Fri.Spec.rbr_soundness_lossy` | `loss ≥ 0`; the lossless theorems are the `loss = 0` case |
 
 ## Parameters and conclusions
 
@@ -56,6 +61,8 @@ positions recovers that codeword, and any query at a disagreement position is re
 The theorem permits real parameters outside the paper's unit intervals whenever its
 hypotheses hold, and in particular covers the paper's full parameter range.
 
+From lossy MCA, `Fri.Spec.soundnessErrorLossy θ δ loss` is the sum of the powers-generator lossy MCA errors over the `k + 1` folds, plus `Real.toNNReal (1 - min (θ - k · loss) (δ - (k + 1) · loss)) ^ l`. Each fold loses agreement on at most `loss · 2^n` accepting queries, so the agreement threshold must hold after the `k` losses of the inner folds and the final codeword agrees off at most `(k + 1) · loss · 2^n` of them. The derivation is in the module docs of `Fri/QuerySoundness.lean`. The decoding consequences of Corollary 5.6 are only stated for lossless safety.
+
 ## Specification properties
 
 - The non-final honest prover retains `i + 1` old words at round `i`, including the original
@@ -78,7 +85,7 @@ hypotheses hold, and in particular covers the paper's full parameter range.
    a bad challenge has occurred. Prover messages preserve a false state because they cannot
    alter earlier challenge prefixes.
 3. `Spec/RoundSoundness` and `BadEvents` bound each fresh bad event conditional on no earlier
-   one. The query event includes the final degree guard. The worst-case-prefix interface
+   one. The query event includes the final degree guard. The fixed-prefix interface
    supplies round-by-round soundness.
 4. `OracleReduction/Security/Accumulation` sums conditional errors along `Prover.runToRound`,
    retaining private prover state and shared oracle state. Its terminal bound covers
@@ -166,6 +173,17 @@ subtractions consume one `I` budget. The final polynomial consumes one `E(d)` pe
 only at the final round. `profile_extractProgram_apply_le` separately bounds every coefficient,
 node-cache, value-cache, and metadata coordinate by the explicit `extractorProfileBound` vector.
 Its transparent definition composes initialization, the complete scan, and final interpolation.
+
+`Fri.Spec.knowledgeSoundnessWithResources_extract` combines the knowledge game for the same
+extractor with the `extractorProfileBound` vector as its budget, through
+`Verifier.knowledgeSoundnessWithResources`. The closed forms in the table, including the tighter
+retained-word bound, remain separate theorems about the same program. Its measured program
+`Extractor.measuredProgram` takes the retained history and folding challenges as its view;
+reconstructing them from the input statement and transcript prefix is outside the charged program.
+The theorem proves that `extract` is the execution of `extractProgram` on that view, and bounds
+every path of the instruction program over all responses. Because every instruction response is
+a certified singleton, the program has one path, whose cost is the recorded profile. The
+exclusions listed above apply unchanged.
 
 Under the reduction's `D ≤ N` constraint these envelopes are polynomial in `N`, rather than in
 `log N`. They do not imply a cryptographic polynomial-time or bit-runtime bound. The compiled

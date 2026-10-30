@@ -184,6 +184,52 @@ theorem sum_johnsonFinRowWeight_slots {n : ℕ} (m h : ℕ) :
     _ = johnsonRowSlotCount n m h := by
       rw [johnsonRowSlotCount, ← Fin.sum_univ_eq_sum_range]
 
+/-- Enumerating the columns preserves the curve source-slot count at challenge degree `ℓ` and
+height `H`. -/
+theorem sum_johnsonColumns_curveSlots (X D μ ℓ H : ℕ) :
+    Finset.univ.sum (fun j : Fin (Fintype.card (JohnsonColumnIndex X D μ)) ↦
+      H + 1 - ℓ * (johnsonColumns X D μ j).y₀) = johnsonCurveSourceSlotCount X D μ ℓ H := by
+  let e := Fintype.equivFin (JohnsonColumnIndex X D μ)
+  calc
+    _ = Finset.univ.sum (fun q : JohnsonColumnIndex X D μ ↦ H + 1 - ℓ * q.1.val) := by
+      rw [← e.sum_comp]
+      apply Finset.sum_congr rfl
+      intro q _
+      simp [e, johnsonColumns]
+    _ = Finset.univ.sum (fun j : Fin (μ + 1) ↦
+        (X - D * j.val) * (H + 1 - ℓ * j.val)) := by
+      rw [Fintype.sum_sigma]
+      apply Finset.sum_congr rfl
+      intro j _
+      simp
+    _ = johnsonCurveSourceSlotCount X D μ ℓ H := by
+      rw [johnsonCurveSourceSlotCount, ← Fin.sum_univ_eq_sum_range]
+
+/-- Enumerating the triangular rows preserves the curve row-slot count at challenge degree `ℓ`
+and height `H`. -/
+theorem sum_johnsonFinRowWeight_curveSlots {n : ℕ} (m ℓ H : ℕ) :
+    Finset.univ.sum (fun i : Fin (Fintype.card (JohnsonRowIndex n m)) ↦
+      H + 1 - ℓ * johnsonFinRowWeight m i) = johnsonCurveRowSlotCount n m ℓ H := by
+  let e := Fintype.equivFin (JohnsonRowIndex n m)
+  calc
+    _ = Finset.univ.sum (fun row : JohnsonRowIndex n m ↦ H + 1 - ℓ * row.2.1.val) := by
+      rw [← e.sum_comp]
+      apply Finset.sum_congr rfl
+      intro row _
+      simp [e, johnsonFinRowWeight]
+    _ = n * Finset.univ.sum (fun q : JohnsonLocalRowIndex m ↦ H + 1 - ℓ * q.1.val) := by
+      rw [Fintype.sum_prod_type]
+      simp
+    _ = n * Finset.univ.sum (fun q : Fin m ↦
+        (m - q.val) * (H + 1 - ℓ * q.val)) := by
+      congr 1
+      rw [Fintype.sum_sigma]
+      apply Finset.sum_congr rfl
+      intro q _
+      simp
+    _ = johnsonCurveRowSlotCount n m ℓ H := by
+      rw [johnsonCurveRowSlotCount, ← Fin.sum_univ_eq_sum_range]
+
 private theorem exists_johnsonLocalRow_of_triangular {m : ℕ} (row : LowContactIndex 0 m)
     (htri : row.1 (localE 0) ≤ row.1 (localT 0)) :
     ∃ q : JohnsonLocalRowIndex m, johnsonLocalRow m q = row := by
@@ -265,14 +311,15 @@ theorem johnsonFinMatrix_kernel_iff {F : Type*} [Field F] {n : ℕ}
     funext i
     exact congrFun h ((Fintype.equivFin (JohnsonRowIndex n m)).symm i)
 
-/-- Every triangular matrix entry has the exact shifted challenge-degree bound. -/
+/-- For received values of challenge degree at most `ℓ`, every triangular matrix entry has the
+exact shifted challenge-degree bound `ℓ (j - e)` for source grade `j` and row grade `e`. -/
 theorem johnsonConstraintMatrix_degree_le {F : Type*} [Field F] {n : ℕ}
-    (X D μ m : ℕ) (centers : Fin n → F) (w : Fin n → F[X])
-    (hw : ∀ i, (w i).natDegree ≤ 1) (row : JohnsonRowIndex n m)
+    (X D μ m ℓ : ℕ) (centers : Fin n → F) (w : Fin n → F[X])
+    (hw : ∀ i, (w i).natDegree ≤ ℓ) (row : JohnsonRowIndex n m)
     (j : Fin (Fintype.card (JohnsonColumnIndex X D μ))) :
     (johnsonConstraintMatrix X D μ m centers w row j).natDegree ≤
-      (johnsonColumns X D μ j).y₀ - row.2.1.val := by
-  have h := natDegree_localConstraintMatrix_le_sub m 1
+      ℓ * ((johnsonColumns X D μ j).y₀ - row.2.1.val) := by
+  have h := natDegree_localConstraintMatrix_le_sub m ℓ
     centers w hw (johnsonColumns X D μ)
     (row.1, johnsonLocalRow m row.2) j
   simpa [johnsonConstraintMatrix, johnsonLocalRow_localJetDegree] using h
@@ -288,16 +335,17 @@ theorem johnsonConstraintMatrix_eq_zero_of_grade_lt {F : Type*} [Field F] {n : �
     (fun i ↦ Polynomial.C (centers i)) w (johnsonColumns X D μ)
   simpa [johnsonColumns_totalJetDegree, johnsonLocalRow_localJetDegree] using hgrade
 
-/-- Flattened entries satisfy the shifted degree premise. -/
+/-- For received values of challenge degree at most `ℓ`, flattened entries satisfy the shifted
+degree premise `ℓ (j - e)`. -/
 theorem johnsonFinMatrix_degree_le {F : Type*} [Field F] {n : ℕ}
-    (X D μ m : ℕ) (centers : Fin n → F) (w : Fin n → F[X])
-    (hw : ∀ i, (w i).natDegree ≤ 1)
+    (X D μ m ℓ : ℕ) (centers : Fin n → F) (w : Fin n → F[X])
+    (hw : ∀ i, (w i).natDegree ≤ ℓ)
     (i : Fin (Fintype.card (JohnsonRowIndex n m)))
     (j : Fin (Fintype.card (JohnsonColumnIndex X D μ))) :
     (johnsonFinMatrix X D μ m centers w i j).natDegree ≤
-      (johnsonColumns X D μ j).y₀ - johnsonFinRowWeight m i := by
+      ℓ * ((johnsonColumns X D μ j).y₀ - johnsonFinRowWeight m i) := by
   simpa [johnsonFinMatrix, johnsonFinRowWeight] using
-    johnsonConstraintMatrix_degree_le X D μ m centers w hw
+    johnsonConstraintMatrix_degree_le X D μ m ℓ centers w hw
       ((Fintype.equivFin (JohnsonRowIndex n m)).symm i) j
 
 /-- Flattened rows above the source grade vanish. -/
@@ -474,7 +522,7 @@ theorem exists_johnson_symbolic_certificate
     (fun v hv ↦ (johnsonFinMatrix_kernel_iff Xc D μ m (fun i ↦ centers i) w v).mp hv)
     (by
       intro i j _
-      have hh := johnsonFinMatrix_degree_le Xc D μ m (fun i ↦ centers i) w
+      have hh := johnsonFinMatrix_degree_le Xc D μ m 1 (fun i ↦ centers i) w
         (fun i ↦ natDegree_receivedLine_le (f i) (g i)) i j
       simpa only [columns, one_mul, johnsonColumns_totalJetDegree] using hh)
     (by
