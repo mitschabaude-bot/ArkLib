@@ -891,6 +891,7 @@ public import ArkLib.ProofSystem.Fri.FoldingSoundness
 public import ArkLib.ProofSystem.Fri.Interaction.Completeness
 public import ArkLib.ProofSystem.Fri.Interaction.Inject
 public import ArkLib.ProofSystem.Fri.Interaction.Protocol
+public import ArkLib.ProofSystem.Fri.Interaction.QueryKnowledge
 public import ArkLib.ProofSystem.Fri.Interaction.RoundKnowledge
 public import ArkLib.ProofSystem.Fri.Interaction.Schedule
 public import ArkLib.ProofSystem.Fri.Projection
