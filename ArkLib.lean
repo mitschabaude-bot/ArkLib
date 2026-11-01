@@ -737,6 +737,7 @@ public import ArkLib.Interaction.Oracle.Runtime
 public import ArkLib.Interaction.Oracle.RuntimeSoundness
 public import ArkLib.Interaction.Oracle.Security.BcsCertificate
 public import ArkLib.Interaction.Oracle.Security.BcsCodec
+public import ArkLib.Interaction.Oracle.Security.BcsFill
 public import ArkLib.Interaction.Oracle.Security.BcsProtocol
 public import ArkLib.Interaction.Oracle.Security.BcsSimulation
 public import ArkLib.Interaction.Oracle.Security.DecodedChallenges
