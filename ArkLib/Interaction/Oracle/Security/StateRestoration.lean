@@ -1,31 +1,34 @@
 /-
 Copyright (c) 2026 ArkLib Contributors. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
-Authors: Quang Dao
+Authors: Quang Dao, Gregor Mitscha-Baude
 -/
 module
 
 public import ArkLib.Interaction.Oracle.Security.Knowledge
-public import ArkLib.Interaction.Oracle.Protocol
+public import ArkLib.Interaction.Oracle.PublicCoin
 public import VCVio.OracleComp.QueryTracking.RandomOracle.FreshQuery
 
 /-!
 # Backward extraction in the state-restoration experiment
 
-A public-coin oracle protocol whose rounds are a function of its input is presented using the
-existing protocol tree: input `z` runs `protocol (rounds z)`. A restoration key is an input `z`
-together with a salted prefix of `rounds z`, which fixes the round, the prover-message prefix, and
-the salt prefix; the input is the outermost component. Previous verifier challenges are
-deliberately absent from the key. A key's knowledge state reconstructs its strict ancestors from
-the same table, and changing its own response cannot change that state.
+The protocol of input `z` is `protocol z`, presented as public-coin by `coin z`: after each
+challenge its shape does not depend on the challenge, though it may depend on the input and on
+the prover's public moves. A restoration key is an input `z` together with a salted prefix of
+`coin z` ending at a challenge: the prover's public moves and oracle payloads up to that
+challenge, and a salt at each challenge up to and including it, with the earlier challenges
+erased. The input is the outermost component. A key's knowledge state reconstructs its strict
+ancestors' challenges from the same table, and changing its own response cannot change that
+state.
 
 For an arbitrary adaptive adversary, completion reads the selected transcript's challenges from
-the same cached oracle. A valid terminal knowledge witness whose backward extraction fails has
-probability at most `(Q + k) * error`, where every input has at most `k` rounds. Inputs and salts
-may have infinite types; challenges have finite nonempty uniform samplers. The probability proof
-allows out-of-order and repeated queries.
-This module proves the knowledge bound on execution paths. The concrete verifier realization and
-its terminal witness relations are separate endpoint obligations, not assumed execution equations.
+the same cached oracle (`complete`), and a valid terminal knowledge witness whose backward
+extraction fails identifies a bad key among the keys it read (`restored_bad_trace`). The
+probability bounds that follow are in `StateRestorationBudget`. Inputs, salts and prover moves may
+have infinite types; challenges have finite nonempty uniform samplers.
+
+`Round` and `protocol` give the fixed-shape fragment of alternating oracle messages and
+challenges, presented by `Round.coin`.
 -/
 
 @[expose] public section
@@ -41,13 +44,12 @@ structure Round where
   Challenge : Type
   interface : OracleInterface Message
   decEqMessage : DecidableEq Message
-  finiteMessage : Finite Message
   finiteChallenge : Finite Challenge
   nonemptyChallenge : Nonempty Challenge
   sampleChallenge : SampleableType Challenge
 
-attribute [instance] Round.decEqMessage Round.finiteMessage Round.finiteChallenge
-  Round.nonemptyChallenge Round.sampleChallenge
+attribute [instance] Round.decEqMessage Round.finiteChallenge Round.nonemptyChallenge
+  Round.sampleChallenge
 
 /-- The fixed presentation uses oracle-message and public-receiver nodes. -/
 def protocol : List Round → Protocol
@@ -55,117 +57,136 @@ def protocol : List Round → Protocol
   | round :: rounds => .oracleWith round.Message round.interface
       (.public .receiver round.Challenge (fun _ => protocol rounds))
 
-/-- A salted prefix encodes its round by its depth and retains each prover message and salt
-through that round. No earlier verifier response is part of a prefix. -/
-@[reducible] def Prefix (Salt : Type) : List Round → Type
-  | [] => Empty
-  | round :: rounds => (round.Message × Salt) ⊕ (round.Message × Salt × Prefix Salt rounds)
+/-- Alternating oracle messages and challenges are public-coin. -/
+def Round.coin : (rounds : List Round) → PublicCoin (protocol rounds)
+  | [] => .done
+  | _ :: rounds => .oracle (.challenge (Round.coin rounds))
+
+/-! ### Keys -/
+
+/-- A salted prefix ending at a challenge: the prover's moves and oracle payloads before it, and
+a salt at each challenge up to and including it. No verifier challenge is part of a prefix. -/
+@[reducible] def Prefix (Salt : Type) {protocol : Protocol} (coin : PublicCoin protocol) : Type :=
+  PublicCoin.rec (motive := fun _ _ => Type) Empty
+    (fun {Moves} _ _ _ prefixes => (move : Moves) × prefixes move)
+    (fun {Messages} _ _ _ _ prefixes => Messages × prefixes)
+    (fun _ prefixes => Salt ⊕ (Salt × prefixes)) coin
 
 namespace Prefix
 
 variable {Salt : Type}
 
-/-- The first round prefix for this prover message and salt. -/
-@[match_pattern, reducible] def here {round : Round} {rounds : List Round}
-    (message : round.Message) (salt : Salt) : Prefix Salt (round :: rounds) :=
-  Sum.inl ⟨message, salt⟩
-
-/-- A later round prefix, retaining this earlier prover message and salt. -/
-@[match_pattern, reducible] def later {round : Round} {rounds : List Round}
-    (message : round.Message) (salt : Salt) (pre : Prefix Salt rounds) :
-    Prefix Salt (round :: rounds) := Sum.inr ⟨message, salt, pre⟩
-
 instance instDecidableEq [DecidableEq Salt] :
-    (rounds : List Round) → DecidableEq (Prefix Salt rounds)
-  | [] => inferInstanceAs (DecidableEq Empty)
-  | round :: rounds =>
-      letI := instDecidableEq rounds
-      inferInstanceAs (DecidableEq ((round.Message × Salt) ⊕
-        (round.Message × Salt × Prefix Salt rounds)))
+    {protocol : Protocol} → (coin : PublicCoin protocol) → DecidableEq (Prefix Salt coin)
+  | _, .done => fun pre => nomatch pre
+  | _, @PublicCoin.sender Moves _ _ next =>
+      letI := fun move => instDecidableEq (next move)
+      inferInstanceAs (DecidableEq ((move : Moves) × Prefix Salt (next move)))
+  | _, @PublicCoin.oracle Messages _ _ _ next =>
+      letI := instDecidableEq next
+      inferInstanceAs (DecidableEq (Messages × Prefix Salt next))
+  | _, @PublicCoin.challenge _ _ _ _ _ next =>
+      letI := instDecidableEq next
+      inferInstanceAs (DecidableEq (Salt ⊕ (Salt × Prefix Salt next)))
 
-instance instFinite [Finite Salt] : (rounds : List Round) → Finite (Prefix Salt rounds)
-  | [] => inferInstanceAs (Finite Empty)
-  | round :: rounds =>
-      letI : Finite (Prefix Salt rounds) := instFinite rounds
-      inferInstanceAs (Finite ((round.Message × Salt) ⊕
-        (round.Message × Salt × Prefix Salt rounds)))
+/-- The answer type of a prefix is the alphabet of the challenge it ends at. -/
+@[reducible] def Challenge {protocol : Protocol} {coin : PublicCoin protocol} :
+    Prefix Salt coin → Type :=
+  PublicCoin.rec (motive := fun _ coin => Prefix Salt coin → Type) (fun pre => nomatch pre)
+    (fun _ challenge pre => challenge pre.1 pre.2) (fun _ challenge pre => challenge pre.2)
+    (@fun Challenge _ _ _ _ _ challenge pre => Sum.casesOn pre (fun _ => Challenge)
+      fun pre => challenge pre.2) coin
 
-/-- The answer type is the challenge alphabet of the prefix's round. -/
-@[reducible] def Challenge : {rounds : List Round} → Prefix Salt rounds → Type
-  | [], pre => nomatch pre
-  | round :: _, .inl _ => round.Challenge
-  | _ :: _, .inr (_, _, pre) => pre.Challenge
+/-- The protocol following the challenge a prefix ends at. -/
+@[reducible] noncomputable def rest {protocol : Protocol} {coin : PublicCoin protocol} :
+    Prefix Salt coin → Protocol :=
+  PublicCoin.rec (motive := fun _ coin => Prefix Salt coin → Protocol) (fun pre => nomatch pre)
+    (fun _ rest pre => rest pre.1 pre.2) (fun _ rest pre => rest pre.2)
+    (@fun _ _ _ _ restProtocol _ rest pre => Sum.casesOn pre (fun _ => restProtocol)
+      fun pre => rest pre.2) coin
 
-/-- Rounds following the challenge addressed by this prefix. -/
-def remaining : {rounds : List Round} → Prefix Salt rounds → List Round
-  | [], pre => nomatch pre
-  | _ :: rounds, .inl _ => rounds
-  | _ :: _, .inr (_, _, pre) => pre.remaining
+/-- The challenge node a prefix ends at, with its salts forgotten. -/
+@[reducible] noncomputable def node {protocol : Protocol} {coin : PublicCoin protocol} :
+    Prefix Salt coin → Prefix PUnit coin :=
+  PublicCoin.rec (motive := fun _ coin => Prefix Salt coin → Prefix PUnit coin)
+    (fun pre => nomatch pre)
+    (fun _ node pre => ⟨pre.1, node pre.1 pre.2⟩) (fun _ node pre => ⟨pre.1, node pre.2⟩)
+    (fun _ node pre => Sum.casesOn (motive := fun _ => PUnit ⊕ (PUnit × _)) pre
+      (fun _ => .inl PUnit.unit) fun pre => .inr ⟨PUnit.unit, node pre.2⟩) coin
 
-instance {rounds : List Round} (pre : Prefix Salt rounds) : Finite pre.Challenge := by
-  induction rounds with
-  | nil => exact pre.elim
-  | cons round rounds ih =>
-      cases pre with
-      | inl _ => exact round.finiteChallenge
-      | inr data => exact ih data.2.2
+instance instFinite : {protocol : Protocol} → {coin : PublicCoin protocol} →
+    (pre : Prefix Salt coin) → Finite pre.Challenge
+  | _, .done, pre => nomatch pre
+  | _, @PublicCoin.sender _ _ _ _, ⟨_, pre⟩ => instFinite pre
+  | _, @PublicCoin.oracle _ _ _ _ _, ⟨_, pre⟩ => instFinite pre
+  | _, @PublicCoin.challenge _ _ _ _ _ _, .inl _ => inferInstance
+  | _, @PublicCoin.challenge _ _ _ _ _ _, .inr ⟨_, pre⟩ => instFinite pre
 
-instance {rounds : List Round} (pre : Prefix Salt rounds) : Nonempty pre.Challenge := by
-  induction rounds with
-  | nil => exact pre.elim
-  | cons round rounds ih =>
-      cases pre with
-      | inl _ => exact round.nonemptyChallenge
-      | inr data => exact ih data.2.2
+instance instNonempty : {protocol : Protocol} → {coin : PublicCoin protocol} →
+    (pre : Prefix Salt coin) → Nonempty pre.Challenge
+  | _, .done, pre => nomatch pre
+  | _, @PublicCoin.sender _ _ _ _, ⟨_, pre⟩ => instNonempty pre
+  | _, @PublicCoin.oracle _ _ _ _ _, ⟨_, pre⟩ => instNonempty pre
+  | _, @PublicCoin.challenge _ _ _ _ _ _, .inl _ => inferInstance
+  | _, @PublicCoin.challenge _ _ _ _ _ _, .inr ⟨_, pre⟩ => instNonempty pre
 
-instance {rounds : List Round} (pre : Prefix Salt rounds) : SampleableType pre.Challenge := by
-  induction rounds with
-  | nil => exact pre.elim
-  | cons round rounds ih =>
-      cases pre with
-      | inl _ => exact round.sampleChallenge
-      | inr data => exact ih data.2.2
+instance instSampleableType : {protocol : Protocol} → {coin : PublicCoin protocol} →
+    (pre : Prefix Salt coin) → SampleableType pre.Challenge
+  | _, .done, pre => nomatch pre
+  | _, @PublicCoin.sender _ _ _ _, ⟨_, pre⟩ => instSampleableType pre
+  | _, @PublicCoin.oracle _ _ _ _ _, ⟨_, pre⟩ => instSampleableType pre
+  | _, @PublicCoin.challenge _ _ _ _ _ _, .inl _ => inferInstance
+  | _, @PublicCoin.challenge _ _ _ _ _ _, .inr ⟨_, pre⟩ => instSampleableType pre
 
 end Prefix
 
-/-- A restoration key: an input and a salted prefix of that input's rounds. -/
-abbrev Key (Input Salt : Type) (rounds : Input → List Round) :=
-  (z : Input) × Prefix Salt (rounds z)
+section
 
-/-- The answer type of a key is the challenge alphabet of its round. -/
-@[reducible] def Key.Challenge {Input Salt : Type} {rounds : Input → List Round}
-    (key : Key Input Salt rounds) : Type :=
+variable {Input : Type} {protocol : Input → Protocol}
+
+/-- A restoration key: an input and a salted prefix of that input's protocol. -/
+abbrev Key (Input Salt : Type) {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z)) :=
+  (z : Input) × Prefix Salt (coin z)
+
+/-- The answer type of a key is the challenge alphabet of its node. -/
+@[reducible] def Key.Challenge {Salt : Type} {coin : (z : Input) → PublicCoin (protocol z)}
+    (key : Key Input Salt coin) : Type :=
   key.2.Challenge
 
-instance {Input Salt : Type} {rounds : Input → List Round} (key : Key Input Salt rounds) :
-    Finite key.Challenge :=
+instance {Salt : Type} {coin : (z : Input) → PublicCoin (protocol z)}
+    (key : Key Input Salt coin) : Finite key.Challenge :=
   inferInstanceAs (Finite key.2.Challenge)
 
-instance {Input Salt : Type} {rounds : Input → List Round} (key : Key Input Salt rounds) :
-    Nonempty key.Challenge :=
+instance {Salt : Type} {coin : (z : Input) → PublicCoin (protocol z)}
+    (key : Key Input Salt coin) : Nonempty key.Challenge :=
   inferInstanceAs (Nonempty key.2.Challenge)
 
-instance {Input Salt : Type} {rounds : Input → List Round} (key : Key Input Salt rounds) :
-    SampleableType key.Challenge :=
+instance {Salt : Type} {coin : (z : Input) → PublicCoin (protocol z)}
+    (key : Key Input Salt coin) : SampleableType key.Challenge :=
   inferInstanceAs (SampleableType key.2.Challenge)
 
-/-- A deterministic complete answer assignment on the prefixes of one round list. -/
-abbrev PrefixTable (Salt : Type) (rounds : List Round) :=
-  (pre : Prefix Salt rounds) → pre.Challenge
+end
+
+/-- A deterministic complete answer assignment on the prefixes of one protocol. -/
+abbrev PrefixTable (Salt : Type) {protocol : Protocol} (coin : PublicCoin protocol) :=
+  (pre : Prefix Salt coin) → pre.Challenge
 
 /-- A deterministic complete answer assignment, used to prove properties of cached execution. -/
-abbrev Table (Input Salt : Type) (rounds : Input → List Round) :=
-  (key : Key Input Salt rounds) → key.Challenge
+abbrev Table (Input Salt : Type) {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z)) :=
+  (key : Key Input Salt coin) → key.Challenge
 
 /-- The answers of a complete table at the keys of one input. -/
-abbrev Table.fibre {Input Salt : Type} {rounds : Input → List Round}
-    (table : Table Input Salt rounds) (z : Input) : PrefixTable Salt (rounds z) :=
+abbrev Table.fibre {Input Salt : Type} {protocol : Input → Protocol}
+    {coin : (z : Input) → PublicCoin (protocol z)}
+    (table : Table Input Salt coin) (z : Input) : PrefixTable Salt (coin z) :=
   fun pre => table ⟨z, pre⟩
 
 /-- Updating a table at a key of input `z` updates the fibre of `z` at that key's prefix. -/
-theorem Table.fibre_update {Input Salt : Type} {rounds : Input → List Round}
-    [DecidableEq Input] [DecidableEq Salt]
-    (table : Table Input Salt rounds) (z : Input) (pre : Prefix Salt (rounds z))
+theorem Table.fibre_update {Input Salt : Type} {protocol : Input → Protocol}
+    {coin : (z : Input) → PublicCoin (protocol z)} [DecidableEq Input] [DecidableEq Salt]
+    (table : Table Input Salt coin) (z : Input) (pre : Prefix Salt (coin z))
     (value : pre.Challenge) :
     Table.fibre (Function.update table ⟨z, pre⟩ value) z =
       Function.update (Table.fibre table z) pre value := by
@@ -173,448 +194,418 @@ theorem Table.fibre_update {Input Salt : Type} {rounds : Input → List Round}
   by_cases h : other = pre
   · subst other
     simp [Table.fibre]
-  · have hkey : (⟨z, other⟩ : Key Input Salt rounds) ≠ ⟨z, pre⟩ := by
+  · have hkey : (⟨z, other⟩ : Key Input Salt coin) ≠ ⟨z, pre⟩ := by
       intro heq
       exact h (eq_of_heq (Sigma.mk.inj heq).2)
     simp only [Table.fibre, Function.update_of_ne hkey, Function.update_of_ne h]
 
+/-! ### Reindexed oracle access -/
+
+/-- Answer queries at `q` by querying `f q`, whose answer type is the same. -/
+def reindexQuery {D D' : Type} {R : D → Type} (f : D' → D) :
+    QueryImpl (OracleSpec.ofFn fun q => R (f q)) (OracleComp (OracleSpec.ofFn R)) :=
+  fun q => liftM ((OracleSpec.ofFn R).query (f q))
+
+theorem evalWithAnswerFn_reindexQuery {D D' A : Type} {R : D → Type} (f : D' → D)
+    (table : (d : D) → R d) (program : OracleComp (OracleSpec.ofFn fun q => R (f q)) A) :
+    evalWithAnswerFn (QueryImpl.ofFn table) (simulateQ (reindexQuery f) program) =
+      evalWithAnswerFn (QueryImpl.ofFn fun q => table (f q)) program := by
+  simp only [evalWithAnswerFn_simulateQ, reindexQuery, evalWithAnswerFn_liftM_query,
+    QueryImpl.ofFn_apply]
+  rfl
+
+theorem tableQueryLog_reindexQuery {D D' A : Type} {R : D → Type} (f : D' → D)
+    (table : (d : D) → R d) (program : OracleComp (OracleSpec.ofFn fun q => R (f q)) A) :
+    (tableQueryLog (simulateQ (reindexQuery f) program) table).map Sigma.fst =
+      ((tableQueryLog program fun q => table (f q)).map Sigma.fst).map f := by
+  simp only [tableQueryLog_simulateQ, reindexQuery, evalWithAnswerFn_liftM_query,
+    QueryImpl.ofFn_apply, tableQueryLog_query, ← List.map_eq_flatMap, List.map_map,
+    Function.comp_def]
+
+theorem isTotalQueryBound_reindexQuery {D D' A : Type} {R : D → Type} (f : D' → D)
+    (program : OracleComp (OracleSpec.ofFn fun q => R (f q)) A) (n : ℕ)
+    (bounded : IsTotalQueryBound program n) :
+    IsTotalQueryBound (simulateQ (reindexQuery f) program) n := by
+  have h := bounded.simulateQ_of_step_le (step := 1) (impl := reindexQuery f)
+    (fun q => show IsTotalQueryBound (reindexQuery (R := R) f q) 1 from by
+      change IsTotalQueryBound (liftM ((OracleSpec.ofFn R).query (f q)) >>= pure) 1
+      exact ⟨by omega, fun _ => trivial⟩)
+  simpa only [Nat.mul_one] using h
+
+/-! ### Backward extraction at a key -/
+
 universe w
 
 /-- Reconstruct the pre-challenge extractor using this prefix's strict ancestor responses. -/
-def prefixExtractor {Salt : Type} : {rounds : List Round} → {state : KnowledgeState.{w}} →
-    RoundExtractor (protocol rounds).tree state → (pre : Prefix Salt rounds) →
-    PrefixTable Salt rounds →
+def prefixExtractor {Salt : Type} : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    {state : KnowledgeState.{w}} → RoundExtractor protocol.tree state →
+    (pre : Prefix Salt coin) → PrefixTable Salt coin →
     (before : KnowledgeState.{w}) ×
-      RoundExtractor (.public pre.Challenge (fun _ => (protocol pre.remaining).tree)) before
-  | [], _, _, pre, _ => nomatch pre
-  | _ :: _, _, extractor, .inl (message, _), _ =>
-      ⟨(extractor message).1, (extractor message).2.2⟩
-  | _ :: _, _, extractor, .inr (message, salt, pre), table =>
-      let challenge := table (Prefix.here message salt)
-      let afterMessage := (extractor message).2.2
-      prefixExtractor (afterMessage challenge).2.2 pre
-        (fun q => table (Prefix.later message salt q))
+      RoundExtractor (.public pre.Challenge (fun _ => pre.rest.tree)) before
+  | _, .done, _, _, pre, _ => nomatch pre
+  | _, @PublicCoin.sender _ _ _ next, _, extractor, ⟨move, pre⟩, table =>
+      prefixExtractor (next move) (extractor move).2.2 pre fun q => table ⟨move, q⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, _, extractor, ⟨message, pre⟩, table =>
+      prefixExtractor next (extractor message).2.2 pre fun q => table ⟨message, q⟩
+  | _, @PublicCoin.challenge _ _ _ _ _ _, state, extractor, .inl _, _ => ⟨state, extractor⟩
+  | _, @PublicCoin.challenge _ _ _ _ _ next, _, extractor, .inr ⟨salt, pre⟩, table =>
+      prefixExtractor next (extractor (table (.inl salt))).2.2 pre
+        fun q => table (.inr ⟨salt, q⟩)
 
 /-- Resampling a target prefix leaves its reconstructed pre-challenge extractor unchanged. -/
-theorem prefixExtractor_update {Salt : Type} {rounds : List Round} [DecidableEq Salt]
-    {state : KnowledgeState.{w}}
-    (extractor : RoundExtractor (protocol rounds).tree state)
-    (pre : Prefix Salt rounds) (table : PrefixTable Salt rounds) (value : pre.Challenge) :
-    prefixExtractor extractor pre (Function.update table pre value) =
-      prefixExtractor extractor pre table := by
-  classical
-  induction rounds generalizing state with
-  | nil => exact pre.elim
-  | cons round rounds ih =>
+theorem prefixExtractor_update {Salt : Type} [DecidableEq Salt] {protocol : Protocol}
+    (coin : PublicCoin protocol) {state : KnowledgeState.{w}}
+    (extractor : RoundExtractor protocol.tree state)
+    (pre : Prefix Salt coin) (table : PrefixTable Salt coin) (value : pre.Challenge) :
+    prefixExtractor coin extractor pre (Function.update table pre value) =
+      prefixExtractor coin extractor pre table := by
+  induction coin generalizing state with
+  | done => exact pre.elim
+  | sender next ih =>
+      rcases pre with ⟨move, pre⟩
+      simp only [prefixExtractor]
+      have htable : (fun q => Function.update table ⟨move, pre⟩ value ⟨move, q⟩) =
+          Function.update (fun q => table ⟨move, q⟩) pre value := by
+        funext q
+        by_cases hq : q = pre
+        · subst q
+          simp
+        · rw [Function.update_of_ne hq, Function.update_of_ne]
+          simpa using hq
+      rw [htable]
+      exact ih move (extractor move).2.2 pre (fun q => table ⟨move, q⟩) value
+  | oracle next ih =>
+      rcases pre with ⟨message, pre⟩
+      simp only [prefixExtractor]
+      have htable : (fun q => Function.update table ⟨message, pre⟩ value ⟨message, q⟩) =
+          Function.update (fun q => table ⟨message, q⟩) pre value := by
+        funext q
+        by_cases hq : q = pre
+        · subst q
+          simp
+        · rw [Function.update_of_ne hq, Function.update_of_ne]
+          simpa using hq
+      rw [htable]
+      exact ih (extractor message).2.2 pre (fun q => table ⟨message, q⟩) value
+  | challenge next ih =>
       cases pre with
-      | inl data => rfl
+      | inl _ => rfl
       | inr data =>
-          rcases data with ⟨message, salt, pre⟩
+          rcases data with ⟨salt, pre⟩
           simp only [prefixExtractor]
-          have hhere : Function.update table (Prefix.later message salt pre) value
-              (Prefix.here message salt) = table (Prefix.here message salt) := by
-            apply Function.update_of_ne
-            simp [Prefix.here, Prefix.later]
+          have hhere : Function.update table (.inr ⟨salt, pre⟩) value (.inl salt) =
+              table (.inl salt) :=
+            Function.update_of_ne (by simp) _ _
           rw [hhere]
-          have htable : (fun q => Function.update table (Prefix.later message salt pre) value
-                (Prefix.later message salt q)) =
-              Function.update (fun q => table (Prefix.later message salt q)) pre value := by
+          have htable : (fun q => Function.update table (.inr ⟨salt, pre⟩) value
+                (.inr ⟨salt, q⟩)) =
+              Function.update (fun q => table (.inr ⟨salt, q⟩)) pre value := by
             funext q
             by_cases hq : q = pre
             · subst q
               simp
-            · simp [Function.update_of_ne hq, Function.update_of_ne
-                (show Prefix.later message salt q ≠ Prefix.later message salt pre by
-                  simpa [Prefix.later] using hq)]
+            · rw [Function.update_of_ne hq, Function.update_of_ne]
+              simpa using hq
           rw [htable]
-          exact ih _ pre _ value
+          exact ih (extractor (table (.inl salt))).2.2 pre (fun q => table (.inr ⟨salt, q⟩)) value
 
-/-- Every receiver uses its round's uniform challenge and the same stated local error. -/
-def uniformSchedule (error : ENNReal) : (rounds : List Round) →
-    RoundExtractor.ChallengeSchedule (protocol rounds).tree (protocol rounds).roles
-  | [] => PUnit.unit
-  | round :: rounds => fun _ => ⟨⟨$ᵗ round.Challenge, error⟩,
-      fun _ => uniformSchedule error rounds⟩
+/-! ### Completion -/
 
-/-- An all-authored-prefix knowledge bound applies to every reconstructed salted prefix. -/
-theorem prefixExtractor_local_bound {Salt : Type} {rounds : List Round}
-    {state : KnowledgeState.{w}} (extractor : RoundExtractor (protocol rounds).tree state)
-    (error : ENNReal)
-    (bounded : RoundExtractor.IsLocallyBounded extractor (protocol rounds).roles
-      (uniformSchedule error rounds))
-    (pre : Prefix Salt rounds) (table : PrefixTable Salt rounds) :
-    Pr{let response ← $ᵗ pre.Challenge}[
-      RoundExtractor.badChallenge (prefixExtractor extractor pre table).2 response] ≤ error := by
-  induction rounds generalizing state with
-  | nil => exact pre.elim
-  | cons round rounds ih =>
-      cases pre with
-      | inl data =>
-          rcases data with ⟨message, salt⟩
-          have h := (_root_.RoundByRound.GameFamily.isBounded_iff _ _).mp
-            (bounded message).1 PUnit.unit PUnit.unit
-          exact h
-      | inr data =>
-          rcases data with ⟨message, salt, pre⟩
-          exact ih ((extractor message).2.2 (table (Prefix.here message salt))).2.2
-            ((bounded message).2 (table (Prefix.here message salt))) pre
-            (fun q => table (Prefix.later message salt q))
+/-- The prover's public moves, oracle payloads and salts along a complete path of the protocol:
+an execution path with its challenges erased and a salt at each challenge. -/
+@[reducible] def Messages (Salt : Type) {protocol : Protocol} (coin : PublicCoin protocol) :
+    Type :=
+  PublicCoin.rec (motive := fun _ _ => Type) PUnit
+    (fun {Moves} _ _ _ messages => (move : Moves) × messages move)
+    (fun {Messages} _ _ _ _ messages => Messages × messages)
+    (fun _ messages => Salt × messages) coin
 
-/-- The complete prover-message and salt sequence returned by a restoration adversary. -/
-def Messages (Salt : Type) : List Round → Type
-  | [] => PUnit
-  | round :: rounds => round.Message × Salt × Messages Salt rounds
-
-/-- The oracle on the salted prefixes of one round list. -/
-abbrev prefixSpec (Salt : Type) (rounds : List Round) : OracleSpec (Prefix Salt rounds) :=
+/-- The oracle on the salted prefixes of one protocol. -/
+abbrev prefixSpec (Salt : Type) {protocol : Protocol} (coin : PublicCoin protocol) :
+    OracleSpec (Prefix Salt coin) :=
   OracleSpec.ofFn Prefix.Challenge
 
-/-- The restoration oracle answers each key with its round's challenge type. -/
-abbrev oracleSpec (Input Salt : Type) (rounds : Input → List Round) :
-    OracleSpec (Key Input Salt rounds) :=
+/-- The restoration oracle answers each key with its node's challenge type. -/
+abbrev oracleSpec (Input Salt : Type) {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z)) : OracleSpec (Key Input Salt coin) :=
   OracleSpec.ofFn Key.Challenge
 
-/-- Route a suffix prefix through the retained first prover message and salt. -/
-def prependQuery {Salt : Type} {round : Round} {rounds : List Round}
-    (message : round.Message) (salt : Salt) :
-    QueryImpl (prefixSpec Salt rounds) (OracleComp (prefixSpec Salt (round :: rounds))) :=
-  fun pre => liftM ((prefixSpec Salt (round :: rounds)).query (Prefix.later message salt pre))
-
-/-- Route a prefix of input `z`'s rounds to its restoration key. -/
-def inputQuery {Input Salt : Type} {rounds : Input → List Round} (z : Input) :
-    QueryImpl (prefixSpec Salt (rounds z)) (OracleComp (oracleSpec Input Salt rounds)) :=
-  fun pre => liftM ((oracleSpec Input Salt rounds).query ⟨z, pre⟩)
+/-- Route a prefix of input `z`'s protocol to its restoration key. -/
+abbrev inputQuery {Input Salt : Type} {protocol : Input → Protocol}
+    {coin : (z : Input) → PublicCoin (protocol z)} (z : Input) :
+    QueryImpl (prefixSpec Salt (coin z)) (OracleComp (oracleSpec Input Salt coin)) :=
+  reindexQuery (R := Key.Challenge) (Sigma.mk z)
 
 /-- Complete a message sequence by reading all challenges from the prefix oracle. -/
-def completePrefix {Salt : Type} : (rounds : List Round) → Messages Salt rounds →
-    OracleComp (prefixSpec Salt rounds) (protocol rounds).tree.ExecutionPath
-  | [], _ => pure PUnit.unit
-  | round :: rounds, (message, salt, messages) => do
-      let challenge ← liftM ((prefixSpec Salt (round :: rounds)).query
-        (Prefix.here message salt))
-      let path ← simulateQ (prependQuery message salt) (completePrefix rounds messages)
-      pure ⟨message, ⟨challenge, path⟩⟩
+def completePrefix {Salt : Type} : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    Messages Salt coin → OracleComp (prefixSpec Salt coin) protocol.tree.ExecutionPath
+  | _, .done, _ => pure PUnit.unit
+  | _, @PublicCoin.sender _ _ _ next, ⟨move, messages⟩ => do
+      let path ← simulateQ (reindexQuery (R := Prefix.Challenge (coin := .sender next))
+        (Sigma.mk move))
+        (completePrefix (next move) messages)
+      pure ⟨move, path⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, ⟨message, messages⟩ => do
+      let path ← simulateQ (reindexQuery (R := Prefix.Challenge (coin := .oracle next))
+        (Prod.mk message))
+        (completePrefix next messages)
+      pure ⟨message, path⟩
+  | _, @PublicCoin.challenge Challenge _ _ _ _ next, ⟨salt, messages⟩ => do
+      let challenge ← liftM ((prefixSpec Salt (@PublicCoin.challenge Challenge _ _ _ _ next)).query
+        (Sum.inl salt))
+      let path ← simulateQ (reindexQuery
+        (R := Prefix.Challenge (coin := @PublicCoin.challenge Challenge _ _ _ _ next))
+        (fun q : Prefix Salt next => Sum.inr ⟨salt, q⟩)) (completePrefix next messages)
+      pure ⟨challenge, path⟩
 
 /-- Complete the selected transcript by reading all challenges from the same restoration oracle,
 at the keys of the selected input. -/
-def complete {Input Salt : Type} (rounds : Input → List Round) (z : Input)
-    (messages : Messages Salt (rounds z)) :
-    OracleComp (oracleSpec Input Salt rounds) (protocol (rounds z)).tree.ExecutionPath :=
-  simulateQ (inputQuery z) (completePrefix (rounds z) messages)
-
-/-- Prefix completion makes at most one access per protocol round, including repeated cached
-prefixes. -/
-theorem completePrefix_queryBound {Salt : Type} (rounds : List Round)
-    (messages : Messages Salt rounds) :
-    IsTotalQueryBound (completePrefix rounds messages) rounds.length := by
-  induction rounds with
-  | nil => trivial
-  | cons round rounds ih =>
-      rcases messages with ⟨message, salt, messages⟩
-      simp only [completePrefix, List.length_cons, isTotalQueryBound_query_bind_iff,
-        Nat.add_sub_cancel]
-      refine ⟨by omega, fun challenge => ?_⟩
-      have h := (ih messages).simulateQ_of_step_le (step := 1)
-        (fun pre => show IsTotalQueryBound
-          (prependQuery (Salt := Salt) (round := round) message salt pre) 1 from by
-            change IsTotalQueryBound
-              (liftM ((prefixSpec Salt (round :: rounds)).query
-                (Prefix.later message salt pre)) >>= pure) 1
-            exact ⟨by omega, fun _ => trivial⟩)
-      have hb := isTotalQueryBound_bind h (fun path => show IsTotalQueryBound
-        (pure (⟨message, ⟨challenge, path⟩⟩ : (protocol (round :: rounds)).tree.ExecutionPath) :
-          OracleComp (prefixSpec Salt (round :: rounds)) _) 0 from trivial)
-      simpa only [Nat.mul_one, Nat.add_zero, protocol, Protocol.oracleWith, Protocol.public]
-        using hb
-
-/-- Completion makes at most one access per round of the selected input. -/
-theorem complete_queryBound {Input Salt : Type} (rounds : Input → List Round) (z : Input)
-    (messages : Messages Salt (rounds z)) :
-    IsTotalQueryBound (complete rounds z messages) (rounds z).length := by
-  have h := (completePrefix_queryBound (rounds z) messages).simulateQ_of_step_le (step := 1)
-    (impl := inputQuery (Input := Input) (rounds := rounds) z)
-    (fun pre => show IsTotalQueryBound
-      (inputQuery (Input := Input) (Salt := Salt) (rounds := rounds) z pre) 1 from by
-        change IsTotalQueryBound
-          (liftM ((oracleSpec Input Salt rounds).query ⟨z, pre⟩) >>= pure) 1
-        exact ⟨by omega, fun _ => trivial⟩)
-  rw [complete]
-  simpa only [Nat.mul_one] using h
+def complete {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z)) (z : Input)
+    (messages : Messages Salt (coin z)) :
+    OracleComp (oracleSpec Input Salt coin) (protocol z).tree.ExecutionPath :=
+  simulateQ (inputQuery z) (completePrefix (coin z) messages)
 
 /-- The execution path reconstructed from a deterministic prefix challenge table. -/
-def prefixPath {Salt : Type} : (rounds : List Round) →
-    Messages Salt rounds → PrefixTable Salt rounds → (protocol rounds).tree.ExecutionPath
-  | [], _, _ => PUnit.unit
-  | _ :: rounds, (message, salt, messages), table =>
-      ⟨message, ⟨table (Prefix.here message salt),
-        prefixPath rounds messages (fun q => table (Prefix.later message salt q))⟩⟩
+def prefixPath {Salt : Type} : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    Messages Salt coin → PrefixTable Salt coin → protocol.tree.ExecutionPath
+  | _, .done, _, _ => PUnit.unit
+  | _, @PublicCoin.sender _ _ _ next, ⟨move, messages⟩, table =>
+      ⟨move, prefixPath (next move) messages fun q => table ⟨move, q⟩⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, ⟨message, messages⟩, table =>
+      ⟨message, prefixPath next messages fun q => table ⟨message, q⟩⟩
+  | _, @PublicCoin.challenge _ _ _ _ _ next, ⟨salt, messages⟩, table =>
+      ⟨table (.inl salt), prefixPath next messages fun q => table (.inr ⟨salt, q⟩)⟩
 
 /-- The existing execution path reconstructed from a deterministic challenge table. -/
-def completedPath {Input Salt : Type} (rounds : Input → List Round) (z : Input)
-    (messages : Messages Salt (rounds z)) (table : Table Input Salt rounds) :
-    (protocol (rounds z)).tree.ExecutionPath :=
-  prefixPath (rounds z) messages (Table.fibre table z)
+def completedPath {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z)) (z : Input)
+    (messages : Messages Salt (coin z)) (table : Table Input Salt coin) :
+    (protocol z).tree.ExecutionPath :=
+  prefixPath (coin z) messages (Table.fibre table z)
 
 /-- The prefixes read when completing this message sequence. -/
-def prefixKeys {Salt : Type} : (rounds : List Round) → Messages Salt rounds →
-    List (Prefix Salt rounds)
-  | [], _ => []
-  | _ :: rounds, (message, salt, messages) =>
-      Prefix.here message salt ::
-        (prefixKeys rounds messages).map (Prefix.later message salt)
+def prefixKeys {Salt : Type} : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    Messages Salt coin → List (Prefix Salt coin)
+  | _, .done, _ => []
+  | _, @PublicCoin.sender _ _ _ next, ⟨move, messages⟩ =>
+      (prefixKeys (next move) messages).map (Sigma.mk move)
+  | _, @PublicCoin.oracle _ _ _ _ next, ⟨message, messages⟩ =>
+      (prefixKeys next messages).map (Prod.mk message)
+  | _, @PublicCoin.challenge _ _ _ _ _ next, ⟨salt, messages⟩ =>
+      .inl salt :: (prefixKeys next messages).map (fun q => .inr ⟨salt, q⟩)
 
 /-- The actual challenge keys read when completing this selected message sequence. -/
-def completionKeys {Input Salt : Type} (rounds : Input → List Round) (z : Input)
-    (messages : Messages Salt (rounds z)) : List (Key Input Salt rounds) :=
-  (prefixKeys (rounds z) messages).map (Sigma.mk z)
+def completionKeys {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z)) (z : Input)
+    (messages : Messages Salt (coin z)) : List (Key Input Salt coin) :=
+  (prefixKeys (coin z) messages).map (Sigma.mk z)
 
 /-- Deterministic execution of prefix completion returns exactly the reconstructed path. -/
-theorem completePrefix_eval {Salt : Type} (rounds : List Round)
-    (messages : Messages Salt rounds) (table : PrefixTable Salt rounds) :
-    evalWithAnswerFn (QueryImpl.ofFn table) (completePrefix rounds messages) =
-      prefixPath rounds messages table := by
-  induction rounds with
-  | nil => rfl
-  | cons round rounds ih =>
-      rcases messages with ⟨message, salt, messages⟩
-      simp only [completePrefix, evalWithAnswerFn_bind, evalWithAnswerFn_liftM_query,
-        QueryImpl.ofFn_apply, evalWithAnswerFn_simulateQ, prependQuery,
+theorem completePrefix_eval {Salt : Type} {protocol : Protocol} (coin : PublicCoin protocol)
+    (messages : Messages Salt coin) (table : PrefixTable Salt coin) :
+    evalWithAnswerFn (QueryImpl.ofFn table) (completePrefix coin messages) =
+      prefixPath coin messages table := by
+  induction coin with
+  | done => rfl
+  | sender next ih =>
+      rcases messages with ⟨move, messages⟩
+      simp only [completePrefix, evalWithAnswerFn_bind, evalWithAnswerFn_reindexQuery,
         prefixPath]
-      exact congrArg (fun path => (⟨message, ⟨table (Prefix.here message salt), path⟩⟩ :
-          (protocol (round :: rounds)).tree.ExecutionPath))
-        (ih messages (fun q => table (Prefix.later message salt q)))
+      simp only [ih]
+      rfl
+  | oracle next ih =>
+      rcases messages with ⟨message, messages⟩
+      simp only [completePrefix, evalWithAnswerFn_bind, evalWithAnswerFn_reindexQuery,
+        prefixPath]
+      simp only [ih]
+      rfl
+  | challenge next ih =>
+      rcases messages with ⟨salt, messages⟩
+      simp only [completePrefix, evalWithAnswerFn_bind, evalWithAnswerFn_liftM_query,
+        QueryImpl.ofFn_apply, evalWithAnswerFn_reindexQuery, prefixPath]
+      simp only [ih]
+      rfl
 
 /-- Deterministic execution of completion returns exactly the reconstructed path. -/
-theorem complete_eval {Input Salt : Type} (rounds : Input → List Round) (z : Input)
-    (messages : Messages Salt (rounds z)) (table : Table Input Salt rounds) :
-    evalWithAnswerFn (QueryImpl.ofFn table) (complete rounds z messages) =
-      completedPath rounds z messages table := by
-  simp only [complete, evalWithAnswerFn_simulateQ, inputQuery, evalWithAnswerFn_liftM_query,
-    QueryImpl.ofFn_apply, completedPath]
-  exact completePrefix_eval (rounds z) messages (Table.fibre table z)
+theorem complete_eval {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z)) (z : Input)
+    (messages : Messages Salt (coin z)) (table : Table Input Salt coin) :
+    evalWithAnswerFn (QueryImpl.ofFn table) (complete coin z messages) =
+      completedPath coin z messages table := by
+  rw [complete, evalWithAnswerFn_reindexQuery]
+  exact completePrefix_eval (coin z) messages (Table.fibre table z)
 
 /-- The prefix-key list is the projection of the actual prefix-oracle query log. -/
-theorem completePrefix_log_keys {Salt : Type} (rounds : List Round)
-    (messages : Messages Salt rounds) (table : PrefixTable Salt rounds) :
-    (tableQueryLog (completePrefix rounds messages) table).map Sigma.fst =
-      prefixKeys rounds messages := by
-  induction rounds with
-  | nil => simp [completePrefix, prefixKeys, protocol, Protocol.done]
-  | cons round rounds ih =>
-      rcases messages with ⟨message, salt, messages⟩
-      simp only [completePrefix, protocol, Protocol.oracleWith, Protocol.public,
-        tableQueryLog_bind, tableQueryLog_pure, List.append_nil, tableQueryLog_simulateQ,
-        prependQuery, evalWithAnswerFn_liftM_query, QueryImpl.ofFn_apply, tableQueryLog_query,
-        List.singleton_append, List.map_cons, ← List.map_eq_flatMap, List.map_map,
-        Function.comp_def, prefixKeys]
-      congr 1
-      simpa only [List.flatMap_singleton, List.map_map, Function.comp_def] using
-        congrArg (List.map (Prefix.later message salt))
-          (ih messages (fun q => table (Prefix.later message salt q)))
+theorem completePrefix_log_keys {Salt : Type} {protocol : Protocol} (coin : PublicCoin protocol)
+    (messages : Messages Salt coin) (table : PrefixTable Salt coin) :
+    (tableQueryLog (completePrefix coin messages) table).map Sigma.fst =
+      prefixKeys coin messages := by
+  induction coin with
+  | done => simp [completePrefix, prefixKeys]
+  | sender next ih =>
+      rcases messages with ⟨move, messages⟩
+      simp only [completePrefix, tableQueryLog_bind, List.map_append]
+      erw [tableQueryLog_pure, tableQueryLog_reindexQuery, ih move messages]
+      simp only [List.map_nil, List.append_nil, prefixKeys]
+  | oracle next ih =>
+      rcases messages with ⟨message, messages⟩
+      simp only [completePrefix, tableQueryLog_bind, List.map_append]
+      erw [tableQueryLog_pure, tableQueryLog_reindexQuery, ih messages]
+      simp only [List.map_nil, List.append_nil, prefixKeys]
+  | challenge next ih =>
+      rcases messages with ⟨salt, messages⟩
+      simp only [completePrefix, tableQueryLog_bind, List.map_append]
+      erw [tableQueryLog_pure, tableQueryLog_query, tableQueryLog_reindexQuery, ih messages]
+      simp only [List.map_nil, List.append_nil, prefixKeys, List.map_cons, List.singleton_append]
 
 /-- The completion-key list is the projection of the actual oracle query log. -/
-theorem complete_log_keys {Input Salt : Type} (rounds : Input → List Round) (z : Input)
-    (messages : Messages Salt (rounds z)) (table : Table Input Salt rounds) :
-    (tableQueryLog (complete rounds z messages) table).map Sigma.fst =
-      completionKeys rounds z messages := by
-  simp only [complete, tableQueryLog_simulateQ, inputQuery, evalWithAnswerFn_liftM_query,
-    QueryImpl.ofFn_apply, tableQueryLog_query, ← List.map_eq_flatMap, List.map_map,
-    Function.comp_def, completionKeys]
-  rw [← completePrefix_log_keys (rounds z) messages (Table.fibre table z), List.map_map]
-  rfl
+theorem complete_log_keys {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z)) (z : Input)
+    (messages : Messages Salt (coin z)) (table : Table Input Salt coin) :
+    (tableQueryLog (complete coin z messages) table).map Sigma.fst =
+      completionKeys coin z messages := by
+  rw [complete, tableQueryLog_reindexQuery, completionKeys,
+    completePrefix_log_keys (coin z) messages (Table.fibre table z)]
 
 /-- A bad challenge on the reconstructed path is a bad prefix in its actual completion log. -/
-theorem badChallengeOnPath_prefixPath {Salt : Type} {rounds : List Round}
-    {state : KnowledgeState.{w}} (extractor : RoundExtractor (protocol rounds).tree state)
-    (messages : Messages Salt rounds) (table : PrefixTable Salt rounds)
-    (witness : (extractor.terminalState (prefixPath rounds messages table)).Witness)
-    (bad : extractor.BadChallengeOnPath (protocol rounds).roles
-      (prefixPath rounds messages table) witness) :
-    ∃ pre ∈ prefixKeys rounds messages,
-      RoundExtractor.badChallenge (prefixExtractor extractor pre table).2 (table pre) := by
-  induction rounds generalizing state with
-  | nil => exact bad.elim
-  | cons round rounds ih =>
-      rcases messages with ⟨message, salt, messages⟩
+theorem badChallengeOnPath_prefixPath {Salt : Type} {protocol : Protocol}
+    (coin : PublicCoin protocol) {state : KnowledgeState.{w}}
+    (extractor : RoundExtractor protocol.tree state)
+    (messages : Messages Salt coin) (table : PrefixTable Salt coin)
+    (witness : (extractor.terminalState (prefixPath coin messages table)).Witness)
+    (bad : extractor.BadChallengeOnPath protocol.roles (prefixPath coin messages table) witness) :
+    ∃ pre ∈ prefixKeys coin messages,
+      RoundExtractor.badChallenge (prefixExtractor coin extractor pre table).2 (table pre) := by
+  induction coin generalizing state with
+  | done => exact bad.elim
+  | sender next ih =>
+      rcases messages with ⟨move, messages⟩
       rcases bad with bad | bad
-      · refine ⟨Prefix.here message salt, List.mem_cons_self, ?_⟩
-        exact ⟨_, bad.2.1, bad.2.2⟩
-      · obtain ⟨pre, hpre, hb⟩ := ih
-          ((extractor message).2.2 (table (Prefix.here message salt))).2.2
-          messages (fun q => table (Prefix.later message salt q)) witness bad
-        exact ⟨Prefix.later message salt pre,
-          List.mem_cons_of_mem _ (List.mem_map.mpr ⟨pre, hpre, rfl⟩), hb⟩
+      · exact absurd bad.1 (by simp [Protocol.public])
+      · obtain ⟨pre, hpre, hb⟩ := ih move (extractor move).2.2 messages _ witness bad
+        exact ⟨⟨move, pre⟩, List.mem_map.mpr ⟨pre, hpre, rfl⟩, hb⟩
+  | oracle next ih =>
+      rcases messages with ⟨message, messages⟩
+      obtain ⟨pre, hpre, hb⟩ := ih (extractor message).2.2 messages _ witness bad
+      exact ⟨⟨message, pre⟩, List.mem_map.mpr ⟨pre, hpre, rfl⟩, hb⟩
+  | challenge next ih =>
+      rcases messages with ⟨salt, messages⟩
+      rcases bad with bad | bad
+      · exact ⟨.inl salt, List.mem_cons_self, _, bad.2.1, bad.2.2⟩
+      · obtain ⟨pre, hpre, hb⟩ := ih (extractor (table (.inl salt))).2.2 messages _ witness bad
+        exact ⟨.inr ⟨salt, pre⟩, List.mem_cons_of_mem _ (List.mem_map.mpr ⟨pre, hpre, rfl⟩), hb⟩
 
-/-- An adversary's selection: an input, a complete message sequence for that input's rounds,
+/-- An adversary's selection: an input, a complete message sequence for that input's protocol,
 and a terminal witness. -/
-abbrev Selection (Input Salt W : Type) (rounds : Input → List Round) :=
-  (z : Input) × Messages Salt (rounds z) × W
+abbrev Selection (Input Salt W : Type) {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z)) :=
+  (z : Input) × Messages Salt (coin z) × W
 
-/-- A completed selection: an input, an execution path of that input's rounds, and a terminal
+/-- A completed selection: an input, an execution path of that input's protocol, and a terminal
 witness. -/
-abbrev Outcome (Input W : Type) (rounds : Input → List Round) :=
-  (z : Input) × (protocol (rounds z)).tree.ExecutionPath × W
+abbrev Outcome (Input W : Type) (protocol : Input → Protocol) :=
+  (z : Input) × (protocol z).tree.ExecutionPath × W
 
 /-- Run the adaptive adversary, then complete its selected transcript using the same oracle. -/
-def restoredExecution {Input Salt W : Type} (rounds : Input → List Round)
-    (adversary : OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds)) :
-    OracleComp (oracleSpec Input Salt rounds) (Outcome Input W rounds) := do
+def restoredExecution {Input Salt W : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : OracleComp (oracleSpec Input Salt coin) (Selection Input Salt W coin)) :
+    OracleComp (oracleSpec Input Salt coin) (Outcome Input W protocol) := do
   let ⟨z, messages, witness⟩ ← adversary
-  let path ← complete rounds z messages
+  let path ← complete coin z messages
   pure ⟨z, path, witness⟩
 
-/-- The adversary and completion together make at most `Q + k` accesses when every input has at
-most `k` rounds. -/
-theorem restoredExecution_queryBound {Input Salt W : Type} (rounds : Input → List Round)
-    (adversary : OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds))
-    (Q k : ℕ) (bounded : IsTotalQueryBound adversary Q)
-    (length_le : ∀ z, (rounds z).length ≤ k) :
-    IsTotalQueryBound (restoredExecution rounds adversary) (Q + k) := by
-  apply isTotalQueryBound_bind bounded
-  rintro ⟨z, messages, witness⟩
-  have h := isTotalQueryBound_bind
-    ((complete_queryBound rounds z messages).mono (length_le z))
-    (fun path => show IsTotalQueryBound
-      (pure (⟨z, path, witness⟩ : Outcome Input W rounds) :
-        OracleComp (oracleSpec Input Salt rounds) _) 0 from trivial)
-  simpa only [Nat.add_zero] using h
-
 /-- A permitted-input key at which some later witness fails backward knowledge preservation. -/
-def badKey {Input Salt : Type} {rounds : Input → List Round}
+def badKey {Input Salt : Type} {protocol : Input → Protocol}
+    {coin : (z : Input) → PublicCoin (protocol z)}
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
-    (Z : Set Input) (key : Key Input Salt rounds) (table : Table Input Salt rounds) : Prop :=
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
+    (Z : Set Input) (key : Key Input Salt coin) (table : Table Input Salt coin) : Prop :=
   key.1 ∈ Z ∧ RoundExtractor.badChallenge
-    (prefixExtractor (extractor key.1) key.2 (Table.fibre table key.1)).2 (table key)
+    (prefixExtractor (coin key.1) (extractor key.1) key.2 (Table.fibre table key.1)).2 (table key)
 
 /-- Resampling a key leaves its event a function of the fresh response alone. -/
-theorem badKey_update_iff {Input Salt : Type} {rounds : Input → List Round}
-    [DecidableEq Input] [DecidableEq Salt]
+theorem badKey_update_iff {Input Salt : Type} {protocol : Input → Protocol}
+    {coin : (z : Input) → PublicCoin (protocol z)} [DecidableEq Input] [DecidableEq Salt]
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
-    (Z : Set Input) (key : Key Input Salt rounds) (table : Table Input Salt rounds)
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
+    (Z : Set Input) (key : Key Input Salt coin) (table : Table Input Salt coin)
     (response : key.Challenge) :
     badKey state extractor Z key (Function.update table key response) ↔
       key.1 ∈ Z ∧ RoundExtractor.badChallenge
-        (prefixExtractor (extractor key.1) key.2 (Table.fibre table key.1)).2 response := by
+        (prefixExtractor (coin key.1) (extractor key.1) key.2 (Table.fibre table key.1)).2
+          response := by
   rcases key with ⟨z, pre⟩
   unfold badKey
   rw [Table.fibre_update, prefixExtractor_update, Function.update_self]
 
-/-- All-prefix knowledge bounds hold when resampling each target in every background table. -/
-theorem badKey_resample_bound {Input Salt : Type} {rounds : Input → List Round}
-    [DecidableEq Input] [DecidableEq Salt]
-    (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
-    (Z : Set Input) (error : ENNReal)
-    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol (rounds z)).roles
-      (uniformSchedule error (rounds z)))
-    (key : Key Input Salt rounds) (table : Table Input Salt rounds) :
-    Pr{let response ← $ᵗ key.Challenge}[
-      badKey state extractor Z key (Function.update table key response)] ≤ error := by
-  simp_rw [badKey_update_iff]
-  by_cases hz : key.1 ∈ Z
-  · simp only [hz, true_and]
-    exact prefixExtractor_local_bound (extractor key.1) error
-      (bounded key.1 hz) key.2 (Table.fibre table key.1)
-  · simp only [hz, false_and]
-    simp
-
 /-- A valid terminal witness whose backward extraction fails on the completed path of input `z`
 identifies a bad key among that completion's keys. -/
-theorem badKey_of_completedPath {Input Salt W : Type} {rounds : Input → List Round}
+theorem badKey_of_completedPath {Input Salt W : Type} {protocol : Input → Protocol}
+    {coin : (z : Input) → PublicCoin (protocol z)}
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
+    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
-    (z : Input) (messages : Messages Salt (rounds z)) (witness : W)
-    (table : Table Input Salt rounds)
+    (z : Input) (messages : Messages Salt (coin z)) (witness : W)
+    (table : Table Input Salt coin)
     (hz : z ∈ Z)
-    (holds : ((extractor z).terminalState (completedPath rounds z messages table)).holds
-      (terminalWitness z (completedPath rounds z messages table) witness))
+    (holds : ((extractor z).terminalState (completedPath coin z messages table)).holds
+      (terminalWitness z (completedPath coin z messages table) witness))
     (fails : ¬ (state z).holds ((extractor z).extractWitness
-      (completedPath rounds z messages table)
-      (terminalWitness z (completedPath rounds z messages table) witness))) :
-    ∃ key ∈ completionKeys rounds z messages, badKey state extractor Z key table := by
+      (completedPath coin z messages table)
+      (terminalWitness z (completedPath coin z messages table) witness))) :
+    ∃ key ∈ completionKeys coin z messages, badKey state extractor Z key table := by
   have hbad := RoundExtractor.extraction_failure_implies_bad_challenge (extractor z)
-    (protocol (rounds z)).roles (preserving z hz) _ _ holds fails
+    (protocol z).roles (preserving z hz) _ _ holds fails
   obtain ⟨pre, hpre, hb⟩ :=
-    badChallengeOnPath_prefixPath (extractor z) messages (Table.fibre table z) _ hbad
+    badChallengeOnPath_prefixPath (coin z) (extractor z) messages (Table.fibre table z) _ hbad
   exact ⟨⟨z, pre⟩, List.mem_map.mpr ⟨pre, hpre, rfl⟩, hz, hb⟩
 
 /-- Failed backward extraction from terminal knowledge identifies an actually accessed bad key. -/
-theorem restored_bad_trace {Input Salt W : Type} {rounds : Input → List Round}
+theorem restored_bad_trace {Input Salt W : Type} {protocol : Input → Protocol}
+    {coin : (z : Input) → PublicCoin (protocol z)}
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
+    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
-    (adversary : OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds))
-    (table : Table Input Salt rounds)
+    (adversary : OracleComp (oracleSpec Input Salt coin) (Selection Input Salt W coin))
+    (table : Table Input Salt coin)
     (bad : let result :=
-        evalWithAnswerFn (QueryImpl.ofFn table) (restoredExecution rounds adversary)
+        evalWithAnswerFn (QueryImpl.ofFn table) (restoredExecution coin adversary)
       result.1 ∈ Z ∧
       ((extractor result.1).terminalState result.2.1).holds
         (terminalWitness result.1 result.2.1 result.2.2) ∧
       ¬ (state result.1).holds ((extractor result.1).extractWitness result.2.1
         (terminalWitness result.1 result.2.1 result.2.2))) :
-    ∃ q ∈ tableQueryLog (restoredExecution rounds adversary) table,
+    ∃ q ∈ tableQueryLog (restoredExecution coin adversary) table,
       badKey state extractor Z q.1 table := by
   let result := evalWithAnswerFn (QueryImpl.ofFn table) adversary
   rcases hresult : result with ⟨z, messages, witness⟩
-  have heval : evalWithAnswerFn (QueryImpl.ofFn table) (restoredExecution rounds adversary) =
-      ⟨z, completedPath rounds z messages table, witness⟩ := by
+  have heval : evalWithAnswerFn (QueryImpl.ofFn table) (restoredExecution coin adversary) =
+      ⟨z, completedPath coin z messages table, witness⟩ := by
     simp only [restoredExecution, evalWithAnswerFn_bind, evalWithAnswerFn_pure]
     change (⟨result.1,
-      evalWithAnswerFn (QueryImpl.ofFn table) (complete rounds result.1 result.2.1),
-        result.2.2⟩ : Outcome Input W rounds) = _
+      evalWithAnswerFn (QueryImpl.ofFn table) (complete coin result.1 result.2.1),
+        result.2.2⟩ : Outcome Input W protocol) = _
     rw [hresult, complete_eval]
   dsimp only at bad
   rw [heval] at bad
   obtain ⟨key, hkey, hb⟩ := badKey_of_completedPath state extractor Z preserving
     terminalWitness z messages witness table bad.1 bad.2.1 bad.2.2
-  have hmem : key ∈ (tableQueryLog (complete rounds z messages) table).map Sigma.fst := by
+  have hmem : key ∈ (tableQueryLog (complete coin z messages) table).map Sigma.fst := by
     rwa [complete_log_keys]
   obtain ⟨q, hq, heq⟩ := List.mem_map.mp hmem
   refine ⟨q, ?_, heq ▸ hb⟩
   simp only [restoredExecution, tableQueryLog_bind]
   apply List.mem_append_right
-  change q ∈ tableQueryLog (complete rounds result.1 result.2.1) table ++ _
+  change q ∈ tableQueryLog (complete coin result.1 result.2.1) table ++ _
   rw [hresult]
   exact List.mem_append_left _ hq
-
-/-- All-prefix round-by-round knowledge bounds imply the `(Q + k) * error` extraction bound in
-the actual cached restoration/completion experiment, where every input has at most `k` rounds.
-The input is selected adaptively, the terminal witness is supplied by the adversary, and its
-named carrier map is explicit data. -/
-theorem restored_extraction_bound {Input Salt W : Type} {rounds : Input → List Round}
-    [DecidableEq Input] [DecidableEq Salt]
-    (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
-    (Z : Set Input) (error : ENNReal)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
-    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol (rounds z)).roles
-      (uniformSchedule error (rounds z)))
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
-      W → ((extractor z).terminalState path).Witness)
-    (adversary : OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds))
-    (Q k : ℕ) (queryBound : IsTotalQueryBound adversary Q)
-    (length_le : ∀ z, (rounds z).length ≤ k) :
-    Pr{let result ← (simulateQ randomOracle (restoredExecution rounds adversary)).run' ∅}[
-      result.1 ∈ Z ∧
-      ((extractor result.1).terminalState result.2.1).holds
-        (terminalWitness result.1 result.2.1 result.2.2) ∧
-      ¬ (state result.1).holds ((extractor result.1).extractWitness result.2.1
-        (terminalWitness result.1 result.2.1 result.2.2))] ≤
-      (Q + k) * error := by
-  rw [← Nat.cast_add]
-  apply prEvent_randomOracle_le_of_bad_queries _ (Q + k)
-    (restoredExecution_queryBound rounds adversary Q k queryBound length_le) _
-    (badKey state extractor Z) error
-  · exact badKey_resample_bound state extractor Z error bounded
-  · exact restored_bad_trace state extractor Z preserving terminalWitness adversary
 
 end Interaction.Oracle.Security.StateRestoration

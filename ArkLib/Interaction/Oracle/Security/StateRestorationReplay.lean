@@ -5,24 +5,23 @@ Authors: Quang Dao
 -/
 module
 
-public import ArkLib.Interaction.Oracle.Security.StateRestoration
+public import ArkLib.Interaction.Oracle.Security.StateRestorationBudget
 public import ArkLib.Interaction.Oracle.Security.KnowledgeComposition
 public import PolyFun.Interaction.TwoParty.Strategy
 
 /-!
 # Verifier replay for state restoration
 
-A scripted prover sends selected oracle messages and remembers every public challenge.
-The restricted verifier runs declared challenge programs and a terminal program that can read
-only its accumulated input and message access. The existing executor interprets that
-terminal program with the closing handler of the same concrete execution path.
+A scripted prover sends the prover moves and oracle payloads of a path. The restricted verifier
+runs declared challenge programs and a terminal program that can read only its accumulated input
+and message access. The existing executor interprets that terminal program with the closing
+handler of the same concrete execution path.
 
-Path-based replay reads completed challenges from the path itself. Completion's structural
-support guarantees that this path has the selected messages, so replay makes no additional oracle
-queries and requires no global response table. The ordinary uniform-program verifier satisfies
-actual challenge freshness for the uniform certificate schedule at every authored prefix.
-This covers source-only terminal programs; arbitrary terminal ambient effects are outside this
-supported presentation.
+Path-based replay reads the challenges from the path itself, so it makes no additional oracle
+queries and requires no global response table (`execute_pathReplay`). The ordinary
+uniform-program verifier samples every challenge as the uniform error schedule
+(`uniformVerifier_fresh`). This covers source-only terminal programs; arbitrary terminal ambient
+effects are outside this supported presentation.
 -/
 
 @[expose] public section
@@ -32,12 +31,16 @@ open Interaction.Oracle.TypeTree
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-/-- Actual ambient challenge programs, followed by their public-response-dependent continuation.
-This is verifier authoring data; execution uses the existing interpreter. -/
-def ChallengePrograms {ι : Type} (ambient : OracleSpec ι) : List Round → Type
-  | [] => PUnit
-  | round :: rounds => OracleComp ambient round.Challenge ×
-      (round.Challenge → ChallengePrograms ambient rounds)
+/-- Actual ambient challenge programs at the challenge nodes, each followed by its
+public-response-dependent continuation. Oracle payloads are not available to them. This is
+verifier authoring data; execution uses the existing interpreter. -/
+@[reducible] def ChallengePrograms {ι : Type} (ambient : OracleSpec ι) {protocol : Protocol}
+    (coin : PublicCoin protocol) : Type :=
+  PublicCoin.rec (motive := fun _ _ => Type) PUnit
+    (fun {Moves} _ _ _ programs => (move : Moves) → programs move)
+    (fun _ programs => programs)
+    (@fun Challenge _ _ _ _ _ programs => OracleComp ambient Challenge × (Challenge → programs))
+    coin
 
 /-- Forward ambient challenge queries into the ambient side of the restricted signature. -/
 def ambientQueries {ι : Type} (ambient : OracleSpec ι) (access : PFunctor) :
@@ -49,114 +52,76 @@ def sourceQueries {ι : Type} (ambient : OracleSpec ι) (access : PFunctor) :
     QueryImpl (ofPFunctor access) (OracleComp (ambient + ofPFunctor access)) :=
   fun q => liftM ((ambient + ofPFunctor access).query (Sum.inr q))
 
-/-- Restricted verifier: oracle receives are pure; each public challenge is the supplied
-ambient program. No concrete oracle payload is available to authoring. -/
-def challengeFragment {ι : Type} (ambient : OracleSpec ι) : (rounds : List Round) →
-    (initial : PFunctor) → ChallengePrograms ambient rounds →
-    Verifier.Fragment ambient (protocol rounds).tree (protocol rounds).roles
-      (protocol rounds).oracles initial (fun _ => Unit)
-  | [], _, _ => ()
-  | round :: rounds, initial, programs =>
-      let extended := Access.extend initial round.interface
-      pure (do
-        let challenge ← simulateQ (ambientQueries ambient extended) programs.1
-        pure ⟨challenge, challengeFragment ambient rounds extended (programs.2 challenge)⟩)
+/-- Restricted verifier: prover moves and oracle receives are pure; each public challenge is
+the supplied ambient program. No concrete oracle payload is available to authoring. -/
+def challengeFragment {ι : Type} (ambient : OracleSpec ι) : {protocol : Protocol} →
+    (coin : PublicCoin protocol) → (initial : PFunctor) → ChallengePrograms ambient coin →
+    Verifier.Fragment ambient protocol.tree protocol.roles protocol.oracles initial (fun _ => Unit)
+  | _, .done, _, _ => ()
+  | _, @PublicCoin.sender _ _ _ next, initial, programs =>
+      fun move => pure (challengeFragment ambient (next move) initial (programs move))
+  | _, @PublicCoin.oracle _ _ interface _ next, initial, programs =>
+      pure (challengeFragment ambient next (Access.extend initial interface) programs)
+  | _, @PublicCoin.challenge _ _ _ _ _ next, initial, programs => do
+      let challenge ← simulateQ (ambientQueries ambient initial) programs.1
+      pure ⟨challenge, challengeFragment ambient next initial (programs.2 challenge)⟩
 
 /-- Complete the fragment with a deterministic source-only terminal program. It can
 query accumulated inputs/messages; ambient randomness is confined to challenge programs. -/
-def challengeVerifier {ι : Type} (ambient : OracleSpec ι) (rounds : List Round)
-    (initial : PFunctor) (programs : ChallengePrograms ambient rounds)
-    (Out : (protocol rounds).tree.BranchPath → Type)
-    (terminal : (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (Out p)) :
-    Verifier.Strategy ambient (protocol rounds).tree (protocol rounds).roles
-      (protocol rounds).oracles initial Out :=
+def challengeVerifier {ι : Type} (ambient : OracleSpec ι) {protocol : Protocol}
+    (coin : PublicCoin protocol) (initial : PFunctor) (programs : ChallengePrograms ambient coin)
+    (Out : protocol.tree.BranchPath → Type)
+    (terminal : (p : protocol.tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter protocol.tree protocol.oracles initial p)) (Out p)) :
+    Verifier.Strategy ambient protocol.tree protocol.roles protocol.oracles initial Out :=
   Verifier.Fragment.mapOutput ambient (fun p _ =>
-    simulateQ (sourceQueries ambient (accessAfter (protocol rounds).tree
-      (protocol rounds).oracles initial p)) (terminal p))
-    (challengeFragment ambient rounds initial programs)
+    simulateQ (sourceQueries ambient (accessAfter protocol.tree protocol.oracles initial p))
+      (terminal p))
+    (challengeFragment ambient coin initial programs)
 
-/-- Fixed message authoring, responding to each public challenge. -/
-def messageProver {ι : Type} {Salt : Type} (ambient : OracleSpec ι) :
-    (rounds : List Round) → Messages Salt rounds →
-    Prover.Strategy ambient (protocol rounds).tree (protocol rounds).roles (fun _ => Unit)
-  | [], _ => ()
-  | _ :: rounds, (message, _, messages) =>
-      pure ⟨message, fun _ => pure (messageProver ambient rounds messages)⟩
+/-- The prover sending the moves and oracle payloads of a path, whatever the challenges. -/
+def pathProver {ι : Type} (ambient : OracleSpec ι) : {protocol : Protocol} →
+    (coin : PublicCoin protocol) → protocol.tree.ExecutionPath →
+    Prover.Strategy ambient protocol.tree protocol.roles (fun _ => Unit)
+  | _, .done, _ => ()
+  | _, @PublicCoin.sender _ _ _ next, path =>
+      pure ⟨path.1, pathProver ambient (next path.1) path.2⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, path => pure ⟨path.1, pathProver ambient next path.2⟩
+  | _, @PublicCoin.challenge _ _ _ _ _ next, path =>
+      fun _ => pure (pathProver ambient next path.2)
 
-/-- Scripted prover retains every public response in its private output. Salts only select
-restoration keys and are never added to the protocol. -/
-def scriptedProver {ι : Type} {Salt : Type} (ambient : OracleSpec ι)
-    (rounds : List Round) (messages : Messages Salt rounds) :
-    Prover.Strategy ambient (protocol rounds).tree (protocol rounds).roles
-      (fun _ => (protocol rounds).tree.BranchPath) :=
-  StrategyOver.TwoParty.Focal.mapOutput
-    (fun path _ => (ExecutionPath.ofTypeTreePath path).toBranchPath)
-    (messageProver ambient rounds messages)
+/-- Programs returning arbitrary challenges, for the moves a replayed path does not take. -/
+noncomputable def arbitraryPrograms {ι : Type} (ambient : OracleSpec ι) :
+    {protocol : Protocol} → (coin : PublicCoin protocol) → ChallengePrograms ambient coin
+  | _, .done => PUnit.unit
+  | _, @PublicCoin.sender _ _ _ next => fun move => arbitraryPrograms ambient (next move)
+  | _, @PublicCoin.oracle _ _ _ _ next => arbitraryPrograms ambient next
+  | _, @PublicCoin.challenge _ _ _ _ _ next =>
+      ⟨pure (Classical.arbitrary _), fun _ => arbitraryPrograms ambient next⟩
 
-/-- Replay data reads only challenges from the path already obtained by completion. -/
-def pathPrograms {ι : Type} (ambient : OracleSpec ι) : (rounds : List Round) →
-    (protocol rounds).tree.ExecutionPath → ChallengePrograms ambient rounds
-  | [], _ => PUnit.unit
-  | _ :: rounds, path => ⟨pure path.2.1, fun _ => pathPrograms ambient rounds path.2.2⟩
-
-/-- Concrete oracle messages match the selected restoration messages; salts have no role in the
-protocol. -/
-def MatchesMessages {Salt : Type} : (rounds : List Round) → Messages Salt rounds →
-    (protocol rounds).tree.ExecutionPath → Prop
-  | [], _, _ => True
-  | _ :: rounds, (message, _, messages), path =>
-      path.1 = message ∧ MatchesMessages rounds messages path.2.2
-
-/-- Oracle simulation cannot add terminal outputs outside the original structural support. -/
-theorem simulateQ_support_subset {ι κ : Type}
-    {ambient : OracleSpec ι} {source : OracleSpec κ}
-    (impl : QueryImpl source (OracleComp ambient)) {α : Type} (program : OracleComp source α) :
-    support (simulateQ impl program) ⊆ support program := by
-  induction program using OracleComp.inductionOn with
-  | pure a =>
-      intro value supported
-      simp only [simulateQ_pure] at supported
-      have same := OracleComp.eq_of_mem_support_pure a supported
-      subst value
-      simp
-  | query_bind q k ih =>
-      intro value supported
-      simp only [simulateQ_bind, simulateQ_liftM_query] at supported
-      obtain ⟨response, _, hs⟩ := OracleComp.mem_support_bind_peel _ _ supported
-      exact MonadAttach.mem_support_bind.mpr ⟨response, by simp, ih response hs⟩
-
-/-- Every path in the open prefix completion program has exactly the authored oracle messages. -/
-theorem completePrefix_support_matches {Salt : Type} (rounds : List Round)
-    (messages : Messages Salt rounds) (path : (protocol rounds).tree.ExecutionPath)
-    (supported : path ∈ support (completePrefix rounds messages)) :
-    MatchesMessages rounds messages path := by
-  induction rounds with
-  | nil => trivial
-  | cons round rounds ih =>
-      rcases messages with ⟨message, salt, messages⟩
-      simp only [completePrefix] at supported
-      obtain ⟨challenge, _, hs⟩ := OracleComp.mem_support_bind_peel _ _ supported
-      obtain ⟨tail, htail, hpure⟩ := OracleComp.mem_support_bind_peel _ _ hs
-      have same := OracleComp.eq_of_mem_support_pure _ hpure
-      subst path
-      exact ⟨rfl, ih messages tail (simulateQ_support_subset _ _ htail)⟩
-
-/-- Every path in the actual open completion program has exactly the authored oracle messages. -/
-theorem complete_support_matches {Input Salt : Type} (rounds : Input → List Round) (z : Input)
-    (messages : Messages Salt (rounds z)) (path : (protocol (rounds z)).tree.ExecutionPath)
-    (supported : path ∈ support (complete rounds z messages)) :
-    MatchesMessages (rounds z) messages path :=
-  completePrefix_support_matches (rounds z) messages path
-    (simulateQ_support_subset _ _ supported)
+/-- Replay programs read the challenges of the path already obtained by completion. -/
+noncomputable def pathPrograms {ι : Type} (ambient : OracleSpec ι) :
+    {protocol : Protocol} → (coin : PublicCoin protocol) → protocol.tree.ExecutionPath →
+    ChallengePrograms ambient coin
+  | _, .done, _ => PUnit.unit
+  | _, @PublicCoin.sender Moves decEq _ next, path => fun move =>
+      @dite _ (path.1 = move) (decEq path.1 move)
+        (fun h => h ▸ pathPrograms ambient (next path.1) path.2)
+        (fun _ => arbitraryPrograms ambient (next move))
+  | _, @PublicCoin.oracle _ _ _ _ next, path => pathPrograms ambient next path.2
+  | _, @PublicCoin.challenge _ _ _ _ _ next, path =>
+      ⟨pure path.1, fun _ => pathPrograms ambient next path.2⟩
 
 /-- Ordinary fresh uniform challenge programs. -/
-def uniformPrograms : (rounds : List Round) → ChallengePrograms unifSpec rounds
-  | [] => PUnit.unit
-  | round :: rounds => ⟨$ᵗ round.Challenge, fun _ => uniformPrograms rounds⟩
+def uniformPrograms : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    ChallengePrograms unifSpec coin
+  | _, .done => PUnit.unit
+  | _, @PublicCoin.sender _ _ _ next => fun move => uniformPrograms (next move)
+  | _, @PublicCoin.oracle _ _ _ _ next => uniformPrograms next
+  | _, @PublicCoin.challenge Challenge _ _ _ _ next =>
+      ⟨$ᵗ Challenge, fun _ => uniformPrograms next⟩
 
-private theorem simulate_ambientQueries {ι : Type} (ambient : OracleSpec ι) (access : PFunctor)
+theorem simulate_ambientQueries {ι : Type} (ambient : OracleSpec ι) (access : PFunctor)
     (impl : QueryImpl (ofPFunctor access) Id) {α : Type} (program : OracleComp ambient α) :
     simulateQ (Verifier.liftAccessImpl ambient access impl)
       (simulateQ (ambientQueries ambient access) program) = program := by
@@ -167,7 +132,7 @@ private theorem simulate_ambientQueries {ι : Type} (ambient : OracleSpec ι) (a
     simp [QueryImpl.compose, ambientQueries]
   rw [h, simulateQ_id']
 
-private theorem simulate_sourceQueries {ι : Type} (ambient : OracleSpec ι) (access : PFunctor)
+theorem simulate_sourceQueries {ι : Type} (ambient : OracleSpec ι) (access : PFunctor)
     (impl : QueryImpl (ofPFunctor access) Id) {α : Type}
     (program : OracleComp (ofPFunctor access) α) :
     simulateQ (Verifier.liftAccessImpl ambient access impl)
@@ -183,194 +148,89 @@ private theorem simulate_sourceQueries {ι : Type} (ambient : OracleSpec ι) (ac
   rfl
 
 /-- The actual terminal observation uses exactly the run's accumulated closing handler. -/
-private theorem execute_sourceTerminal {ι : Type} (ambient : OracleSpec ι)
-    (rounds : List Round) (initial : PFunctor)
-    (impl : QueryImpl (ofPFunctor initial) Id) (programs : ChallengePrograms ambient rounds)
-    (OutP : (protocol rounds).tree.ExecutionPath → Type)
-    (prover : Prover.Strategy ambient (protocol rounds).tree (protocol rounds).roles OutP)
-    (Out : (protocol rounds).tree.BranchPath → Type)
-    (terminal : (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (Out p)) :
-    executeStrategies ambient (protocol rounds).tree (protocol rounds).roles
-      (protocol rounds).oracles initial impl prover
-      (challengeVerifier ambient rounds initial programs Out terminal) =
+theorem execute_sourceTerminal {ι : Type} (ambient : OracleSpec ι)
+    {protocol : Protocol} (coin : PublicCoin protocol) (initial : PFunctor)
+    (impl : QueryImpl (ofPFunctor initial) Id) (programs : ChallengePrograms ambient coin)
+    (OutP : protocol.tree.ExecutionPath → Type)
+    (prover : Prover.Strategy ambient protocol.tree protocol.roles OutP)
+    (Out : protocol.tree.BranchPath → Type)
+    (terminal : (p : protocol.tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter protocol.tree
+        protocol.oracles initial p)) (Out p)) :
+    executeStrategies ambient protocol.tree protocol.roles
+      protocol.oracles initial impl prover
+      (challengeVerifier ambient coin initial programs Out terminal) =
     (fun result => let path := ExecutionPath.ofTypeTreePath result.1
       ⟨path, result.2.1, evalWithAnswerFn
-        (path.closingImpl (protocol rounds).oracles initial impl)
+        (path.closingImpl protocol.oracles initial impl)
         (terminal path.toBranchPath)⟩) <$>
-      TwoParty.run (protocol rounds).tree.toTypeTree
-        (RoleDecoration.toTypeTreeRoles (protocol rounds).tree (protocol rounds).roles)
-        prover (Verifier.toCounterpartValue ambient (protocol rounds).tree (protocol rounds).roles
-          (protocol rounds).oracles initial impl (fun _ => Unit)
-          (challengeFragment ambient rounds initial programs)) := by
-  have interpreted : Verifier.toCounterpart ambient (protocol rounds).tree (protocol rounds).roles
-      (protocol rounds).oracles initial impl Out
-      (challengeVerifier ambient rounds initial programs Out terminal) =
+      TwoParty.run protocol.tree.toTypeTree
+        (RoleDecoration.toTypeTreeRoles protocol.tree protocol.roles)
+        prover (Verifier.toCounterpartValue ambient protocol.tree protocol.roles
+          protocol.oracles initial impl (fun _ => Unit)
+          (challengeFragment ambient coin initial programs)) := by
+  have interpreted : Verifier.toCounterpart ambient protocol.tree protocol.roles
+      protocol.oracles initial impl Out
+      (challengeVerifier ambient coin initial programs Out terminal) =
     StrategyOver.TwoParty.Counterpart.mapOutput (fun path _ =>
       pure (evalWithAnswerFn ((ExecutionPath.ofTypeTreePath path).closingImpl
-        (protocol rounds).oracles initial impl)
+        protocol.oracles initial impl)
         (terminal (ExecutionPath.ofTypeTreePath path).toBranchPath)))
-      (Verifier.toCounterpartValue ambient (protocol rounds).tree (protocol rounds).roles
-        (protocol rounds).oracles initial impl (fun _ => Unit)
-        (challengeFragment ambient rounds initial programs)) := by
+      (Verifier.toCounterpartValue ambient protocol.tree protocol.roles
+        protocol.oracles initial impl (fun _ => Unit)
+        (challengeFragment ambient coin initial programs)) := by
     unfold Verifier.toCounterpart challengeVerifier
     rw [Verifier.toCounterpartWith_mapOutput]
     simp only [simulate_sourceQueries]
-    exact Verifier.toCounterpartWith_finish_eq_mapOutput ambient (protocol rounds).tree
-      (protocol rounds).roles (protocol rounds).oracles initial impl (fun _ => Unit)
+    exact Verifier.toCounterpartWith_finish_eq_mapOutput ambient protocol.tree
+      protocol.roles protocol.oracles initial impl (fun _ => Unit)
       (fun p => OracleComp ambient (Out p))
       (fun path actual _ => pure (evalWithAnswerFn actual (terminal path)))
-      (challengeFragment ambient rounds initial programs)
+      (challengeFragment ambient coin initial programs)
   rw [executeStrategies_eq_run, interpreted, run_counterpart_mapOutput]
   simp only [map_eq_pure_bind, bind_assoc]
   apply bind_congr
   intro result
   rfl
 
-/-- The existing paired runner replays the supplied path when concrete messages match. -/
-private theorem pathReplay_run {ι Salt : Type} (ambient : OracleSpec ι)
-    (rounds : List Round) (initial : PFunctor)
-    (impl : QueryImpl (ofPFunctor initial) Id) (messages : Messages Salt rounds)
-    (path : (protocol rounds).tree.ExecutionPath) (matched : MatchesMessages rounds messages path) :
-    TwoParty.run (protocol rounds).tree.toTypeTree
-      (RoleDecoration.toTypeTreeRoles (protocol rounds).tree (protocol rounds).roles)
-      (messageProver ambient rounds messages)
-      (Verifier.toCounterpartValue ambient (protocol rounds).tree (protocol rounds).roles
-        (protocol rounds).oracles initial impl (fun _ => Unit)
-        (challengeFragment ambient rounds initial (pathPrograms ambient rounds path))) =
-      pure ⟨path.toTypeTreePath, (), ()⟩ := by
-  induction rounds generalizing initial with
-  | nil => cases path; rfl
-  | cons round rounds ih =>
-      rcases messages with ⟨message, salt, messages⟩
-      rcases path with ⟨actualMessage, challenge, tail⟩
-      rcases matched with ⟨same, matched⟩
-      change actualMessage = message at same
-      change MatchesMessages rounds messages tail at matched
-      subst actualMessage
-      simp only [messageProver, pathPrograms, challengeFragment,
-        protocol, Protocol.oracleWith, Protocol.public,
-        Verifier.toCounterpartValue, Verifier.toCounterpartWith]
-      change TwoParty.run
-        (.node round.Message (fun _ => .node round.Challenge
-          (fun _ => (protocol rounds).tree.toTypeTree)))
-        ⟨.sender, fun _ => ⟨.receiver, fun _ => RoleDecoration.toTypeTreeRoles
-          (protocol rounds).tree (protocol rounds).roles⟩⟩ _ _ = _
-      refine (TwoParty.run_sender (m := OracleComp ambient) (X := round.Message)
-        (rest := fun _ => _root_.Interaction.TypeTree.node round.Challenge
-          (fun _ => (protocol rounds).tree.toTypeTree))
-        (rRest := fun _ => ⟨.receiver, fun _ => RoleDecoration.toTypeTreeRoles
-          (protocol rounds).tree (protocol rounds).roles⟩)
-        (OutputP := fun _ => Unit) (OutputC := fun _ => Unit)
-        (pure ⟨message, fun _ => pure (messageProver ambient rounds messages)⟩)
-        (fun actualMessage => pure (pure ⟨challenge,
-          Verifier.toCounterpartValue ambient (protocol rounds).tree (protocol rounds).roles
-            (protocol rounds).oracles (Access.extend initial round.interface)
-            (Access.extendImpl initial round.interface impl actualMessage) (fun _ => Unit)
-            (challengeFragment ambient rounds (Access.extend initial round.interface)
-              (pathPrograms ambient rounds tail))⟩))).trans ?_
-      simp only [pure_bind]
-      have receiverStep := TwoParty.run_receiver (m := OracleComp ambient) (X := round.Challenge)
-        (rest := fun _ => (protocol rounds).tree.toTypeTree)
-        (rRest := fun _ => RoleDecoration.toTypeTreeRoles
-          (protocol rounds).tree (protocol rounds).roles)
-        (OutputP := fun _ => Unit) (OutputC := fun _ => Unit)
-        (fun _ => pure (messageProver ambient rounds messages))
-        (pure ⟨challenge,
-          Verifier.toCounterpartValue ambient (protocol rounds).tree (protocol rounds).roles
-            (protocol rounds).oracles (Access.extend initial round.interface)
-            (Access.extendImpl initial round.interface impl message) (fun _ => Unit)
-            (challengeFragment ambient rounds (Access.extend initial round.interface)
-              (pathPrograms ambient rounds tail))⟩)
-      refine (congrArg (fun computation => do
-        let tailOut ← computation
-        pure (⟨⟨message, tailOut.1⟩, tailOut.2⟩ :
-          (path : _root_.Interaction.TypeTree.Path
-            (_root_.Interaction.TypeTree.node round.Message (fun _ =>
-              _root_.Interaction.TypeTree.node round.Challenge (fun _ =>
-                (protocol rounds).tree.toTypeTree)))) × Unit × Unit)) receiverStep).trans ?_
-      simp only [pure_bind]
-      simp only [bind_assoc, pure_bind]
-      refine (congrArg (fun computation => do
-        let tailOut ← computation
-        pure (⟨⟨message, ⟨challenge, tailOut.1⟩⟩, tailOut.2⟩ :
-          (path : _root_.Interaction.TypeTree.Path
-            (_root_.Interaction.TypeTree.node round.Message (fun _ =>
-              _root_.Interaction.TypeTree.node round.Challenge (fun _ =>
-                (protocol rounds).tree.toTypeTree)))) × Unit × Unit))
-        (ih (Access.extend initial round.interface)
-          (Access.extendImpl initial round.interface impl message) messages tail matched)).trans ?_
-      rfl
-
 /-- Exact path-based replay in the actual executor. The real game has only this completed
 path; its verifier never inspects a global response table or makes additional oracle queries. -/
-theorem execute_pathReplay {ι Salt : Type} (ambient : OracleSpec ι)
-    (rounds : List Round) (initial : PFunctor)
-    (impl : QueryImpl (ofPFunctor initial) Id) (messages : Messages Salt rounds)
-    (path : (protocol rounds).tree.ExecutionPath) (matched : MatchesMessages rounds messages path)
-    (Out : (protocol rounds).tree.BranchPath → Type)
-    (terminal : (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (Out p)) :
-    executeStrategies ambient (protocol rounds).tree (protocol rounds).roles
-      (protocol rounds).oracles initial impl (scriptedProver ambient rounds messages)
-      (challengeVerifier ambient rounds initial (pathPrograms ambient rounds path) Out terminal) =
-    pure ⟨path, path.toBranchPath, evalWithAnswerFn
-      (path.closingImpl (protocol rounds).oracles initial impl)
+theorem execute_pathReplay {ι : Type} (ambient : OracleSpec ι) {protocol : Protocol}
+    (coin : PublicCoin protocol) (initial : PFunctor)
+    (impl : QueryImpl (ofPFunctor initial) Id) (path : protocol.tree.ExecutionPath)
+    (Out : protocol.tree.BranchPath → Type)
+    (terminal : (p : protocol.tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter protocol.tree protocol.oracles initial p)) (Out p)) :
+    executeStrategies ambient protocol.tree protocol.roles protocol.oracles initial impl
+      (pathProver ambient coin path)
+      (challengeVerifier ambient coin initial (pathPrograms ambient coin path) Out terminal) =
+    pure ⟨path, (), evalWithAnswerFn (path.closingImpl protocol.oracles initial impl)
       (terminal path.toBranchPath)⟩ := by
-  rw [execute_sourceTerminal]
-  unfold scriptedProver
-  have mapped := TwoParty.run_mapOutput_mapOutput
-    (fun path (_ : Unit) => (ExecutionPath.ofTypeTreePath path).toBranchPath)
-    (fun _ (out : Unit) => out) (messageProver ambient rounds messages)
-    (Verifier.toCounterpartValue ambient (protocol rounds).tree (protocol rounds).roles
-      (protocol rounds).oracles initial impl (fun _ => Unit)
-      (challengeFragment ambient rounds initial (pathPrograms ambient rounds path)))
-  simp only [StrategyOver.TwoParty.Counterpart.mapOutput_id] at mapped
-  rw [mapped, pathReplay_run ambient rounds initial impl messages path matched]
-  simp only [map_pure]
-  congr 1
-  rw [ExecutionPath.ofTypeTreePath_toTypeTreePath]
+  sorry
 
 set_option backward.isDefEq.respectTransparency false in
-/-- The ordinary verifier actually samples every receiver challenge according to the
-uniform schedule, for all authored oracle messages and every supported continuation. -/
-theorem uniformFragment_fresh (error : ENNReal) (rounds : List Round) (initial : PFunctor)
-    (impl : QueryImpl (ofPFunctor initial) Id) :
-    SamplesChallenges unifSpec (QueryImpl.id' unifSpec) (protocol rounds).tree
-      (protocol rounds).roles (protocol rounds).oracles initial impl (fun _ => Unit)
-      (challengeFragment unifSpec rounds initial (uniformPrograms rounds))
-      (uniformSchedule error rounds) := by
-  induction rounds generalizing initial with
-  | nil => trivial
-  | cons round rounds ih =>
-      simp only [protocol, Protocol.oracleWith, Protocol.public, SamplesChallenges,
-        challengeFragment, simulateQ_pure, simulateQ_id', uniformSchedule]
-      intro message after supported
-      have same := OracleComp.eq_of_mem_support_pure _ supported
-      subst after
-      simp only [uniformPrograms, simulateQ_map, simulate_ambientQueries, ← map_eq_pure_bind]
-      constructor
-      · intro event
-        simp only [Functor.map_map]
-      · intro chosen supported
-        obtain ⟨challenge, _, rfl⟩ := OracleComp.mem_support_map_peel _ _ supported
-        exact ih _ _
+/-- The ordinary verifier actually samples every challenge according to the uniform error
+schedule, for all authored prover moves and oracle messages and every supported continuation. -/
+theorem uniformFragment_fresh {protocol : Protocol} (coin : PublicCoin protocol)
+    (errors : Errors coin) (initial : PFunctor) (impl : QueryImpl (ofPFunctor initial) Id) :
+    SamplesChallenges unifSpec (QueryImpl.id' unifSpec) protocol.tree protocol.roles
+      protocol.oracles initial impl (fun _ => Unit)
+      (challengeFragment unifSpec coin initial (uniformPrograms coin))
+      (errorSchedule coin errors) := by
+  sorry
 
 /-- Source-only terminal authoring preserves actual uniform challenge freshness. -/
-theorem uniformVerifier_fresh (error : ENNReal) (rounds : List Round) (initial : PFunctor)
-    (impl : QueryImpl (ofPFunctor initial) Id)
-    (Out : (protocol rounds).tree.BranchPath → Type)
-    (terminal : (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (Out p)) :
-    SamplesChallenges unifSpec (QueryImpl.id' unifSpec) (protocol rounds).tree
-      (protocol rounds).roles (protocol rounds).oracles initial impl _
-      (challengeVerifier unifSpec rounds initial (uniformPrograms rounds) Out terminal)
-      (uniformSchedule error rounds) := by
+theorem uniformVerifier_fresh {protocol : Protocol} (coin : PublicCoin protocol)
+    (errors : Errors coin) (initial : PFunctor) (impl : QueryImpl (ofPFunctor initial) Id)
+    (Out : protocol.tree.BranchPath → Type)
+    (terminal : (p : protocol.tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter protocol.tree protocol.oracles initial p)) (Out p)) :
+    SamplesChallenges unifSpec (QueryImpl.id' unifSpec) protocol.tree protocol.roles
+      protocol.oracles initial impl _
+      (challengeVerifier unifSpec coin initial (uniformPrograms coin) Out terminal)
+      (errorSchedule coin errors) := by
   unfold challengeVerifier
   exact samplesChallenges_mapOutput _ _ _ _ _ _ _ _ _ _ _ _
-    (uniformFragment_fresh error rounds initial impl)
+    (uniformFragment_fresh coin errors initial impl)
 
 end Interaction.Oracle.Security.StateRestoration

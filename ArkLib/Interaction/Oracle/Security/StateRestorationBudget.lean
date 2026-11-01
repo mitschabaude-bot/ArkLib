@@ -1,22 +1,29 @@
 /-
 Copyright (c) 2026 ArkLib Contributors. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
-Authors: Quang Dao
+Authors: Quang Dao, Gregor Mitscha-Baude
 -/
 module
 
-public import ArkLib.Interaction.Oracle.Security.StateRestorationOracle
+public import ArkLib.Interaction.Oracle.Security.StateRestoration
 public import VCVio.OracleComp.QueryTracking.CostModel
 
 /-!
-# Nonuniform round errors in state restoration
+# Local errors in state restoration
 
-Each protocol round has its own knowledge error, and the errors may depend on the input. Completion
-of input `z` pays the sum of `z`'s errors; an adaptive adversary with at most `Q` queries pays `Q`
-times the largest error over all inputs and rounds. The same actual closed oracle-output game and
-named backward extraction therefore have error at most
-`Q * (⨆ z, max_j error z j) + ⨆ z, sum_j error z j`. Challenge samplers remain uniform within
-each round.
+Each challenge node of a public-coin protocol has its own knowledge error (`Errors`), indexed by
+the node: the prover's moves and oracle payloads before it, with the earlier challenges erased.
+The errors may depend on the input. `errorSchedule` is the challenge schedule that samples each
+challenge uniformly with its node's error. Completion of input `z` pays the errors along its path,
+at most the largest path sum `pathError`; an adaptive adversary with at most `Q` queries pays `Q`
+times the largest node error over all inputs. Hence the cached restoration experiment has
+extraction error at most `Q * maxError errors + sumError errors`
+(`restored_extraction_bound`).
+
+A knowledge certificate whose schedule samples every challenge uniformly
+(`UniformChallenges`) gives node errors by taking, at each node, the largest error over the
+erased earlier challenges (`supErrors`), and its local bound holds for their schedule
+(`isLocallyBounded_supErrors`).
 -/
 
 @[expose] public section
@@ -28,166 +35,173 @@ namespace Interaction.Oracle.Security.StateRestoration
 
 universe w
 
-/-- A vector of local knowledge errors, indexed in protocol order. -/
-abbrev RoundErrors (rounds : List Round) := Fin rounds.length → ENNReal
+/-- Local knowledge errors at the challenge nodes of a public-coin protocol. -/
+abbrev Errors {protocol : Protocol} (coin : PublicCoin protocol) :=
+  Prefix PUnit coin → ENNReal
 
-/-- Every receiver samples its round's uniform challenge with that round's local error. -/
-def roundErrorSchedule : (rounds : List Round) → RoundErrors rounds →
-    RoundExtractor.ChallengeSchedule (protocol rounds).tree (protocol rounds).roles
-  | [], _ => PUnit.unit
-  | round :: rounds, errors => fun _ => ⟨⟨$ᵗ round.Challenge, errors 0⟩,
-      fun _ => roundErrorSchedule rounds (fun j => errors j.succ)⟩
+/-- Every challenge is sampled uniformly, with its node's local error. -/
+def errorSchedule : {protocol : Protocol} → (coin : PublicCoin protocol) → Errors coin →
+    RoundExtractor.ChallengeSchedule protocol.tree protocol.roles
+  | _, .done, _ => PUnit.unit
+  | _, @PublicCoin.sender _ _ _ next, errors =>
+      ⟨PUnit.unit, fun move => errorSchedule (next move) fun q => errors ⟨move, q⟩⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, errors =>
+      fun message => errorSchedule next fun q => errors ⟨message, q⟩
+  | _, @PublicCoin.challenge Challenge _ _ _ _ next, errors =>
+      ⟨⟨$ᵗ Challenge, errors (.inl PUnit.unit)⟩,
+        fun _ => errorSchedule next fun q => errors (.inr ⟨PUnit.unit, q⟩)⟩
 
-/-- A constant error vector gives the uniform challenge schedule. -/
-theorem roundErrorSchedule_const (rounds : List Round) (error : ENNReal) :
-    roundErrorSchedule rounds (fun _ => error) = uniformSchedule error rounds := by
-  induction rounds with
-  | nil => rfl
-  | cons round rounds ih =>
-      simp only [roundErrorSchedule, uniformSchedule]
-      funext message
-      congr 1
-      funext challenge
-      exact ih
+/-- The largest sum of node errors along a complete path. -/
+noncomputable def pathError : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    Errors coin → ENNReal
+  | _, .done, _ => 0
+  | _, @PublicCoin.sender _ _ _ next, errors => ⨆ move, pathError (next move) fun q => errors ⟨move, q⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, errors => ⨆ message, pathError next fun q => errors ⟨message, q⟩
+  | _, @PublicCoin.challenge _ _ _ _ _ next, errors =>
+      errors (.inl PUnit.unit) + pathError next fun q => errors (.inr ⟨PUnit.unit, q⟩)
 
-/-- The charge of a salted prefix is the local error at its round. -/
-def prefixError {Salt : Type} : {rounds : List Round} → RoundErrors rounds →
-    Prefix Salt rounds → ENNReal
-  | [], _, pre => nomatch pre
-  | _ :: _, errors, .inl _ => errors 0
-  | _ :: _, errors, .inr (_, _, pre) => prefixError (fun j => errors j.succ) pre
+/-- The charge of a salted prefix is the error of its node. -/
+noncomputable abbrev prefixError {Salt : Type} {protocol : Protocol} {coin : PublicCoin protocol}
+    (errors : Errors coin) (pre : Prefix Salt coin) : ENNReal :=
+  errors pre.node
 
-/-- The charge of a restoration key is the local error of its input at its round. -/
-def keyError {Input Salt : Type} {rounds : Input → List Round}
-    (errors : (z : Input) → RoundErrors (rounds z)) (key : Key Input Salt rounds) : ENNReal :=
+section
+
+variable {Input : Type} {protocol : Input → Protocol}
+
+/-- The charge of a restoration key is the error of its input's node. -/
+noncomputable abbrev keyError {Salt : Type} {coin : (z : Input) → PublicCoin (protocol z)}
+    (errors : (z : Input) → Errors (coin z)) (key : Key Input Salt coin) : ENNReal :=
   prefixError (errors key.1) key.2
 
-/-- The largest local error over all inputs and rounds. -/
-noncomputable def maxError {Input : Type} {rounds : Input → List Round}
-    (errors : (z : Input) → RoundErrors (rounds z)) : ENNReal :=
-  ⨆ z, Finset.univ.sup (errors z)
+/-- The largest node error over all inputs. -/
+noncomputable def maxError {coin : (z : Input) → PublicCoin (protocol z)}
+    (errors : (z : Input) → Errors (coin z)) : ENNReal :=
+  ⨆ z, ⨆ node, errors z node
 
-/-- The largest total local error of one input's rounds. -/
-noncomputable def sumError {Input : Type} {rounds : Input → List Round}
-    (errors : (z : Input) → RoundErrors (rounds z)) : ENNReal :=
-  ⨆ z, ∑ j, errors z j
+/-- The largest path sum of errors over all inputs. -/
+noncomputable def sumError {coin : (z : Input) → PublicCoin (protocol z)}
+    (errors : (z : Input) → Errors (coin z)) : ENNReal :=
+  ⨆ z, pathError (coin z) (errors z)
 
-/-- With input-independent errors, the largest error is at most the maximum round error. -/
-theorem maxError_const_le {Input : Type} {rounds : List Round} (errors : RoundErrors rounds) :
-    maxError (rounds := fun _ : Input => rounds) (fun _ => errors) ≤ Finset.univ.sup errors :=
-  iSup_le fun _ => le_rfl
-
-/-- With input-independent errors, the largest total is at most the sum of the round errors. -/
-theorem sumError_const_le {Input : Type} {rounds : List Round} (errors : RoundErrors rounds) :
-    sumError (rounds := fun _ : Input => rounds) (fun _ => errors) ≤ ∑ j, errors j :=
-  iSup_le fun _ => le_rfl
-
-/-- Every prefix charge is bounded by the maximum round error, including zero or infinite
-errors. -/
-theorem prefixError_le_max {Salt : Type} {rounds : List Round}
-    (errors : RoundErrors rounds) (pre : Prefix Salt rounds) :
-    prefixError errors pre ≤ Finset.univ.sup errors := by
-  induction rounds with
-  | nil => exact pre.elim
-  | cons round rounds ih =>
-      cases pre with
-      | inl _ => exact Finset.le_sup (Finset.mem_univ (0 : Fin (rounds.length + 1)))
-      | inr data =>
-          apply (ih (fun j => errors j.succ) data.2.2).trans
-          apply Finset.sup_le
-          intro j _
-          exact Finset.le_sup (Finset.mem_univ j.succ)
-
-/-- Every key charge is bounded by the largest error over all inputs and rounds. -/
-theorem keyError_le_maxError {Input Salt : Type} {rounds : Input → List Round}
-    (errors : (z : Input) → RoundErrors (rounds z)) (key : Key Input Salt rounds) :
+/-- Every key charge is bounded by the largest node error. -/
+theorem keyError_le_maxError {Salt : Type} {coin : (z : Input) → PublicCoin (protocol z)}
+    (errors : (z : Input) → Errors (coin z)) (key : Key Input Salt coin) :
     keyError errors key ≤ maxError errors :=
-  (prefixError_le_max (errors key.1) key.2).trans (le_iSup (fun z => Finset.univ.sup (errors z))
-    key.1)
+  (le_iSup (errors key.1) key.2.node).trans (le_iSup (fun z => ⨆ node, errors z node) key.1)
+
+end
 
 /-- All authored-prefix local bounds apply to each prefix's reconstructed pre-challenge state. -/
-theorem prefixExtractor_round_bound {Salt : Type} {rounds : List Round}
-    {state : KnowledgeState.{w}} (extractor : RoundExtractor (protocol rounds).tree state)
-    (errors : RoundErrors rounds)
-    (bounded : RoundExtractor.IsLocallyBounded extractor (protocol rounds).roles
-      (roundErrorSchedule rounds errors))
-    (pre : Prefix Salt rounds) (table : PrefixTable Salt rounds) :
+theorem prefixExtractor_bound {Salt : Type} {protocol : Protocol} (coin : PublicCoin protocol)
+    {state : KnowledgeState.{w}} (extractor : RoundExtractor protocol.tree state)
+    (errors : Errors coin)
+    (bounded : RoundExtractor.IsLocallyBounded extractor protocol.roles
+      (errorSchedule coin errors))
+    (pre : Prefix Salt coin) (table : PrefixTable Salt coin) :
     Pr{let response ← $ᵗ pre.Challenge}[
-      RoundExtractor.badChallenge (prefixExtractor extractor pre table).2 response] ≤
+      RoundExtractor.badChallenge (prefixExtractor coin extractor pre table).2 response] ≤
       prefixError errors pre := by
-  induction rounds generalizing state with
-  | nil => exact pre.elim
-  | cons round rounds ih =>
+  induction coin generalizing state with
+  | done => exact pre.elim
+  | sender next ih =>
+      rcases pre with ⟨move, pre⟩
+      exact ih move _ _ (bounded move) pre _
+  | oracle next ih =>
+      rcases pre with ⟨message, pre⟩
+      exact ih _ _ (bounded message) pre _
+  | challenge next ih =>
       cases pre with
-      | inl data =>
-          rcases data with ⟨message, salt⟩
-          exact (_root_.RoundByRound.GameFamily.isBounded_iff _ _).mp
-            (bounded message).1 PUnit.unit PUnit.unit
+      | inl _ =>
+          exact (_root_.RoundByRound.GameFamily.isBounded_iff _ _).mp bounded.1
+            PUnit.unit PUnit.unit
       | inr data =>
-          rcases data with ⟨message, salt, pre⟩
-          exact ih ((extractor message).2.2 (table (Prefix.here message salt))).2.2
-            (fun j => errors j.succ) ((bounded message).2 (table (Prefix.here message salt)))
-            pre (fun q => table (Prefix.later message salt q))
+          rcases data with ⟨salt, pre⟩
+          exact ih _ _ (bounded.2 (table (.inl salt))) pre _
 
-/-- Resampling a key in any background table has bad-event probability at most its round error. -/
-theorem badKey_round_resample_bound {Input Salt : Type} {rounds : Input → List Round}
-    [DecidableEq Input] [DecidableEq Salt]
+/-- Resampling a key in any background table has bad-event probability at most its error. -/
+theorem badKey_resample_bound {Input Salt : Type} {protocol : Input → Protocol}
+    {coin : (z : Input) → PublicCoin (protocol z)} [DecidableEq Input] [DecidableEq Salt]
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
-    (Z : Set Input) (errors : (z : Input) → RoundErrors (rounds z))
-    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol (rounds z)).roles
-      (roundErrorSchedule (rounds z) (errors z)))
-    (key : Key Input Salt rounds) (table : Table Input Salt rounds) :
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
+    (Z : Set Input) (errors : (z : Input) → Errors (coin z))
+    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol z).roles
+      (errorSchedule (coin z) (errors z)))
+    (key : Key Input Salt coin) (table : Table Input Salt coin) :
     Pr{let response ← $ᵗ key.Challenge}[
-      badKey state extractor Z key (Function.update table key response)] ≤ keyError errors key := by
+      badKey state extractor Z key (Function.update table key response)] ≤
+      keyError errors key := by
   simp_rw [badKey_update_iff]
   by_cases hz : key.1 ∈ Z
   · simp only [hz, true_and]
-    exact prefixExtractor_round_bound (extractor key.1) (errors key.1) (bounded key.1 hz) key.2
-      (Table.fibre table key.1)
+    exact prefixExtractor_bound (coin key.1) (extractor key.1) (errors key.1) (bounded key.1 hz)
+      key.2 (Table.fibre table key.1)
   · simp only [hz, false_and]
     simp
 
-/-- Routing a suffix prefix retains its round charge exactly, on every complete execution path. -/
-theorem costDist_prependQuery {Salt A : Type} {round : Round} {rounds : List Round}
-    (errors : RoundErrors (round :: rounds)) (message : round.Message) (salt : Salt)
-    (program : OracleComp (prefixSpec Salt rounds) A) :
-    costDist (simulateQ (prependQuery message salt) program)
-        (⟨prefixError errors⟩ : CostModel (prefixSpec Salt (round :: rounds)) ENNReal) =
-      simulateQ (prependQuery message salt)
-        (costDist program (⟨prefixError (fun j => errors j.succ)⟩ :
-          CostModel (prefixSpec Salt rounds) ENNReal)) := by
+/-! ### Costs -/
+
+/-- Simulation keeps every returned value within the original support. -/
+theorem simulateQ_support_subset {ι κ : Type}
+    {ambient : OracleSpec ι} {source : OracleSpec κ}
+    (impl : QueryImpl source (OracleComp ambient)) {α : Type} (program : OracleComp source α) :
+    support (simulateQ impl program) ⊆ support program := by
+  induction program using OracleComp.inductionOn with
+  | pure a =>
+      intro value supported
+      simp only [simulateQ_pure] at supported
+      have same := OracleComp.eq_of_mem_support_pure a supported
+      subst value
+      simp
+  | query_bind q k ih =>
+      intro value supported
+      simp only [simulateQ_bind, simulateQ_liftM_query] at supported
+      obtain ⟨response, _, hs⟩ := OracleComp.mem_support_bind_peel _ _ supported
+      exact MonadAttach.mem_support_bind.mpr ⟨response, by simp, ih response hs⟩
+
+/-- A worst-case budget is also a budget for any larger bound. -/
+theorem worstCaseCostBound_mono {ι A : Type} {spec : OracleSpec ι} {program : OracleComp spec A}
+    {model : CostModel spec ENNReal} {budget larger : ENNReal}
+    (bounded : WorstCaseCostBound program model budget) (le : budget ≤ larger) :
+    WorstCaseCostBound program model larger := by
+  rw [worstCaseCostBound_iff_support_bound] at bounded ⊢
+  exact fun result supported => (bounded result supported).trans le
+
+/-- Reindexing charges each query the weight of its image, on every complete execution path. -/
+theorem costDist_reindexQuery {D D' A : Type} {R : D → Type} (f : D' → D)
+    (weight : D → ENNReal) (program : OracleComp (OracleSpec.ofFn fun q => R (f q)) A) :
+    costDist (simulateQ (reindexQuery f) program)
+        (⟨weight⟩ : CostModel (OracleSpec.ofFn R) ENNReal) =
+      simulateQ (reindexQuery f)
+        (costDist program (⟨fun q => weight (f q)⟩ :
+          CostModel (OracleSpec.ofFn fun q => R (f q)) ENNReal)) := by
   induction program using OracleComp.inductionOn with
   | pure value => simp [costDist, instrumentedRun]
   | query_bind key next ih =>
       simp only [costDist, instrumentedRun, QueryImpl.withAddCost, QueryImpl.ofLift_eq_id'] at ih
-      simp [costDist, instrumentedRun, QueryImpl.withAddCost, prependQuery, OracleSpec.query,
-        WriterT.run_bind, simulateQ_bind, simulateQ_query, bind_assoc, prefixError, ih]
+      simp [costDist, instrumentedRun, QueryImpl.withAddCost, reindexQuery, OracleSpec.query,
+        WriterT.run_bind, simulateQ_bind, simulateQ_query, bind_assoc, ih]
 
-/-- Routing a prefix of input `z` to its key retains its round charge exactly. -/
-theorem costDist_inputQuery {Input Salt A : Type} {rounds : Input → List Round}
-    (errors : (z : Input) → RoundErrors (rounds z)) (z : Input)
-    (program : OracleComp (prefixSpec Salt (rounds z)) A) :
-    costDist (simulateQ (inputQuery z) program)
-        (⟨keyError errors⟩ : CostModel (oracleSpec Input Salt rounds) ENNReal) =
-      simulateQ (inputQuery z)
-        (costDist program (⟨prefixError (errors z)⟩ :
-          CostModel (prefixSpec Salt (rounds z)) ENNReal)) := by
-  induction program using OracleComp.inductionOn with
-  | pure value => simp [costDist, instrumentedRun]
-  | query_bind key next ih =>
-      simp only [costDist, instrumentedRun, QueryImpl.withAddCost, QueryImpl.ofLift_eq_id',
-        keyError] at ih
-      simp [costDist, instrumentedRun, QueryImpl.withAddCost, inputQuery, OracleSpec.query,
-        WriterT.run_bind, simulateQ_bind, simulateQ_query, bind_assoc, keyError, ih]
+/-- Reindexing preserves a worst-case budget under the pulled-back weights. -/
+theorem worstCaseCostBound_reindexQuery {D D' A : Type} {R : D → Type} (f : D' → D)
+    (weight : D → ENNReal) (program : OracleComp (OracleSpec.ofFn fun q => R (f q)) A)
+    (budget : ENNReal)
+    (bounded : WorstCaseCostBound program (⟨fun q => weight (f q)⟩ :
+      CostModel (OracleSpec.ofFn fun q => R (f q)) ENNReal) budget) :
+    WorstCaseCostBound (simulateQ (reindexQuery f) program)
+      (⟨weight⟩ : CostModel (OracleSpec.ofFn R) ENNReal) budget := by
+  rw [worstCaseCostBound_iff_support_bound] at bounded ⊢
+  intro result supported
+  rw [costDist_reindexQuery] at supported
+  exact bounded result (simulateQ_support_subset _ _ supported)
 
 /-- A `Q`-query adversary pays at most `Q` times the largest error on every branch. -/
-theorem queryBound_round_cost {Input Salt A : Type} {rounds : Input → List Round}
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (program : OracleComp (oracleSpec Input Salt rounds) A)
+theorem queryBound_cost {Input Salt A : Type} {protocol : Input → Protocol}
+    {coin : (z : Input) → PublicCoin (protocol z)} (errors : (z : Input) → Errors (coin z))
+    (program : OracleComp (oracleSpec Input Salt coin) A)
     (Q : Nat) (bounded : IsTotalQueryBound program Q) :
     WorstCaseCostBound program (⟨keyError errors⟩ :
-      CostModel (oracleSpec Input Salt rounds) ENNReal) (Q * maxError errors) := by
+      CostModel (oracleSpec Input Salt coin) ENNReal) (Q * maxError errors) := by
   induction program using OracleComp.inductionOn generalizing Q with
   | pure value => simp
   | query_bind key next ih =>
@@ -204,89 +218,88 @@ theorem queryBound_round_cost {Input Salt A : Type} {rounds : Input → List Rou
           conv_rhs => rw [hQ]
           rw [Nat.cast_add, Nat.cast_one, add_mul, one_mul, add_comm]
 
-/-- The suffix-prefix injection preserves a complete-path error budget. -/
-theorem roundCost_prependQuery {Salt A : Type} {round : Round} {rounds : List Round}
-    (errors : RoundErrors (round :: rounds)) (message : round.Message) (salt : Salt)
-    (program : OracleComp (prefixSpec Salt rounds) A) (budget : ENNReal)
-    (bounded : WorstCaseCostBound program (⟨prefixError (fun j => errors j.succ)⟩ :
-      CostModel (prefixSpec Salt rounds) ENNReal) budget) :
-    WorstCaseCostBound (simulateQ (prependQuery message salt) program)
-      (⟨prefixError errors⟩ : CostModel (prefixSpec Salt (round :: rounds)) ENNReal) budget := by
-  intro result supported
-  change result ∈ support (costDist _ _) at supported
-  rw [costDist_prependQuery] at supported
-  exact bounded result (simulateQ_support_subset _ _ supported)
-
-/-- Prefix completion pays one round error per actual access, hence the sum of the round-error
-vector. -/
-theorem completePrefix_round_cost {Salt : Type} (rounds : List Round)
-    (errors : RoundErrors rounds) (messages : Messages Salt rounds) :
-    WorstCaseCostBound (completePrefix rounds messages)
-      (⟨prefixError errors⟩ : CostModel (prefixSpec Salt rounds) ENNReal) (∑ j, errors j) := by
-  induction rounds with
-  | nil => simp [completePrefix, protocol, Protocol.done]
-  | cons round rounds ih =>
-      rcases messages with ⟨message, salt, messages⟩
-      simp only [completePrefix, List.length_cons]
-      rw [Fin.sum_univ_succ]
+/-- Prefix completion pays one node error per actual access, at most the largest path sum. -/
+theorem completePrefix_cost {Salt : Type} {protocol : Protocol} (coin : PublicCoin protocol)
+    (errors : Errors coin) (messages : Messages Salt coin) :
+    WorstCaseCostBound (completePrefix coin messages)
+      (⟨prefixError errors⟩ : CostModel (prefixSpec Salt coin) ENNReal)
+      (pathError coin errors) := by
+  induction coin with
+  | done => simp [completePrefix]
+  | sender next ih =>
+      rcases messages with ⟨move, messages⟩
+      simp only [completePrefix, pathError]
+      refine worstCaseCostBound_mono (budget := pathError (next move) (fun q => errors ⟨move, q⟩) + 0)
+        ((worstCaseCostBound_reindexQuery (R := Prefix.Challenge (coin := .sender next))
+          (Sigma.mk move) (prefixError errors) _ _ (ih move (fun q => errors ⟨move, q⟩) messages)).bind fun _ => (worstCaseCostBound_pure _ _ _).mpr le_rfl) ?_
+      rw [add_zero]
+      exact le_iSup (fun move => pathError (next move) fun q => errors ⟨move, q⟩) move
+  | oracle next ih =>
+      rcases messages with ⟨message, messages⟩
+      simp only [completePrefix, pathError]
+      refine worstCaseCostBound_mono (budget := pathError next (fun q => errors ⟨message, q⟩) + 0)
+        ((worstCaseCostBound_reindexQuery (R := Prefix.Challenge (coin := .oracle next))
+          (Prod.mk message) (prefixError errors) _ _ (ih (fun q => errors ⟨message, q⟩) messages)).bind fun _ => (worstCaseCostBound_pure _ _ _).mpr le_rfl) ?_
+      rw [add_zero]
+      exact le_iSup (fun message => pathError next fun q => errors ⟨message, q⟩) message
+  | challenge next ih =>
+      rcases messages with ⟨salt, messages⟩
+      simp only [completePrefix, pathError]
       apply (worstCaseCostBound_query_bind_iff _ _ _ _).mpr
       intro challenge result supported
-      have tail := roundCost_prependQuery errors message salt (completePrefix rounds messages) _
-        (ih (fun j => errors j.succ) messages)
-      have combined := tail.bind (fun path => show WorstCaseCostBound
-        (pure (⟨message, challenge, path⟩ : (protocol (round :: rounds)).tree.ExecutionPath))
-          (⟨prefixError errors⟩ : CostModel (prefixSpec Salt (round :: rounds)) ENNReal) 0 from
-            by simp)
-      have hcost := combined result supported
-      simpa only [prefixError, add_zero, zero_add, add_comm] using
-        add_le_add_left hcost (errors 0)
+      have combined := (worstCaseCostBound_reindexQuery (R := Prefix.Challenge (coin := .challenge next))
+        (fun q : Prefix Salt next => Sum.inr ⟨salt, q⟩) (prefixError errors) _ _
+        (ih (fun q => errors (.inr ⟨PUnit.unit, q⟩)) messages)).bind
+          (k := fun path => (pure ⟨challenge, path⟩ : OracleComp (prefixSpec Salt (.challenge next))
+            (Protocol.public .receiver _ fun _ => _).tree.ExecutionPath))
+            fun _ => (worstCaseCostBound_pure _ _ _).mpr le_rfl
+      rw [add_zero] at combined
+      rw [worstCaseCostBound_iff_support_bound] at combined
+      exact add_le_add le_rfl (combined result supported)
 
-/-- Completion of input `z` pays at most the largest total error of one input's rounds. -/
-theorem complete_round_cost {Input Salt : Type} (rounds : Input → List Round)
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (z : Input) (messages : Messages Salt (rounds z)) :
-    WorstCaseCostBound (complete rounds z messages)
-      (⟨keyError errors⟩ : CostModel (oracleSpec Input Salt rounds) ENNReal)
-      (sumError errors) := by
-  intro result supported
-  change result ∈ support (costDist _ _) at supported
-  rw [complete, costDist_inputQuery] at supported
-  exact (completePrefix_round_cost (rounds z) (errors z) messages result
-    (simulateQ_support_subset _ _ supported)).trans
-      (le_iSup (fun z => ∑ j, errors z j) z)
+/-- Completion of input `z` pays at most the largest path sum over all inputs. -/
+theorem complete_cost {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z)) (errors : (z : Input) → Errors (coin z))
+    (z : Input) (messages : Messages Salt (coin z)) :
+    WorstCaseCostBound (complete coin z messages)
+      (⟨keyError errors⟩ : CostModel (oracleSpec Input Salt coin) ENNReal)
+      (sumError errors) :=
+  worstCaseCostBound_mono (worstCaseCostBound_reindexQuery (R := Key.Challenge) (Sigma.mk z)
+    (keyError errors) _ _ (completePrefix_cost (coin z) (errors z) messages))
+      (le_iSup (fun z => pathError (coin z) (errors z)) z)
 
 /-- Adversary and completion budgets add in the same actual restoration oracle program. -/
-theorem restoredExecution_round_cost {Input Salt W : Type} (rounds : Input → List Round)
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (adversary : OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds))
+theorem restoredExecution_cost {Input Salt W : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z)) (errors : (z : Input) → Errors (coin z))
+    (adversary : OracleComp (oracleSpec Input Salt coin) (Selection Input Salt W coin))
     (Q : Nat) (bounded : IsTotalQueryBound adversary Q) :
-    WorstCaseCostBound (restoredExecution rounds adversary)
-      (⟨keyError errors⟩ : CostModel (oracleSpec Input Salt rounds) ENNReal)
+    WorstCaseCostBound (restoredExecution coin adversary)
+      (⟨keyError errors⟩ : CostModel (oracleSpec Input Salt coin) ENNReal)
       (Q * maxError errors + sumError errors) := by
-  apply (queryBound_round_cost errors adversary Q bounded).bind
+  apply (queryBound_cost errors adversary Q bounded).bind
   rintro ⟨z, messages, witness⟩
-  have completed := (complete_round_cost rounds errors z messages).bind
-    (fun path => show WorstCaseCostBound (pure (⟨z, path, witness⟩ : Outcome Input W rounds))
-      (⟨keyError errors⟩ : CostModel (oracleSpec Input Salt rounds) ENNReal) 0 from by simp)
+  have completed := (complete_cost coin errors z messages).bind
+    (fun path => show WorstCaseCostBound (pure (⟨z, path, witness⟩ : Outcome Input W protocol))
+      (⟨keyError errors⟩ : CostModel (oracleSpec Input Salt coin) ENNReal) 0 from by simp)
   simpa only [add_zero] using completed
 
-/-- Per-round knowledge errors imply the `Q * max + sum` extraction bound in the actual cached
+/-- Per-node knowledge errors imply the `Q * max + sum` extraction bound in the actual cached
 restoration experiment. Inputs may be adaptive and keys may be queried out of order or repeatedly.
 The terminal witness is supplied by the adversary; extraction remains the named backward map.
 The sum budget is proved for completion, rather than assumed independent of earlier accesses. -/
-theorem restored_extraction_round_bound {Input Salt W : Type} {rounds : Input → List Round}
-    [DecidableEq Input] [DecidableEq Salt]
+theorem restored_extraction_bound {Input Salt W : Type} {protocol : Input → Protocol}
+    {coin : (z : Input) → PublicCoin (protocol z)} [DecidableEq Input] [DecidableEq Salt]
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
-    (Z : Set Input) (errors : (z : Input) → RoundErrors (rounds z))
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
-    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol (rounds z)).roles
-      (roundErrorSchedule (rounds z) (errors z)))
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
+    (Z : Set Input) (errors : (z : Input) → Errors (coin z))
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
+    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol z).roles
+      (errorSchedule (coin z) (errors z)))
+    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
-    (adversary : OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds))
+    (adversary : OracleComp (oracleSpec Input Salt coin) (Selection Input Salt W coin))
     (Q : ℕ) (queryBound : IsTotalQueryBound adversary Q) :
-    Pr{let result ← (simulateQ randomOracle (restoredExecution rounds adversary)).run' ∅}[
+    Pr{let result ← (simulateQ randomOracle (restoredExecution coin adversary)).run' ∅}[
       result.1 ∈ Z ∧
       ((extractor result.1).terminalState result.2.1).holds
         (terminalWitness result.1 result.2.1 result.2.2) ∧
@@ -294,103 +307,57 @@ theorem restored_extraction_round_bound {Input Salt W : Type} {rounds : Input �
         (terminalWitness result.1 result.2.1 result.2.2))] ≤
       Q * maxError errors + sumError errors := by
   apply prEvent_randomOracle_le_of_bad_queries_weighted _ (keyError errors) _
-    (restoredExecution_round_cost rounds errors adversary Q queryBound) _
+    (restoredExecution_cost coin errors adversary Q queryBound) _
     (badKey state extractor Z)
-  · exact badKey_round_resample_bound state extractor Z errors bounded
+  · exact badKey_resample_bound state extractor Z errors bounded
   · exact restored_bad_trace state extractor Z preserving terminalWitness adversary
 
-/-- The actual closed-oracle verification game has knowledge error at most `Q * max + sum` for
-an arbitrary adaptive `Q`-query adversary and distinct all-prefix local round errors. The output
-relation observes this same run's closed virtual behavior; rejection `none` is unsuccessful.
-The named terminal-witness equivalence and exact input/output relation laws link the certificate
-to the actual source-only terminal program. No finite input or salt domain is required. -/
-theorem stateRestoration_oracle_knowledge_soundness_nonuniform
-    {Input Salt : Type} {rounds : Input → List Round} {W : Type}
-    [DecidableEq Input] [DecidableEq Salt]
-    (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
-    (Z : Set Input) (errors : (z : Input) → RoundErrors (rounds z))
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
-    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol (rounds z)).roles
-      (roundErrorSchedule (rounds z) (errors z)))
-    (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Stmt : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
-    {Idx : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
-      OracleFamily (Idx z p) (Realization z p))
-    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
-        (protocol (rounds z)).oracles initial p)) (OracleOutput initial Stmt family z p))
-    (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
-      ClosedClaim (Stmt z p) (family z p) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
-      W ≃ ((extractor z).terminalState path).Witness)
-    (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
-    (outputLaw : ∀ z path witness,
-      ((extractor z).terminalState path).holds (terminalWitness z path witness) ↔
-        ∃ claim, closedTerminalObservation initial impl Stmt family terminal z path = some claim ∧
-          Rout z path.toBranchPath claim witness)
-    (adversary : OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds))
-    (Q : ℕ) (queryBound : IsTotalQueryBound adversary Q) :
-    Pr{let result ← (simulateQ randomOracle
-        (closedVerificationGame initial impl Stmt family terminal adversary)).run' ∅}[
-      result.1 ∈ Z ∧
-      (∃ claim, result.2.2.1 = some claim ∧
-        Rout result.1 result.2.1.toBranchPath claim result.2.2.2) ∧
-      ¬ Rin result.1 (extractInputWitness state extractor terminalWitness
-        result.1 result.2.1 result.2.2.2)] ≤ Q * maxError errors + sumError errors := by
-  rw [closedVerificationGame_eq, simulateQ_map]
-  simp only [StateT.run'_map', prEvent_map]
-  simp only [extractInputWitness, ← inputLaw, ← outputLaw]
-  exact restored_extraction_round_bound state extractor Z errors preserving bounded
-    (fun z path => terminalWitness z path) adversary Q queryBound
+/-! ### Errors of a knowledge certificate -/
 
-/-- Rounds and errors that are the same for every input: the bound is
-`Q * max_j error_j + sum_j error_j`. -/
-theorem stateRestoration_oracle_knowledge_soundness_nonuniform_fixed
-    {Input Salt : Type} {rounds : List Round} {W : Type}
-    [DecidableEq Input] [DecidableEq Salt]
-    (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
-    (Z : Set Input) (errors : RoundErrors rounds)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
-    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol rounds).roles
-      (roundErrorSchedule rounds errors))
-    (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Stmt : Input → (protocol rounds).tree.BranchPath → Type)
-    {Idx : Input → (protocol rounds).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol rounds).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleFamily (Idx z p) (Realization z p))
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p))
-        (OracleOutput (rounds := fun _ => rounds) initial Stmt family z p))
-    (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      ClosedClaim (Stmt z p) (family z p) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
-      W ≃ ((extractor z).terminalState path).Witness)
-    (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
-    (outputLaw : ∀ z path witness,
-      ((extractor z).terminalState path).holds (terminalWitness z path witness) ↔
-        ∃ claim, closedTerminalObservation (rounds := fun _ => rounds) initial impl Stmt family
-          terminal z path = some claim ∧ Rout z path.toBranchPath claim witness)
-    (adversary : OracleComp (oracleSpec Input Salt fun _ => rounds)
-      (Selection Input Salt W fun _ => rounds))
-    (Q : ℕ) (queryBound : IsTotalQueryBound adversary Q) :
-    Pr{let result ← (simulateQ randomOracle
-        (closedVerificationGame initial impl Stmt family terminal adversary)).run' ∅}[
-      result.1 ∈ Z ∧
-      (∃ claim, result.2.2.1 = some claim ∧
-        Rout result.1 result.2.1.toBranchPath claim result.2.2.2) ∧
-      ¬ Rin result.1 (extractInputWitness state extractor terminalWitness
-        result.1 result.2.1 result.2.2.2)] ≤ Q * Finset.univ.sup errors + ∑ j, errors j :=
-  (stateRestoration_oracle_knowledge_soundness_nonuniform state extractor Z (fun _ => errors)
-    preserving bounded initial impl Stmt family terminal Rin Rout terminalWitness inputLaw
-    outputLaw adversary Q queryBound).trans
-      (add_le_add (by gcongr; exact maxError_const_le errors) (sumError_const_le errors))
+/-- Every challenge of a schedule is sampled uniformly. -/
+def UniformChallenges : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    RoundExtractor.ChallengeSchedule protocol.tree protocol.roles → Prop
+  | _, .done, _ => True
+  | _, @PublicCoin.sender _ _ _ next, schedule => ∀ move, UniformChallenges (next move) (schedule.2 move)
+  | _, @PublicCoin.oracle _ _ _ _ next, schedule => ∀ message, UniformChallenges next (schedule message)
+  | _, @PublicCoin.challenge Challenge _ _ _ _ next, schedule =>
+      schedule.1.1 = $ᵗ Challenge ∧ ∀ challenge, UniformChallenges next (schedule.2 challenge)
+
+/-- The error of a schedule at each node: its largest error over the erased earlier
+challenges. -/
+noncomputable def supErrors : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    RoundExtractor.ChallengeSchedule protocol.tree protocol.roles → Errors coin
+  | _, .done, _, node => nomatch node
+  | _, @PublicCoin.sender _ _ _ next, schedule, ⟨move, node⟩ => supErrors (next move) (schedule.2 move) node
+  | _, @PublicCoin.oracle _ _ _ _ next, schedule, ⟨message, node⟩ => supErrors next (schedule message) node
+  | _, @PublicCoin.challenge _ _ _ _ _ _, schedule, .inl _ => schedule.1.2
+  | _, @PublicCoin.challenge _ _ _ _ _ next, schedule, .inr ⟨_, node⟩ =>
+      ⨆ challenge, supErrors next (schedule.2 challenge) node
+
+/-- A local bound for a uniform schedule holds for any node errors above its own. -/
+theorem isLocallyBounded_errorSchedule {protocol : Protocol} (coin : PublicCoin protocol)
+    {state : KnowledgeState.{w}} (extractor : RoundExtractor protocol.tree state)
+    (schedule : RoundExtractor.ChallengeSchedule protocol.tree protocol.roles)
+    (uniform : UniformChallenges coin schedule)
+    (bounded : extractor.IsLocallyBounded protocol.roles schedule)
+    (errors : Errors coin) (le : ∀ node, supErrors coin schedule node ≤ errors node) :
+    extractor.IsLocallyBounded protocol.roles (errorSchedule coin errors) := by
+  induction coin generalizing state with
+  | done => trivial
+  | sender next ih =>
+      exact fun move => ih move _ _ (uniform move) (bounded move) _ fun node => le ⟨move, node⟩
+  | oracle next ih =>
+      exact fun message => ih _ _ (uniform message) (bounded message) _
+        fun node => le ⟨message, node⟩
+  | challenge next ih =>
+      refine ⟨?_, fun challenge => ih _ _ (uniform.2 challenge) (bounded.2 challenge) _
+        fun node => (le_iSup (fun challenge => supErrors next (schedule.2 challenge) node)
+          challenge).trans (le (.inr ⟨PUnit.unit, node⟩))⟩
+      have here := bounded.1
+      rw [_root_.RoundByRound.GameFamily.isBounded_iff] at here ⊢
+      intro round context
+      have h := here round context
+      rw [uniform.1] at h
+      exact h.trans (le (.inl PUnit.unit))
 
 end Interaction.Oracle.Security.StateRestoration
