@@ -19,15 +19,18 @@ challenge carrier `S × O` (`CommonChallenge`). The encoding (`ChainCodec`) is a
 restoration keys to nonempty input lists: the inputs absorbed for a key need not extend those of
 its predecessor.
 
-`HashChain.chainStopped_knowledge_soundness` bounds the state-restoration knowledge error of this
-game, for an adversary on the chain, by the collision-or-prediction error of the chain plus the
-encoded random oracle's bound (`encodedExternalStopped_knowledge_soundness_adversaryCount`):
+`HashChain.chainStopped_knowledge_soundness` bounds the probability that the verifier completes a
+path with a valid terminal witness whose backward extraction fails, for an adversary on the chain,
+by the collision-or-prediction error of the chain plus the encoded random oracle's bound
+(`encodedExternalStopped_extraction_le_adversaryCount`):
 `chainError S q + (maxError errors * q + sumError errors)`, `q` the chain queries of the adversary
 and the verifier together. The chain answers coins, a state and an output, and a protocol's
-challenges are decoded from them (`DecodedChallenges.lean`):
-`KnowledgeCertificate.chainStopped_knowledge_soundness` applies the bound to the decoded
-presentation of a protocol with a knowledge certificate, `chainError S q` plus the decoders' ratio
-times the certificate's `maxError * q + sumError`.
+challenges are drawn from them (`DecodedChallenges.lean`), after a prover witness and with a check
+on the coins such as a proof of work: `KnowledgeCertificate.chainStopped_knowledge_soundness`
+applies the bound to the decoded presentation of a protocol with a knowledge certificate,
+`chainError S q` plus the certificate's `maxError * q + sumError` with every node's error
+multiplied by its draw's ratio. A grinding draw's ratio carries its proof-of-work pass probability,
+so grinding at a node divides that node's error, in both terms, by about `2 ^ bits`.
 
 ## Proof
 
@@ -536,9 +539,10 @@ theorem isQueryBoundP_dropEmpty_simulate (s₀ : S) {α : Type}
 /-- **Fiat–Shamir on a hash chain.** An adversary on a hash chain selects a transcript, and the
 verifier completes it while its guards pass, absorbing each key's encoding through the chain from
 `s₀` and reading the challenge off the answer. If the adversary and the verifier together make at
-most `q` chain queries, the round-by-round knowledge failure of a certificate with node errors
-`errors` has probability at most the chain's collision-or-prediction error `chainError S q` plus
-the encoded random oracle's bound `maxError errors * q + sumError errors`. -/
+most `q` chain queries, the verifier completes a path with a valid terminal witness whose
+backward extraction fails, for witness maps locally bounded by the node errors `errors`, with
+probability at most the chain's collision-or-prediction error `chainError S q` plus the encoded
+random oracle's bound `maxError errors * q + sumError errors`. -/
 theorem chainStopped_knowledge_soundness (s₀ : S) (coin : (z : Input) → PublicCoin (protocol z))
     (common : CommonChallenge Input Salt (S × O) coin)
     (codec : ChainCodec (Key Input Salt coin) I)
@@ -553,21 +557,13 @@ theorem chainStopped_knowledge_soundness (s₀ : S) (coin : (z : Input) → Publ
     (Z : Set Input)
     (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol z).roles (errorSchedule (coin z) (errors z)))
-    (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol z).tree.ExecutionPath) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
-      W → ((extractor z).terminalState path).Witness)
-    (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
-    (outputLaw : ∀ z path witness,
-      Rout z path witness →
-        ((extractor z).terminalState path).holds (terminalWitness z path witness)) :
+      (protocol z).roles (errorSchedule (coin z) (errors z))) :
     Pr{let result ← (simulateQ (chainSpec S I O + []ₒ).romImpl
         (chainStoppedExecution s₀ coin common codec guards adversary)).run' ∅}[
-      badStoppedRelation state extractor Rin Rout terminalWitness Z result] ≤
+      stoppedExtractionFails state extractor Z result] ≤
       chainError S q + (maxError errors * q + sumError errors) := by
   classical
-  let E := badStoppedRelation state extractor Rin Rout terminalWitness Z
+  let E := stoppedExtractionFails (W := W) state extractor Z
   let cc := chainCompletionAfter (W := W) s₀ coin common codec guards
   let enc := encodedExternalCompletionAfter (W := W) coin common codec.strict guards
   let Aplus := chainAdversary s₀ coin common codec guards adversary
@@ -655,9 +651,8 @@ theorem chainStopped_knowledge_soundness (s₀ : S) (coin : (z : Input) → Publ
       simp [hR]
     · rw [prEvent_pure]
       simp [hR]
-  have h6 := encodedExternalStopped_knowledge_soundness_adversaryCount coin common codec.strict
-    guards errors external state extractor Z preserving bounded Rin Rout terminalWitness inputLaw
-    outputLaw
+  have h6 := encodedExternalStopped_extraction_le_adversaryCount coin common codec.strict
+    guards errors external state extractor Z preserving bounded
   have h7 : expectedFreshQueryCharge external (fun _ => 1) ≤ q := by
     rw [OracleComp.expectedFreshQueryCharge_map]
     exact expectedFreshQueryCharge_le X (isQueryBoundP_dropEmpty_simulate s₀ hqA)
@@ -671,16 +666,19 @@ theorem chainStopped_knowledge_soundness (s₀ : S) (coin : (z : Input) → Publ
     _ = _ := add_comm _ _
 
 open PublicCoin in
-/-- **Fiat–Shamir on a hash chain from knowledge certificates.** The verifier reads each challenge
-off the chain's answer, its state and output, through the decoders `dec`, whose pushforwards of
-uniform answers are within `ratio` of the uniform challenges. If every input's certificate samples
-its challenges uniformly and the adversary and the verifier together make at most `q` chain
-queries, the knowledge failure of the certificates pulled back along the decoders has probability
-at most `chainError S q` plus `ratio` times the state-restoration bound
-`maxError * q + sumError` of the certificates' node errors. -/
+/-- **Fiat–Shamir on a hash chain from knowledge certificates, with grinding.** The verifier
+draws each challenge off the chain's answer, its state and output, through the draws `dec`: after
+the prover's witness, absorbed into the key, it rejects the answers that fail the draw's check
+(a grinding draw's proof of work) and decodes the challenge from the others. Each draw is bounded
+by the ratio at its node (`ratio`). If every input's certificate samples its challenges uniformly
+and the adversary and the verifier together make at most `q` chain queries, the verifier completes
+a path whose answers all pass, decoding to a path of the protocol with a valid terminal witness
+whose backward extraction fails, with probability at most `chainError S q` plus the
+state-restoration bound `maxError * q + sumError` of the certificates' node errors, each
+multiplied by its node's ratio. -/
 theorem KnowledgeCertificate.chainStopped_knowledge_soundness (s₀ : S)
     (coin : (z : Input) → PublicCoin (protocol z)) (dec : (z : Input) → Decoder (S × O) (coin z))
-    (ratio : ENNReal) (hdec : ∀ z, Decoder.Bounded ratio (coin z) (dec z))
+    (ratio : (z : Input) → Errors (coin z)) (hdec : ∀ z, Decoder.Bounded (coin z) (dec z) (ratio z))
     (codec : ChainCodec (Key Input Salt fun z => decoded (S × O) (coin z) (dec z)) I)
     (guards : (z : Input) → GuardSchedule Salt (decoded (S × O) (coin z) (dec z)))
     (state : Input → KnowledgeState)
@@ -691,26 +689,22 @@ theorem KnowledgeCertificate.chainStopped_knowledge_soundness (s₀ : S)
       (Option (Selection Input Salt W fun z => decoded (S × O) (coin z) (dec z))))
     {q : ℕ} (hq : IsQueryBoundP
       (chainStoppedExecution s₀ (fun z => decoded (S × O) (coin z) (dec z))
-      (decodedCommon coin dec) codec guards adversary) (fun t => isChain t = true) q)
-    (Rout : (z : Input) →
-      (path : (decodedProtocol (S × O) (coin z) (dec z)).tree.ExecutionPath) → W → Prop)
-    (terminalWitness : (z : Input) →
-      (path : (decodedProtocol (S × O) (coin z) (dec z)).tree.ExecutionPath) → W →
-        ((decodeExtractor (coin z) (dec z) (certificate z).extractor).terminalState path).Witness)
-    (outputLaw : ∀ z path witness, Rout z path witness →
-      ((decodeExtractor (coin z) (dec z) (certificate z).extractor).terminalState path).holds
-        (terminalWitness z path witness)) :
+      (decodedCommon coin dec) codec guards adversary) (fun t => isChain t = true) q) :
     Pr{let result ← (simulateQ (chainSpec S I O + []ₒ).romImpl
         (chainStoppedExecution s₀ (fun z => decoded (S × O) (coin z) (dec z))
           (decodedCommon coin dec) codec guards adversary)).run' ∅}[
-      badStoppedRelation state (fun z => decodeExtractor (coin z) (dec z) (certificate z).extractor)
-        (fun z => (state z).holds) Rout terminalWitness Set.univ result] ≤
-      chainError S q +
-        ratio * (maxError (fun z => supErrors (coin z) (certificate z).challenges) * q +
-        sumError (fun z => supErrors (coin z) (certificate z).challenges)) := by
+      ∃ z path seed, result = some ⟨z, path, seed⟩ ∧
+        ∃ p, decodePath (coin z) (dec z) path = some p ∧
+          ∃ witness, ((certificate z).extractor.terminalState p).holds witness ∧
+            ¬ (state z).holds ((certificate z).extractor.extractWitness p witness)] ≤
+      chainError S q + (maxError (fun z node => ratio z node *
+          supErrors (coin z) (certificate z).challenges node) * q +
+        sumError (fun z node => ratio z node *
+          supErrors (coin z) (certificate z).challenges node)) := by
   classical
   let errors : (z : Input) → Errors (decoded (S × O) (coin z) (dec z)) := fun z node =>
-    ratio * supErrors (coin z) (certificate z).challenges (Prefix.undecode (coin z) (dec z) node)
+    ratio z (Prefix.undecode (coin z) (dec z) node) *
+      supErrors (coin z) (certificate z).challenges (Prefix.undecode (coin z) (dec z) node)
   have h := HashChain.chainStopped_knowledge_soundness
     (protocol := fun z => decodedProtocol (S × O) (coin z) (dec z)) s₀
     (fun z => decoded (S × O) (coin z) (dec z))
@@ -719,22 +713,23 @@ theorem KnowledgeCertificate.chainStopped_knowledge_soundness (s₀ : S)
     (fun z _ => isProverPreserving_decodeExtractor (coin z) (dec z) _
       (certificate z).prover_preserving)
     (fun z _ => isLocallyBounded_errorSchedule _ _ _
-      (uniformChallenges_decodeSchedule ratio (coin z) (dec z) (certificate z).challenges)
-      (isLocallyBounded_decodeExtractor ratio (coin z) (dec z) (hdec z) _ _ (uniform z)
+      (uniformChallenges_decodeSchedule (coin z) (dec z) (ratio z) (certificate z).challenges)
+      (isLocallyBounded_decodeExtractor (coin z) (dec z) (ratio z) (hdec z) _ _ (uniform z)
         (certificate z).local_bound) _
-      (supErrors_decodeSchedule_le ratio (coin z) (dec z) (certificate z).challenges))
-    (fun z => (state z).holds) Rout terminalWitness (fun _ _ => Iff.rfl) outputLaw
-  refine h.trans (add_le_add le_rfl ?_)
-  have hmax : maxError errors ≤
-      ratio * maxError (fun z => supErrors (coin z) (certificate z).challenges) :=
-    iSup_le fun z => iSup_le fun node => mul_le_mul_right
-      (le_iSup_of_le z (le_iSup (supErrors (coin z) (certificate z).challenges) _)) ratio
-  have hsum : sumError errors =
-      ratio * sumError (fun z => supErrors (coin z) (certificate z).challenges) := by
-    simp only [sumError, errors]
-    rw [ENNReal.mul_iSup]
-    exact iSup_congr fun z => pathError_undecode ratio (coin z) (dec z) _
-  rw [hsum, mul_add, ← mul_assoc]
+      (supErrors_decodeSchedule_le (coin z) (dec z) (ratio z) (certificate z).challenges))
+  refine (prEvent_mono _ _ _ fun result hresult => ?_).trans (h.trans (add_le_add le_rfl ?_))
+  · obtain ⟨z, path, seed, rfl, bad⟩ := hresult
+    exact ⟨Set.mem_univ z, (badTerminal_decode (coin z) (dec z) (certificate z).extractor path
+      (fun w => ¬ (state z).holds w)).mpr bad⟩
+  have hmax : maxError errors ≤ maxError (fun z node =>
+      ratio z node * supErrors (coin z) (certificate z).challenges node) :=
+    iSup_le fun z => iSup_le fun node =>
+      le_iSup_of_le z (le_iSup (fun node => ratio z node *
+        supErrors (coin z) (certificate z).challenges node) (Prefix.undecode (coin z) (dec z) node))
+  have hsum : sumError errors ≤ sumError (fun z node =>
+      ratio z node * supErrors (coin z) (certificate z).challenges node) :=
+    iSup_mono fun z => pathError_undecode_le (coin z) (dec z) fun node =>
+      ratio z node * supErrors (coin z) (certificate z).challenges node
   gcongr
 
 end Reduction

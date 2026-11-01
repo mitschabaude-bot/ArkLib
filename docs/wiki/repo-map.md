@@ -64,8 +64,10 @@ home_page/            site assets and assembled website root
   answers carry the next query's state) to a random oracle keyed by the input prefix, up to a
   state collision or prediction, `Q (Q + 1) / 2 / |S|` for `Q` chain queries, and gives the
   prefix encoding of chain keys off that event. `DecodedChallenges.lean` presents a public-coin protocol with
-  every challenge decoded from common coins (`PublicCoin.decoded`) and pulls knowledge certificates
-  back along the decoders, their errors scaled by the decoders' ratio to uniform.
+  every challenge drawn from common coins (`PublicCoin.decoded`): a prover witness, a check on the
+  coins such as a proof of work (`Draw.grind`), and the decoded challenge. It pulls knowledge
+  certificates back along the draws, each node's error scaled by its draw's ratio to uniform, a
+  grinding draw's ratio carrying its proof-of-work pass probability (`powFraction`).
   `HashChainEncoded.lean` is Fiat–Shamir on a hash chain: the verifier absorbs each key's encoding
   (`ChainCodec`) through the chain, and the knowledge error is `chainError S q` plus the encoded
   random oracle's bound (`chainStopped_knowledge_soundness`, and its certificate form).

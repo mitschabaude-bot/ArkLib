@@ -423,22 +423,21 @@ theorem fixedTable_stoppedCompletion_result_keys [DecidableEq Input] [DecidableE
   exact ⟨hpath.trans (stoppedComplete_eval coin guards z messages table),
     by rw [hlog]; exact stoppedComplete_log_keys coin guards z messages table⟩
 
-/-- The terminal seed is supplied by the adversary, then validated by the accepted relation.
-An invalid named backward extraction on an accepted stopped path has a bad key among the actual
-queried keys of that stopped completion. -/
-theorem badExtractOnStoppedPath_has_bad_key
+/-- A valid terminal witness whose backward extraction fails on an accepted stopped path has a
+bad key among the actual queried keys of that stopped completion. -/
+theorem stoppedPath_extractionFails_has_bad_key
     (state : Input → KnowledgeState.{w})
     (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Z : Set Input)
     (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
-    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
-      W → ((extractor z).terminalState path).Witness)
     (guards : (z : Input) → GuardSchedule Salt (coin z))
-    (z : Input) (messages : Messages Salt (coin z)) (witness : W)
+    (z : Input) (messages : Messages Salt (coin z))
     (table : Table Input Salt coin)
     (path : (protocol z).tree.ExecutionPath)
-    (accepted : stoppedPath coin guards z messages table = some path)
-    (bad : badExtractOnPath state extractor Z terminalWitness (some ⟨z, path, witness⟩)) :
+    (accepted : stoppedPath coin guards z messages table = some path) (hz : z ∈ Z)
+    (witness : ((extractor z).terminalState path).Witness)
+    (holds : ((extractor z).terminalState path).holds witness)
+    (fails : ¬ (state z).holds ((extractor z).extractWitness path witness)) :
     ∃ key ∈ stoppedKeys coin guards z messages table,
       badKey state extractor Z key table := by
   have passed := stoppedPath_some_implies_pass coin guards z messages table accepted
@@ -446,8 +445,8 @@ theorem badExtractOnStoppedPath_has_bad_key
   have heq : path = completedPath coin z messages table :=
     Option.some.inj (accepted.symm.trans hpath)
   subst path
-  obtain ⟨key, hkey, hbad⟩ := badExtractOnPath_completion
-    state extractor Z preserving terminalWitness z messages witness table bad
+  obtain ⟨key, hkey, hbad⟩ := badKey_of_completedPath state extractor Z preserving z messages
+    table witness hz holds fails
   exact ⟨key, by rw [stoppedKeys_of_pass coin guards z messages table passed]; exact hkey,
     hbad⟩
 
@@ -533,9 +532,18 @@ theorem fixedTable_stopped_trace [DecidableEq Input] [DecidableEq Salt]
       · exact congrArg Prod.fst hout
       · simp only [hsource, hout]
 
+/-- The stopped game completed a path of an input in `Z` that has a valid terminal witness whose
+backward extraction fails. A rejected or failed selection is no failure. -/
+def stoppedExtractionFails (state : Input → KnowledgeState.{w})
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
+    (Z : Set Input) : Option (Outcome Input W protocol) → Prop
+  | none => False
+  | some ⟨z, path, _⟩ => z ∈ Z ∧ ∃ witness, ((extractor z).terminalState path).holds witness ∧
+      ¬ (state z).holds ((extractor z).extractWitness path witness)
+
 /-- A failed extraction on a supported stopped run is witnessed by a bad key in that same
 run's ordered hash log. This implication comes from preservation and the full accepted path. -/
-theorem fixedTable_stopped_badExtract_has_bad_query [DecidableEq Input] [DecidableEq Salt]
+theorem fixedTable_stopped_extractionFails_has_bad_query [DecidableEq Input] [DecidableEq Salt]
     (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
         z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin)
@@ -543,8 +551,6 @@ theorem fixedTable_stopped_badExtract_has_bad_query [DecidableEq Input] [Decidab
     (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Z : Set Input)
     (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
-    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
-      W → ((extractor z).terminalState path).Witness)
     (table : Table Input Salt coin)
     (result : (((Option (Outcome Input W protocol) ×
       QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
@@ -553,7 +559,7 @@ theorem fixedTable_stopped_badExtract_has_bad_query [DecidableEq Input] [Decidab
     (supported : result ∈ support (fixedTableLoggedRun
       (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary)
       table ∅))
-    (bad : badExtractOnPath state extractor Z terminalWitness result.1.1.1) :
+    (bad : stoppedExtractionFails state extractor Z result.1.1.1) :
     ∃ query ∈ result.1.2, badKey state extractor Z query.1 table := by
   rcases fixedTable_stopped_trace coin guards adversary table result supported with
     ⟨hnone, _⟩ | ⟨z, messages, witness, suffixLog, hresult, hlog, hkeys⟩
@@ -565,12 +571,11 @@ theorem fixedTable_stopped_badExtract_has_bad_query [DecidableEq Input] [Decidab
         rw [hresult] at bad
         exact False.elim bad
     | some path =>
-        have hbad : badExtractOnPath state extractor Z terminalWitness
-            (some ⟨z, path, witness⟩) := by
-          simpa only [hpath, Option.map_some, hresult] using bad
-        obtain ⟨key, hkey, hbadkey⟩ := badExtractOnStoppedPath_has_bad_key
-          state extractor Z preserving terminalWitness guards z messages witness table
-            path hpath hbad
+        rw [hpath, Option.map_some] at hresult
+        rw [hresult] at bad
+        obtain ⟨hz, terminal, holds, fails⟩ := bad
+        obtain ⟨key, hkey, hbadkey⟩ := stoppedPath_extractionFails_has_bad_key
+          state extractor Z preserving guards z messages table path hpath hz terminal holds fails
         have hmem : key ∈ suffixLog.map Sigma.fst := by simpa only [hkeys] using hkey
         obtain ⟨query, hquery, hquerykey⟩ := List.mem_map.mp hmem
         refine ⟨query, ?_, ?_⟩
@@ -595,8 +600,9 @@ def badStoppedRelation
       z ∈ Z ∧ Rout z path witness ∧
         ¬ Rin z ((extractor z).extractWitness path (terminalWitness z path witness))
 
-/-- The accepted failure relation entails the certificate's terminal-validity failure event. -/
-theorem badStoppedRelation_implies_badExtractOnPath
+/-- The accepted failure relation entails a failed extraction: its terminal seed is a valid
+terminal witness. -/
+theorem badStoppedRelation_implies_stoppedExtractionFails
     (state : Input → KnowledgeState.{w})
     (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Rin : (z : Input) → (state z).Witness → Prop)
@@ -610,23 +616,49 @@ theorem badStoppedRelation_implies_badExtractOnPath
         ((extractor z).terminalState path).holds (terminalWitness z path witness))
     (result : Option (Outcome Input W protocol))
     (bad : badStoppedRelation state extractor Rin Rout terminalWitness Z result) :
-    badExtractOnPath state extractor Z (fun z path => terminalWitness z path) result := by
+    stoppedExtractionFails state extractor Z result := by
   cases result with
   | none => exact bad
   | some selected =>
       rcases selected with ⟨z, path, witness⟩
-      change z ∈ Z ∧ Rout z path witness ∧
-        ¬ Rin z ((extractor z).extractWitness path (terminalWitness z path witness)) at bad
-      change z ∈ Z ∧
-        ((extractor z).terminalState path).holds (terminalWitness z path witness) ∧
-        ¬ (state z).holds ((extractor z).extractWitness path
-          (terminalWitness z path witness))
-      exact ⟨bad.1, outputLaw z path witness bad.2.1,
-        fun h => bad.2.2 ((inputLaw z _).mp h)⟩
+      obtain ⟨hz, hout, hin⟩ := bad
+      exact ⟨hz, terminalWitness z path witness, outputLaw z path witness hout,
+        fun h => hin ((inputLaw z _).mp h)⟩
 
-/-- All-prefix local certificates charge an accepted invalid named extraction to a distinct
+/-- All-prefix local certificates charge a failed extraction on the stopped path to a distinct
 challenge key in the same stopped cached run. Inputs and salts need only decidable equality;
 adversarial private samples may be interleaved with repeated and out-of-order hash queries. -/
+theorem randomizedStopped_extraction_le_expectedFreshCharge
+    [DecidableEq Input] [DecidableEq Salt]
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
+    (errors : (z : Input) → Errors (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
+    (state : Input → KnowledgeState.{w})
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
+    (Z : Set Input)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
+    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
+      (protocol z).roles (errorSchedule (coin z) (errors z))) :
+    Pr{let joint ← (randomOracleLoggedRun
+      (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary) ∅)}[
+      stoppedExtractionFails state extractor Z joint.1.1.1] ≤
+    expectedFreshQueryCharge
+      (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary)
+      (keyError errors) := by
+  apply prEvent_randomOracle_le_expectedFreshQueryCharge
+    (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary)
+    (fun result => stoppedExtractionFails state extractor Z result.1)
+    (badKey state extractor Z) (keyError errors)
+  · intro table result supported bad
+    obtain ⟨query, hquery, hbad⟩ := fixedTable_stopped_extractionFails_has_bad_query
+      coin guards adversary state extractor Z preserving table result supported bad
+    exact ⟨query.1, (mem_freshKeysOfLog _ _).mpr ⟨query, hquery, rfl⟩, hbad⟩
+  · intro key table
+    exact badKey_resample_bound state extractor Z errors bounded key table
+
+/-- All-prefix local certificates charge an accepted invalid named extraction to a distinct
+challenge key in the same stopped cached run. -/
 theorem randomizedStopped_badRelation_le_expectedFreshCharge
     [DecidableEq Input] [DecidableEq Salt]
     (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
@@ -653,19 +685,11 @@ theorem randomizedStopped_badRelation_le_expectedFreshCharge
     expectedFreshQueryCharge
       (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary)
       (keyError errors) := by
-  apply prEvent_randomOracle_le_expectedFreshQueryCharge
-    (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary)
-    (fun result => badStoppedRelation state extractor Rin Rout terminalWitness Z result.1)
-    (badKey state extractor Z) (keyError errors)
-  · intro table result supported bad
-    obtain ⟨query, hquery, hbad⟩ := fixedTable_stopped_badExtract_has_bad_query
-      coin guards adversary state extractor Z preserving
-        (fun z path => terminalWitness z path) table result supported
-        (badStoppedRelation_implies_badExtractOnPath state extractor Rin Rout
-          terminalWitness Z inputLaw outputLaw result.1.1.1 bad)
-    exact ⟨query.1, (mem_freshKeysOfLog _ _).mpr ⟨query, hquery, rfl⟩, hbad⟩
-  · intro key table
-    exact badKey_resample_bound state extractor Z errors bounded key table
+  refine (prEvent_mono _ _ _ fun joint => ?_).trans
+    (randomizedStopped_extraction_le_expectedFreshCharge coin guards errors adversary state
+      extractor Z preserving bounded)
+  exact badStoppedRelation_implies_stoppedExtractionFails state extractor Rin Rout
+    terminalWitness Z inputLaw outputLaw joint.1.1.1
 
 /-- The cost of the reached challenges is at most the largest path sum of errors. -/
 theorem prefixStoppedKeys_error_sum_le {Salt : Type} {protocol : Protocol}
