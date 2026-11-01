@@ -80,7 +80,18 @@ home_page/            site assets and assembled website root
   knowledge error of a certificate's decoded presentation is `chainError S q` plus
   `maxError * q + sumError` of the node errors times the draws' ratios
   (`KnowledgeCertificate.chainSqueeze_knowledge_soundness`), a challenge of several squeezes
-  costing one query for its whole draw.
+  costing one query for its whole draw. `HashChainObserver.lean` records how a duplex verifier
+  observes a public-coin protocol (`Observer`) and proves its chain inputs injective on keys.
+  `Bcs*.lean` is the BCS compiler on that line: oracle messages committed (Merkle caps), the
+  message behind a commitment read off a snapshot of an auxiliary hash oracle's answers.
+  `BcsProtocol.lean` defines the snapshot protocol (a commitment move per oracle message, a
+  snapshot move per chain block, `Layout`, `Commit`, `openPath`), `BcsCertificate.lean` pulls a
+  certificate back to it, `BcsSimulation.lean` simulates a duplex chain with a hash oracle exactly
+  by forwarding each fresh chain query with the snapshot at its time, `BcsFill.lean` fills snapshot
+  moves from a log, and `BcsKnowledge.lean` proves knowledge soundness of the verifier absorbing
+  commitments (`KnowledgeCertificate.bcs_knowledge_soundness`), with the opened path's messages
+  read at the snapshots and the same error as the hash-chain theorem, the verifier's queries
+  counted twice.
 - `ProofSystem/Fri/Interaction/` is FRI on the interaction layer, with Plonky3's folds and injected
   inputs: `Protocol.lean` defines the tree, the query-reading verifier and the honest prover,
   `Completeness.lean` proves probability-one completeness, `RoundKnowledge.lean` and
