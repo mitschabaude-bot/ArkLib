@@ -26,428 +26,479 @@ namespace Interaction.Oracle.Security.StateRestoration
 
 universe w
 
-variable {Input Salt W : Type} {rounds : Input → List Round}
+variable {Input Salt W : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
 
-/-- A tree of pure, prefix-dependent guards. The continuation can close over the current
-message, salt, and sampled challenge; the current guard itself cannot read that challenge. -/
-def GuardSchedule (Salt : Type) : List Round → Type
-  | [] => PUnit
-  | round :: rounds => (round.Message → Salt → Bool) ×
-      (round.Message → Salt → round.Challenge → GuardSchedule Salt rounds)
+/-- A tree of pure, prefix-dependent guards, one before each challenge. A guard reads the salt of
+its challenge and, through its continuation, the earlier prover moves, oracle payloads, salts and
+challenges; it cannot read its own or a later challenge. -/
+@[reducible] def GuardSchedule (Salt : Type) {protocol : Protocol} (coin : PublicCoin protocol) :
+    Type :=
+  PublicCoin.rec (motive := fun _ _ => Type) PUnit
+    (fun {Moves} _ _ _ guards => (move : Moves) → guards move)
+    (fun {Messages} _ _ _ _ guards => Messages → guards)
+    (@fun Challenge _ _ _ _ _ guards => (Salt → Bool) × (Salt → Challenge → guards)) coin
 
 /-- Complete an authored message sequence against the prefix oracle only while its guards pass.
 Every guard runs before the corresponding hash access. Returned failure retains all preceding
 oracle effects. -/
-def stoppedCompletePrefix {Salt : Type} : (rounds : List Round) →
-    GuardSchedule Salt rounds → Messages Salt rounds →
-      OracleComp (prefixSpec Salt rounds) (Option (protocol rounds).tree.ExecutionPath)
-  | [], _, _ => pure (some PUnit.unit)
-  | round :: rounds, guards, (message, salt, messages) => do
-      if !guards.1 message salt then
+def stoppedCompletePrefix {Salt : Type} : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    GuardSchedule Salt coin → Messages Salt coin →
+      OracleComp (prefixSpec Salt coin) (Option protocol.tree.ExecutionPath)
+  | _, .done, _, _ => pure (some PUnit.unit)
+  | _, @PublicCoin.sender _ _ _ next, guards, ⟨move, messages⟩ => do
+      let suffix ← simulateQ (reindexQuery (R := Prefix.Challenge (coin := .sender next))
+        (Sigma.mk move)) (stoppedCompletePrefix (next move) (guards move) messages)
+      return suffix.map fun path => ⟨move, path⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, guards, ⟨message, messages⟩ => do
+      let suffix ← simulateQ (reindexQuery (R := Prefix.Challenge (coin := .oracle next))
+        (Prod.mk message)) (stoppedCompletePrefix next (guards message) messages)
+      return suffix.map fun path => ⟨message, path⟩
+  | _, @PublicCoin.challenge Challenge _ _ _ _ next, guards, ⟨salt, messages⟩ => do
+      if !guards.1 salt then
         return none
-      let challenge ← liftM ((prefixSpec Salt (round :: rounds)).query
-        (Prefix.here message salt))
-      let suffix ← simulateQ (prependQuery message salt)
-        (stoppedCompletePrefix rounds (guards.2 message salt challenge) messages)
-      return suffix.map fun path => ⟨message, challenge, path⟩
+      let challenge ← liftM ((prefixSpec Salt (@PublicCoin.challenge Challenge _ _ _ _ next)).query
+        (Sum.inl salt))
+      let suffix ← simulateQ (reindexQuery
+        (R := Prefix.Challenge (coin := @PublicCoin.challenge Challenge _ _ _ _ next))
+        (fun q : Prefix Salt next => Sum.inr ⟨salt, q⟩))
+        (stoppedCompletePrefix next (guards.2 salt challenge) messages)
+      return suffix.map fun path => ⟨challenge, path⟩
 
 /-- Complete the selected input's message sequence only while that input's guards pass, at the
 keys of the selected input. -/
-def stoppedComplete {Input Salt : Type} (rounds : Input → List Round)
-    (guards : (z : Input) → GuardSchedule Salt (rounds z)) (z : Input)
-    (messages : Messages Salt (rounds z)) :
-    OracleComp (oracleSpec Input Salt rounds) (Option (protocol (rounds z)).tree.ExecutionPath) :=
-  simulateQ (inputQuery z) (stoppedCompletePrefix (rounds z) (guards z) messages)
+def stoppedComplete {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z)) (z : Input)
+    (messages : Messages Salt (coin z)) :
+    OracleComp (oracleSpec Input Salt coin) (Option (protocol z).tree.ExecutionPath) :=
+  simulateQ (inputQuery z) (stoppedCompletePrefix (coin z) (guards z) messages)
 
 /-- Fixed-table result of stopped prefix completion. It agrees with the ordinary reconstructed
 path on acceptance, and has no full path when a guard rejects. -/
-def prefixStoppedPath {Salt : Type} : (rounds : List Round) →
-    GuardSchedule Salt rounds → Messages Salt rounds →
-      PrefixTable Salt rounds → Option (protocol rounds).tree.ExecutionPath
-  | [], _, _, _ => some PUnit.unit
-  | _ :: rounds, guards, (message, salt, messages), table =>
-      if guards.1 message salt then
-        let challenge := table (Prefix.here message salt)
-        (prefixStoppedPath rounds (guards.2 message salt challenge) messages
-          (fun q => table (Prefix.later message salt q))).map
-            (fun path => ⟨message, challenge, path⟩)
+def prefixStoppedPath {Salt : Type} : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    GuardSchedule Salt coin → Messages Salt coin →
+      PrefixTable Salt coin → Option protocol.tree.ExecutionPath
+  | _, .done, _, _, _ => some PUnit.unit
+  | _, @PublicCoin.sender _ _ _ next, guards, ⟨move, messages⟩, table =>
+      (prefixStoppedPath (next move) (guards move) messages fun q => table ⟨move, q⟩).map
+        fun path => ⟨move, path⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, guards, ⟨message, messages⟩, table =>
+      (prefixStoppedPath next (guards message) messages fun q => table ⟨message, q⟩).map
+        fun path => ⟨message, path⟩
+  | _, @PublicCoin.challenge _ _ _ _ _ next, guards, ⟨salt, messages⟩, table =>
+      if guards.1 salt then
+        (prefixStoppedPath next (guards.2 salt (table (.inl salt))) messages
+          fun q => table (.inr ⟨salt, q⟩)).map fun path => ⟨table (.inl salt), path⟩
       else none
 
 /-- Ordered prefixes actually requested by stopped prefix completion under a fixed table. A
-rejecting round and every subsequent round contribute no prefix. -/
-def prefixStoppedKeys {Salt : Type} : (rounds : List Round) →
-    GuardSchedule Salt rounds → Messages Salt rounds →
-      PrefixTable Salt rounds → List (Prefix Salt rounds)
-  | [], _, _, _ => []
-  | _ :: rounds, guards, (message, salt, messages), table =>
-      if guards.1 message salt then
-        let challenge := table (Prefix.here message salt)
-        Prefix.here message salt ::
-          (prefixStoppedKeys rounds (guards.2 message salt challenge) messages
-            (fun q => table (Prefix.later message salt q))).map (Prefix.later message salt)
+rejecting challenge and every later one contribute no prefix. -/
+def prefixStoppedKeys {Salt : Type} : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    GuardSchedule Salt coin → Messages Salt coin → PrefixTable Salt coin →
+      List (Prefix Salt coin)
+  | _, .done, _, _, _ => []
+  | _, @PublicCoin.sender _ _ _ next, guards, ⟨move, messages⟩, table =>
+      (prefixStoppedKeys (next move) (guards move) messages fun q => table ⟨move, q⟩).map
+        (Sigma.mk move)
+  | _, @PublicCoin.oracle _ _ _ _ next, guards, ⟨message, messages⟩, table =>
+      (prefixStoppedKeys next (guards message) messages fun q => table ⟨message, q⟩).map
+        (Prod.mk message)
+  | _, @PublicCoin.challenge _ _ _ _ _ next, guards, ⟨salt, messages⟩, table =>
+      if guards.1 salt then
+        .inl salt :: (prefixStoppedKeys next (guards.2 salt (table (.inl salt))) messages
+          fun q => table (.inr ⟨salt, q⟩)).map fun q => .inr ⟨salt, q⟩
       else []
 
 /-- Pure guard acceptance over the reconstructed prefix answer table. -/
-def prefixGuardsPass {Salt : Type} : (rounds : List Round) →
-    GuardSchedule Salt rounds → Messages Salt rounds → PrefixTable Salt rounds → Bool
-  | [], _, _, _ => true
-  | _ :: rounds, guards, (message, salt, messages), table =>
-      guards.1 message salt &&
-        prefixGuardsPass rounds
-          (guards.2 message salt (table (Prefix.here message salt))) messages
-          (fun q => table (Prefix.later message salt q))
+def prefixGuardsPass {Salt : Type} : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    GuardSchedule Salt coin → Messages Salt coin → PrefixTable Salt coin → Bool
+  | _, .done, _, _, _ => true
+  | _, @PublicCoin.sender _ _ _ next, guards, ⟨move, messages⟩, table =>
+      prefixGuardsPass (next move) (guards move) messages fun q => table ⟨move, q⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, guards, ⟨message, messages⟩, table =>
+      prefixGuardsPass next (guards message) messages fun q => table ⟨message, q⟩
+  | _, @PublicCoin.challenge _ _ _ _ _ next, guards, ⟨salt, messages⟩, table =>
+      guards.1 salt && prefixGuardsPass next (guards.2 salt (table (.inl salt))) messages
+        fun q => table (.inr ⟨salt, q⟩)
 
 /-- Fixed-table result of stopped completion of the selected input. -/
-def stoppedPath {Input Salt : Type} (rounds : Input → List Round)
-    (guards : (z : Input) → GuardSchedule Salt (rounds z)) (z : Input)
-    (messages : Messages Salt (rounds z)) (table : Table Input Salt rounds) :
-    Option (protocol (rounds z)).tree.ExecutionPath :=
-  prefixStoppedPath (rounds z) (guards z) messages (Table.fibre table z)
+def stoppedPath {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z)) (z : Input)
+    (messages : Messages Salt (coin z)) (table : Table Input Salt coin) :
+    Option (protocol z).tree.ExecutionPath :=
+  prefixStoppedPath (coin z) (guards z) messages (Table.fibre table z)
 
 /-- Ordered keys actually requested by stopped completion of the selected input. -/
-def stoppedKeys {Input Salt : Type} (rounds : Input → List Round)
-    (guards : (z : Input) → GuardSchedule Salt (rounds z)) (z : Input)
-    (messages : Messages Salt (rounds z)) (table : Table Input Salt rounds) :
-    List (Key Input Salt rounds) :=
-  (prefixStoppedKeys (rounds z) (guards z) messages (Table.fibre table z)).map (Sigma.mk z)
+def stoppedKeys {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z)) (z : Input)
+    (messages : Messages Salt (coin z)) (table : Table Input Salt coin) :
+    List (Key Input Salt coin) :=
+  (prefixStoppedKeys (coin z) (guards z) messages (Table.fibre table z)).map (Sigma.mk z)
 
 /-- Pure guard acceptance of the selected input over the reconstructed answer table. -/
-def guardsPass {Input Salt : Type} (rounds : Input → List Round)
-    (guards : (z : Input) → GuardSchedule Salt (rounds z)) (z : Input)
-    (messages : Messages Salt (rounds z)) (table : Table Input Salt rounds) : Bool :=
-  prefixGuardsPass (rounds z) (guards z) messages (Table.fibre table z)
+def guardsPass {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z)) (z : Input)
+    (messages : Messages Salt (coin z)) (table : Table Input Salt coin) : Bool :=
+  prefixGuardsPass (coin z) (guards z) messages (Table.fibre table z)
 
 /-- On a fully accepted guard path, stopped reconstruction is the existing full path. -/
-theorem prefixStoppedPath_eq_some_prefixPath {Salt : Type}
-    (rounds : List Round) (guards : GuardSchedule Salt rounds)
-    (messages : Messages Salt rounds) (table : PrefixTable Salt rounds)
-    (passed : prefixGuardsPass rounds guards messages table = true) :
-    prefixStoppedPath rounds guards messages table = some (prefixPath rounds messages table) := by
-  revert guards messages table
-  induction rounds with
-  | nil => intro guards messages table passed; rfl
-  | cons round rounds ih =>
-      intro guards messages table passed
-      rcases messages with ⟨message, salt, messages⟩
+theorem prefixStoppedPath_eq_some_prefixPath {Salt : Type} {protocol : Protocol}
+    (coin : PublicCoin protocol) (guards : GuardSchedule Salt coin)
+    (messages : Messages Salt coin) (table : PrefixTable Salt coin)
+    (passed : prefixGuardsPass coin guards messages table = true) :
+    prefixStoppedPath coin guards messages table = some (prefixPath coin messages table) := by
+  induction coin with
+  | done => rfl
+  | sender next ih =>
+      rcases messages with ⟨move, messages⟩
+      simp only [prefixGuardsPass] at passed
+      simp only [prefixStoppedPath, prefixPath, ih move _ _ _ passed]
+      rfl
+  | oracle next ih =>
+      rcases messages with ⟨message, messages⟩
+      simp only [prefixGuardsPass] at passed
+      simp only [prefixStoppedPath, prefixPath, ih _ _ _ passed]
+      rfl
+  | challenge next ih =>
+      rcases messages with ⟨salt, messages⟩
       simp only [prefixGuardsPass, Bool.and_eq_true] at passed
-      simp only [prefixStoppedPath, passed.1, ite_true, prefixPath]
-      rw [ih _ _ _ passed.2]
+      simp only [prefixStoppedPath, passed.1, ite_true, prefixPath, ih _ _ _ passed.2]
       rfl
 
 /-- On a fully accepted guard path, stopped reconstruction is the existing full native path. -/
-theorem stoppedPath_eq_some_completedPath {Input Salt : Type}
-    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (z : Input) (messages : Messages Salt (rounds z)) (table : Table Input Salt rounds)
-    (passed : guardsPass rounds guards z messages table = true) :
-    stoppedPath rounds guards z messages table =
-      some (completedPath rounds z messages table) :=
-  prefixStoppedPath_eq_some_prefixPath (rounds z) (guards z) messages _ passed
+theorem stoppedPath_eq_some_completedPath {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (z : Input) (messages : Messages Salt (coin z)) (table : Table Input Salt coin)
+    (passed : guardsPass coin guards z messages table = true) :
+    stoppedPath coin guards z messages table = some (completedPath coin z messages table) :=
+  prefixStoppedPath_eq_some_prefixPath (coin z) (guards z) messages _ passed
 
 /-- A stopped prefix result can be a full path only if all guards passed. -/
-theorem prefixStoppedPath_some_implies_pass {Salt : Type}
-    (rounds : List Round) (guards : GuardSchedule Salt rounds)
-    (messages : Messages Salt rounds) (table : PrefixTable Salt rounds)
-    {path : (protocol rounds).tree.ExecutionPath}
-    (result : prefixStoppedPath rounds guards messages table = some path) :
-    prefixGuardsPass rounds guards messages table = true := by
-  revert guards messages table path
-  induction rounds with
-  | nil => intro guards messages table path result; rfl
-  | cons round rounds ih =>
-      intro guards messages table path result
-      rcases messages with ⟨message, salt, messages⟩
+theorem prefixStoppedPath_some_implies_pass {Salt : Type} {protocol : Protocol}
+    (coin : PublicCoin protocol) (guards : GuardSchedule Salt coin)
+    (messages : Messages Salt coin) (table : PrefixTable Salt coin)
+    {path : protocol.tree.ExecutionPath}
+    (result : prefixStoppedPath coin guards messages table = some path) :
+    prefixGuardsPass coin guards messages table = true := by
+  induction coin with
+  | done => rfl
+  | sender next ih =>
+      rcases messages with ⟨move, messages⟩
+      simp only [prefixStoppedPath] at result
+      cases htail : prefixStoppedPath (next move) (guards move) messages
+          (fun q => table ⟨move, q⟩) with
+      | none => rw [htail] at result; cases result
+      | some tail => exact ih move _ _ _ htail
+  | oracle next ih =>
+      rcases messages with ⟨message, messages⟩
+      simp only [prefixStoppedPath] at result
+      cases htail : prefixStoppedPath next (guards message) messages
+          (fun q => table ⟨message, q⟩) with
+      | none => rw [htail] at result; cases result
+      | some tail => exact ih _ _ _ htail
+  | challenge next ih =>
+      rcases messages with ⟨salt, messages⟩
       simp only [prefixStoppedPath] at result
       split at result
       · rename_i hguard
         simp only [prefixGuardsPass, hguard, Bool.true_and]
-        cases hsuffix : prefixStoppedPath rounds
-            (guards.2 message salt (table (Prefix.here message salt))) messages
-            (fun q => table (Prefix.later message salt q)) with
-        | none =>
-            simp only [hsuffix] at result
-            cases result
-        | some tail =>
-            exact ih _ _ _ hsuffix
-      · simp at result
+        cases htail : prefixStoppedPath next (guards.2 salt (table (.inl salt))) messages
+            (fun q => table (.inr ⟨salt, q⟩)) with
+        | none => rw [htail] at result; cases result
+        | some tail => exact ih _ _ _ htail
+      · cases result
 
 /-- A stopped result can be a full path only if all guards passed. -/
-theorem stoppedPath_some_implies_pass {Input Salt : Type}
-    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (z : Input) (messages : Messages Salt (rounds z)) (table : Table Input Salt rounds)
-    {path : (protocol (rounds z)).tree.ExecutionPath}
-    (result : stoppedPath rounds guards z messages table = some path) :
-    guardsPass rounds guards z messages table = true :=
-  prefixStoppedPath_some_implies_pass (rounds z) (guards z) messages _ result
+theorem stoppedPath_some_implies_pass {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (z : Input) (messages : Messages Salt (coin z)) (table : Table Input Salt coin)
+    {path : (protocol z).tree.ExecutionPath}
+    (result : stoppedPath coin guards z messages table = some path) :
+    guardsPass coin guards z messages table = true :=
+  prefixStoppedPath_some_implies_pass (coin z) (guards z) messages _ result
 
 /-- An accepted stopped prefix run queries exactly the full path's prefixes. -/
-theorem prefixStoppedKeys_of_pass {Salt : Type}
-    (rounds : List Round) (guards : GuardSchedule Salt rounds)
-    (messages : Messages Salt rounds) (table : PrefixTable Salt rounds)
-    (passed : prefixGuardsPass rounds guards messages table = true) :
-    prefixStoppedKeys rounds guards messages table = prefixKeys rounds messages := by
-  revert guards messages table
-  induction rounds with
-  | nil => intro guards messages table passed; rfl
-  | cons round rounds ih =>
-      intro guards messages table passed
-      rcases messages with ⟨message, salt, messages⟩
+theorem prefixStoppedKeys_of_pass {Salt : Type} {protocol : Protocol}
+    (coin : PublicCoin protocol) (guards : GuardSchedule Salt coin)
+    (messages : Messages Salt coin) (table : PrefixTable Salt coin)
+    (passed : prefixGuardsPass coin guards messages table = true) :
+    prefixStoppedKeys coin guards messages table = prefixKeys coin messages := by
+  induction coin with
+  | done => rfl
+  | sender next ih =>
+      rcases messages with ⟨move, messages⟩
+      simp only [prefixGuardsPass] at passed
+      simp only [prefixStoppedKeys, prefixKeys, ih move _ _ _ passed]
+  | oracle next ih =>
+      rcases messages with ⟨message, messages⟩
+      simp only [prefixGuardsPass] at passed
+      simp only [prefixStoppedKeys, prefixKeys, ih _ _ _ passed]
+  | challenge next ih =>
+      rcases messages with ⟨salt, messages⟩
       simp only [prefixGuardsPass, Bool.and_eq_true] at passed
-      simp only [prefixStoppedKeys, passed.1, ite_true, prefixKeys]
-      rw [ih _ _ _ passed.2]
+      simp only [prefixStoppedKeys, passed.1, ite_true, prefixKeys, ih _ _ _ passed.2]
 
 /-- An accepted stopped run queries exactly the full path's challenge keys. -/
-theorem stoppedKeys_of_pass {Input Salt : Type}
-    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (z : Input) (messages : Messages Salt (rounds z)) (table : Table Input Salt rounds)
-    (passed : guardsPass rounds guards z messages table = true) :
-    stoppedKeys rounds guards z messages table = completionKeys rounds z messages := by
+theorem stoppedKeys_of_pass {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (z : Input) (messages : Messages Salt (coin z)) (table : Table Input Salt coin)
+    (passed : guardsPass coin guards z messages table = true) :
+    stoppedKeys coin guards z messages table = completionKeys coin z messages := by
   simp only [stoppedKeys, completionKeys]
-  rw [prefixStoppedKeys_of_pass (rounds z) (guards z) messages _ passed]
+  rw [prefixStoppedKeys_of_pass (coin z) (guards z) messages _ passed]
 
 set_option backward.isDefEq.respectTransparency false in
 /-- The stopped prefix completion's fixed-table result uses the same path reconstruction. -/
-theorem stoppedCompletePrefix_eval {Salt : Type}
-    (rounds : List Round) (guards : GuardSchedule Salt rounds)
-    (messages : Messages Salt rounds) (table : PrefixTable Salt rounds) :
-    evalWithAnswerFn (QueryImpl.ofFn table) (stoppedCompletePrefix rounds guards messages) =
-      prefixStoppedPath rounds guards messages table := by
-  induction rounds with
-  | nil => rfl
-  | cons round rounds ih =>
-      rcases messages with ⟨message, salt, messages⟩
-      simp only [stoppedCompletePrefix]
-      by_cases hg : guards.1 message salt = true
-      · simp only [hg, Bool.not_true, Bool.false_eq_true, ite_false,
-          evalWithAnswerFn_bind, evalWithAnswerFn_liftM_query,
-          QueryImpl.ofFn_apply, evalWithAnswerFn_simulateQ,
-          prependQuery, evalWithAnswerFn_pure, prefixStoppedPath, ite_true]
-        congr 1
-        change evalWithAnswerFn
-            (QueryImpl.ofFn (fun q => table (Prefix.later message salt q)))
-            (stoppedCompletePrefix rounds
-              (guards.2 message salt (table (Prefix.here message salt))) messages) =
-          prefixStoppedPath rounds
-            (guards.2 message salt (table (Prefix.here message salt))) messages
-            (fun q => table (Prefix.later message salt q))
-        simpa only [QueryImpl.ofFn_apply] using
-          ih (guards.2 message salt (table (Prefix.here message salt)))
-            messages (fun q => table (Prefix.later message salt q))
-      · have hg' : guards.1 message salt = false := Bool.eq_false_iff.mpr hg
-        simp [hg', prefixStoppedPath]
+theorem stoppedCompletePrefix_eval {Salt : Type} {protocol : Protocol}
+    (coin : PublicCoin protocol) (guards : GuardSchedule Salt coin)
+    (messages : Messages Salt coin) (table : PrefixTable Salt coin) :
+    evalWithAnswerFn (QueryImpl.ofFn table) (stoppedCompletePrefix coin guards messages) =
+      prefixStoppedPath coin guards messages table := by
+  induction coin with
+  | done => rfl
+  | sender next ih =>
+      rcases messages with ⟨move, messages⟩
+      simp only [stoppedCompletePrefix, evalWithAnswerFn_bind, evalWithAnswerFn_reindexQuery,
+        prefixStoppedPath]
+      erw [ih]
+      rfl
+  | oracle next ih =>
+      rcases messages with ⟨message, messages⟩
+      simp only [stoppedCompletePrefix, evalWithAnswerFn_bind, evalWithAnswerFn_reindexQuery,
+        prefixStoppedPath]
+      erw [ih]
+      rfl
+  | challenge next ih =>
+      rcases messages with ⟨salt, messages⟩
+      by_cases hg : guards.1 salt = true
+      · simp only [stoppedCompletePrefix, hg, Bool.not_true, Bool.false_eq_true, ite_false,
+          evalWithAnswerFn_bind, evalWithAnswerFn_liftM_query, QueryImpl.ofFn_apply,
+          evalWithAnswerFn_reindexQuery, prefixStoppedPath, ite_true]
+        erw [ih]
+        rfl
+      · have hg' : guards.1 salt = false := Bool.eq_false_iff.mpr hg
+        simp [stoppedCompletePrefix, hg', prefixStoppedPath]
 
 /-- The stopped completion's fixed-table result uses the same native path reconstruction. -/
-theorem stoppedComplete_eval {Input Salt : Type}
-    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (z : Input) (messages : Messages Salt (rounds z)) (table : Table Input Salt rounds) :
-    evalWithAnswerFn (QueryImpl.ofFn table) (stoppedComplete rounds guards z messages) =
-      stoppedPath rounds guards z messages table := by
-  simp only [stoppedComplete, evalWithAnswerFn_simulateQ, inputQuery,
-    evalWithAnswerFn_liftM_query, QueryImpl.ofFn_apply, stoppedPath]
-  exact stoppedCompletePrefix_eval (rounds z) (guards z) messages (Table.fibre table z)
+theorem stoppedComplete_eval {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (z : Input) (messages : Messages Salt (coin z)) (table : Table Input Salt coin) :
+    evalWithAnswerFn (QueryImpl.ofFn table) (stoppedComplete coin guards z messages) =
+      stoppedPath coin guards z messages table := by
+  rw [stoppedComplete, evalWithAnswerFn_reindexQuery]
+  exact stoppedCompletePrefix_eval (coin z) (guards z) messages (Table.fibre table z)
 
 /-- The fixed-table ordered prefix-query log contains precisely the executed prefixes. -/
-theorem stoppedCompletePrefix_log_keys {Salt : Type}
-    (rounds : List Round) (guards : GuardSchedule Salt rounds)
-    (messages : Messages Salt rounds) (table : PrefixTable Salt rounds) :
-    (tableQueryLog (stoppedCompletePrefix rounds guards messages) table).map Sigma.fst =
-      prefixStoppedKeys rounds guards messages table := by
-  induction rounds with
-  | nil => simp [stoppedCompletePrefix, prefixStoppedKeys]
-  | cons round rounds ih =>
-      rcases messages with ⟨message, salt, messages⟩
-      by_cases hg : guards.1 message salt = true
+theorem stoppedCompletePrefix_log_keys {Salt : Type} {protocol : Protocol}
+    (coin : PublicCoin protocol) (guards : GuardSchedule Salt coin)
+    (messages : Messages Salt coin) (table : PrefixTable Salt coin) :
+    (tableQueryLog (stoppedCompletePrefix coin guards messages) table).map Sigma.fst =
+      prefixStoppedKeys coin guards messages table := by
+  induction coin with
+  | done => simp [stoppedCompletePrefix, prefixStoppedKeys]
+  | sender next ih =>
+      rcases messages with ⟨move, messages⟩
+      simp only [stoppedCompletePrefix, tableQueryLog_bind, List.map_append]
+      erw [tableQueryLog_pure, tableQueryLog_reindexQuery, ih move]
+      simp only [List.map_nil, List.append_nil, prefixStoppedKeys]
+  | oracle next ih =>
+      rcases messages with ⟨message, messages⟩
+      simp only [stoppedCompletePrefix, tableQueryLog_bind, List.map_append]
+      erw [tableQueryLog_pure, tableQueryLog_reindexQuery, ih]
+      simp only [List.map_nil, List.append_nil, prefixStoppedKeys]
+  | challenge next ih =>
+      rcases messages with ⟨salt, messages⟩
+      by_cases hg : guards.1 salt = true
       · simp only [stoppedCompletePrefix, hg, Bool.not_true, Bool.false_eq_true, ite_false,
-          tableQueryLog_bind, tableQueryLog_pure, List.append_nil,
-          tableQueryLog_simulateQ, prependQuery,
-          evalWithAnswerFn_liftM_query, QueryImpl.ofFn_apply,
-          tableQueryLog_query, List.singleton_append, List.map_cons,
-          ← List.map_eq_flatMap, List.map_map, Function.comp_def,
-          prefixStoppedKeys, ite_true]
-        congr 1
-        simpa only [List.flatMap_singleton, List.map_map, Function.comp_def] using
-          congrArg (List.map (Prefix.later message salt))
-            (ih (guards.2 message salt (table (Prefix.here message salt)))
-              messages (fun q => table (Prefix.later message salt q)))
-      · have hg' : guards.1 message salt = false := Bool.eq_false_iff.mpr hg
+          tableQueryLog_bind, List.map_append]
+        erw [tableQueryLog_pure, tableQueryLog_query, tableQueryLog_reindexQuery, ih]
+        simp only [List.map_nil, List.append_nil, prefixStoppedKeys, hg, ite_true,
+          List.map_cons, List.singleton_append]
+        rfl
+      · have hg' : guards.1 salt = false := Bool.eq_false_iff.mpr hg
         simp [stoppedCompletePrefix, prefixStoppedKeys, hg']
 
 /-- The fixed-table ordered query log contains precisely the executed challenge keys. -/
-theorem stoppedComplete_log_keys {Input Salt : Type}
-    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (z : Input) (messages : Messages Salt (rounds z)) (table : Table Input Salt rounds) :
-    (tableQueryLog (stoppedComplete rounds guards z messages) table).map Sigma.fst =
-      stoppedKeys rounds guards z messages table := by
-  simp only [stoppedComplete, tableQueryLog_simulateQ, inputQuery, evalWithAnswerFn_liftM_query,
-    QueryImpl.ofFn_apply, tableQueryLog_query, ← List.map_eq_flatMap, List.map_map,
-    Function.comp_def, stoppedKeys]
-  rw [← stoppedCompletePrefix_log_keys (rounds z) (guards z) messages (Table.fibre table z),
-    List.map_map]
-  rfl
+theorem stoppedComplete_log_keys {Input Salt : Type} {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (z : Input) (messages : Messages Salt (coin z)) (table : Table Input Salt coin) :
+    (tableQueryLog (stoppedComplete coin guards z messages) table).map Sigma.fst =
+      stoppedKeys coin guards z messages table := by
+  rw [stoppedComplete, tableQueryLog_reindexQuery, stoppedKeys,
+    stoppedCompletePrefix_log_keys (coin z) (guards z) messages (Table.fibre table z)]
 
 /-- Run a randomized adversary and then stop completion at the first failing guard. The source
 phase is logged as returned data without creating new oracle effects. -/
-def randomizedStoppedCompletionAfterAdversaryLog (rounds : Input → List Round)
-    (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (selectedAndLog : Option (Selection Input Salt W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) :
-    OracleComp (unifSpec + oracleSpec Input Salt rounds)
-      (Option (Outcome Input W rounds) ×
-        QueryLog (unifSpec + oracleSpec Input Salt rounds)) := do
+def randomizedStoppedCompletionAfterAdversaryLog (coin : (z : Input) → PublicCoin (protocol z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (selectedAndLog : Option (Selection Input Salt W coin) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) :
+    OracleComp (unifSpec + oracleSpec Input Salt coin)
+      (Option (Outcome Input W protocol) ×
+        QueryLog (unifSpec + oracleSpec Input Salt coin)) := do
   match selectedAndLog.1 with
   | none => pure (none, selectedAndLog.2)
   | some ⟨z, messages, witness⟩ =>
-      let path ← simulateQ (restorationQueries Input Salt rounds)
-        (stoppedComplete rounds guards z messages)
+      let path ← simulateQ (restorationQueries Input Salt coin)
+        (stoppedComplete coin guards z messages)
       pure (path.map (fun p => ⟨z, p, witness⟩), selectedAndLog.2)
 
 /-- The actual joint stopped game shares one lazy random-oracle cache across both phases. -/
-def randomizedStoppedRestoredExecutionWithAdversaryLog (rounds : Input → List Round)
-    (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
-    OracleComp (unifSpec + oracleSpec Input Salt rounds)
-      (Option (Outcome Input W rounds) ×
-        QueryLog (unifSpec + oracleSpec Input Salt rounds)) :=
+def randomizedStoppedRestoredExecutionWithAdversaryLog (coin : (z : Input) → PublicCoin (protocol z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) :
+    OracleComp (unifSpec + oracleSpec Input Salt coin)
+      (Option (Outcome Input W protocol) ×
+        QueryLog (unifSpec + oracleSpec Input Salt coin)) :=
   adversary.withQueryLog >>=
-    randomizedStoppedCompletionAfterAdversaryLog rounds guards
+    randomizedStoppedCompletionAfterAdversaryLog coin guards
 
 /-- The same-cache stopped handoff includes the exact result, ordered hash log, and final cache.
 This law includes failed adversary selections and rejected guard paths. -/
 theorem randomizedStoppedRestoredExecutionWithAdversaryLog_handoff
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache) :
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache) :
     randomOracleLoggedRun
-        (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary) cache =
+        (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary) cache =
       randomOracleLoggedRun adversary.withQueryLog cache >>= fun phase =>
         (fun suffix => ((suffix.1.1, phase.1.2 ++ suffix.1.2), suffix.2)) <$>
           randomOracleLoggedRun
-            (randomizedStoppedCompletionAfterAdversaryLog rounds guards phase.1.1)
+            (randomizedStoppedCompletionAfterAdversaryLog coin guards phase.1.1)
             phase.2 := by
   exact randomOracleLoggedRun_bind adversary.withQueryLog
-    (randomizedStoppedCompletionAfterAdversaryLog rounds guards) cache
+    (randomizedStoppedCompletionAfterAdversaryLog coin guards) cache
 
 /-- Fixed-table version of the same joint handoff, used to derive the bad-key witness from
 the all-prefix certificate on each supported private-randomness branch. -/
 theorem randomizedStoppedRestoredExecutionWithAdversaryLog_fixedTable_handoff
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (table : Table Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache) :
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
+    (table : Table Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache) :
     fixedTableLoggedRun
-        (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary)
+        (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary)
         table cache =
       fixedTableLoggedRun adversary.withQueryLog table cache >>= fun phase =>
         (fun suffix => ((suffix.1.1, phase.1.2 ++ suffix.1.2), suffix.2)) <$>
           fixedTableLoggedRun
-            (randomizedStoppedCompletionAfterAdversaryLog rounds guards phase.1.1)
+            (randomizedStoppedCompletionAfterAdversaryLog coin guards phase.1.1)
             table phase.2 := by
   exact fixedTableLoggedRun_bind adversary.withQueryLog
-    (randomizedStoppedCompletionAfterAdversaryLog rounds guards) table cache
+    (randomizedStoppedCompletionAfterAdversaryLog coin guards) table cache
 
 /-- Accepted fixed-table stopped completion is the existing full native execution path, with
 exactly its full challenge-key log. Rejected paths retain their shorter ordered log. -/
 theorem fixedTable_stoppedCompletion_result_keys [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (z : Input) (messages : Messages Salt (rounds z))
-    (table : Table Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache)
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (z : Input) (messages : Messages Salt (coin z))
+    (table : Table Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache)
     (agree : cache.AgreesWithFn (QueryImpl.ofFn table))
-    (result : ((Option (protocol (rounds z)).tree.ExecutionPath ×
-      QueryLog (oracleSpec Input Salt rounds)) ×
-      (oracleSpec Input Salt rounds).QueryCache))
+    (result : ((Option (protocol z).tree.ExecutionPath ×
+      QueryLog (oracleSpec Input Salt coin)) ×
+      (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (simulateQ (restorationQueries Input Salt rounds)
-        (stoppedComplete rounds guards z messages)) table cache)) :
-    result.1.1 = stoppedPath rounds guards z messages table ∧
-      result.1.2.map Sigma.fst = stoppedKeys rounds guards z messages table := by
+      (simulateQ (restorationQueries Input Salt coin)
+        (stoppedComplete coin guards z messages)) table cache)) :
+    result.1.1 = stoppedPath coin guards z messages table ∧
+      result.1.2.map Sigma.fst = stoppedKeys coin guards z messages table := by
   obtain ⟨hpath, hlog, _⟩ := fixedTable_restorationQueries_run
-    (stoppedComplete rounds guards z messages) table cache agree result supported
-  exact ⟨hpath.trans (stoppedComplete_eval rounds guards z messages table),
-    by rw [hlog]; exact stoppedComplete_log_keys rounds guards z messages table⟩
+    (stoppedComplete coin guards z messages) table cache agree result supported
+  exact ⟨hpath.trans (stoppedComplete_eval coin guards z messages table),
+    by rw [hlog]; exact stoppedComplete_log_keys coin guards z messages table⟩
 
 /-- The terminal seed is supplied by the adversary, then validated by the accepted relation.
 An invalid named backward extraction on an accepted stopped path has a bad key among the actual
 queried keys of that stopped completion. -/
 theorem badExtractOnStoppedPath_has_bad_key
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
+    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
-    (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (z : Input) (messages : Messages Salt (rounds z)) (witness : W)
-    (table : Table Input Salt rounds)
-    (path : (protocol (rounds z)).tree.ExecutionPath)
-    (accepted : stoppedPath rounds guards z messages table = some path)
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (z : Input) (messages : Messages Salt (coin z)) (witness : W)
+    (table : Table Input Salt coin)
+    (path : (protocol z).tree.ExecutionPath)
+    (accepted : stoppedPath coin guards z messages table = some path)
     (bad : badExtractOnPath state extractor Z terminalWitness (some ⟨z, path, witness⟩)) :
-    ∃ key ∈ stoppedKeys rounds guards z messages table,
+    ∃ key ∈ stoppedKeys coin guards z messages table,
       badKey state extractor Z key table := by
-  have passed := stoppedPath_some_implies_pass rounds guards z messages table accepted
-  have hpath := stoppedPath_eq_some_completedPath rounds guards z messages table passed
-  have heq : path = completedPath rounds z messages table :=
+  have passed := stoppedPath_some_implies_pass coin guards z messages table accepted
+  have hpath := stoppedPath_eq_some_completedPath coin guards z messages table passed
+  have heq : path = completedPath coin z messages table :=
     Option.some.inj (accepted.symm.trans hpath)
   subst path
   obtain ⟨key, hkey, hbad⟩ := badExtractOnPath_completion
     state extractor Z preserving terminalWitness z messages witness table bad
-  exact ⟨key, by rw [stoppedKeys_of_pass rounds guards z messages table passed]; exact hkey,
+  exact ⟨key, by rw [stoppedKeys_of_pass coin guards z messages table passed]; exact hkey,
     hbad⟩
 
 /-- A selected source result executes only its stopped completion, preserving the source log.
 The suffix log is exactly the list of keys visited before acceptance or rejection. -/
 theorem fixedTable_stoppedCompletionAfterAdversaryLog_selected
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (z : Input) (messages : Messages Salt (rounds z)) (witness : W)
-    (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt rounds))
-    (table : Table Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache)
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (z : Input) (messages : Messages Salt (coin z)) (witness : W)
+    (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt coin))
+    (table : Table Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache)
     (agree : cache.AgreesWithFn (QueryImpl.ofFn table))
-    (result : (((Option (Outcome Input W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache))
+    (result : (((Option (Outcome Input W protocol) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (randomizedStoppedCompletionAfterAdversaryLog rounds guards
+      (randomizedStoppedCompletionAfterAdversaryLog coin guards
         (some ⟨z, messages, witness⟩, adversaryLog)) table cache)) :
     result.1.1 =
-      ((stoppedPath rounds guards z messages table).map
+      ((stoppedPath coin guards z messages table).map
         (fun path => ⟨z, path, witness⟩), adversaryLog) ∧
-      result.1.2.map Sigma.fst = stoppedKeys rounds guards z messages table := by
-  have hprogram : randomizedStoppedCompletionAfterAdversaryLog rounds guards
+      result.1.2.map Sigma.fst = stoppedKeys coin guards z messages table := by
+  have hprogram : randomizedStoppedCompletionAfterAdversaryLog coin guards
       (some ⟨z, messages, witness⟩, adversaryLog) =
       (fun path => (path.map (fun p => ⟨z, p, witness⟩), adversaryLog)) <$>
-        simulateQ (restorationQueries Input Salt rounds)
-          (stoppedComplete rounds guards z messages) := by
+        simulateQ (restorationQueries Input Salt coin)
+          (stoppedComplete coin guards z messages) := by
     simp only [randomizedStoppedCompletionAfterAdversaryLog, map_eq_pure_bind]
   rw [hprogram, fixedTableLoggedRun_map, support_map] at supported
   obtain ⟨completion, hcompletion, rfl⟩ := supported
   obtain ⟨hpath, hkeys⟩ := fixedTable_stoppedCompletion_result_keys
-    rounds guards z messages table cache agree completion hcompletion
+    coin guards z messages table cache agree completion hcompletion
   exact ⟨by simp [hpath], hkeys⟩
 
 /-- Fixed-table trace decomposition of the actual stopped game. The suffix log is retained even
 when a guard rejects; a failed source selection has no suffix queries. -/
 theorem fixedTable_stopped_trace [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (table : Table Input Salt rounds)
-    (result : (((Option (Outcome Input W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
+    (table : Table Input Salt coin)
+    (result : (((Option (Outcome Input W protocol) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary)
+      (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary)
       table ∅)) :
     (result.1.1.1 = none ∧ result.1.2 = result.1.1.2.snd) ∨
       ∃ z messages witness suffixLog,
         result.1.1.1 =
-          (stoppedPath rounds guards z messages table).map
+          (stoppedPath coin guards z messages table).map
             (fun path => ⟨z, path, witness⟩) ∧
         result.1.2 = result.1.1.2.snd ++ suffixLog ∧
-        suffixLog.map Sigma.fst = stoppedKeys rounds guards z messages table := by
+        suffixLog.map Sigma.fst = stoppedKeys coin guards z messages table := by
   rw [randomizedStoppedRestoredExecutionWithAdversaryLog_fixedTable_handoff]
     at supported
   obtain ⟨phase, hphase, hrest⟩ := (mem_support_bind_iff _ _ _).mp supported
@@ -469,7 +520,7 @@ theorem fixedTable_stopped_trace [DecidableEq Input] [DecidableEq Salt]
   | some selected =>
       rcases selected with ⟨z, messages, witness⟩
       obtain ⟨hout, hkeys⟩ := fixedTable_stoppedCompletionAfterAdversaryLog_selected
-        rounds guards z messages witness sourceLog table phaseCache hagree suffix hsuffix
+        coin guards z messages witness sourceLog table phaseCache hagree suffix hsuffix
       right
       refine ⟨z, messages, witness, suffix.1.2, ?_, ?_, hkeys⟩
       · exact congrArg Prod.fst hout
@@ -478,29 +529,29 @@ theorem fixedTable_stopped_trace [DecidableEq Input] [DecidableEq Salt]
 /-- A failed extraction on a supported stopped run is witnessed by a bad key in that same
 run's ordered hash log. This implication comes from preservation and the full accepted path. -/
 theorem fixedTable_stopped_badExtract_has_bad_query [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
+    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
-    (table : Table Input Salt rounds)
-    (result : (((Option (Outcome Input W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache))
+    (table : Table Input Salt coin)
+    (result : (((Option (Outcome Input W protocol) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary)
+      (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary)
       table ∅))
     (bad : badExtractOnPath state extractor Z terminalWitness result.1.1.1) :
     ∃ query ∈ result.1.2, badKey state extractor Z query.1 table := by
-  rcases fixedTable_stopped_trace rounds guards adversary table result supported with
+  rcases fixedTable_stopped_trace coin guards adversary table result supported with
     ⟨hnone, _⟩ | ⟨z, messages, witness, suffixLog, hresult, hlog, hkeys⟩
   · rw [hnone] at bad
     exact False.elim bad
-  · cases hpath : stoppedPath rounds guards z messages table with
+  · cases hpath : stoppedPath coin guards z messages table with
     | none =>
         rw [hpath] at hresult
         rw [hresult] at bad
@@ -523,13 +574,13 @@ theorem fixedTable_stopped_badExtract_has_bad_query [DecidableEq Input] [Decidab
 explicit terminal seed; extraction applies the named backward map to that very seed. -/
 def badStoppedRelation
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+    (Rout : (z : Input) → (path : (protocol z).tree.ExecutionPath) → W → Prop)
+    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
     (Z : Set Input)
-    (result : Option (Outcome Input W rounds)) : Prop :=
+    (result : Option (Outcome Input W protocol)) : Prop :=
   match result with
   | none => False
   | some ⟨z, path, witness⟩ =>
@@ -539,17 +590,17 @@ def badStoppedRelation
 /-- The accepted failure relation entails the certificate's terminal-validity failure event. -/
 theorem badStoppedRelation_implies_badExtractOnPath
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+    (Rout : (z : Input) → (path : (protocol z).tree.ExecutionPath) → W → Prop)
+    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
     (Z : Set Input)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
       Rout z path witness →
         ((extractor z).terminalState path).holds (terminalWitness z path witness))
-    (result : Option (Outcome Input W rounds))
+    (result : Option (Outcome Input W protocol))
     (bad : badStoppedRelation state extractor Rin Rout terminalWitness Z result) :
     badExtractOnPath state extractor Z (fun z path => terminalWitness z path) result := by
   cases result with
@@ -570,89 +621,92 @@ challenge key in the same stopped cached run. Inputs and salts need only decidab
 adversarial private samples may be interleaved with repeated and out-of-order hash queries. -/
 theorem randomizedStopped_badRelation_le_expectedFreshCharge
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (errors : (z : Input) → Errors (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol (rounds z)).roles (roundErrorSchedule (rounds z) (errors z)))
+      (protocol z).roles (errorSchedule (coin z) (errors z)))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+    (Rout : (z : Input) → (path : (protocol z).tree.ExecutionPath) → W → Prop)
+    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
       Rout z path witness →
         ((extractor z).terminalState path).holds (terminalWitness z path witness)) :
     Pr{let joint ← (randomOracleLoggedRun
-      (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary) ∅)}[
+      (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary) ∅)}[
       badStoppedRelation state extractor Rin Rout terminalWitness Z joint.1.1.1] ≤
     expectedFreshQueryCharge
-      (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary)
+      (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary)
       (keyError errors) := by
   apply prEvent_randomOracle_le_expectedFreshQueryCharge
-    (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary)
+    (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary)
     (fun result => badStoppedRelation state extractor Rin Rout terminalWitness Z result.1)
     (badKey state extractor Z) (keyError errors)
   · intro table result supported bad
     obtain ⟨query, hquery, hbad⟩ := fixedTable_stopped_badExtract_has_bad_query
-      rounds guards adversary state extractor Z preserving
+      coin guards adversary state extractor Z preserving
         (fun z path => terminalWitness z path) table result supported
         (badStoppedRelation_implies_badExtractOnPath state extractor Rin Rout
           terminalWitness Z inputLaw outputLaw result.1.1.1 bad)
     exact ⟨query.1, (mem_freshKeysOfLog _ _).mpr ⟨query, hquery, rfl⟩, hbad⟩
   · intro key table
-    exact badKey_round_resample_bound state extractor Z errors bounded key table
+    exact badKey_resample_bound state extractor Z errors bounded key table
 
-set_option backward.isDefEq.respectTransparency false in
-/-- The cost of reached stopped rounds is at most the sum of all local round errors. -/
-theorem prefixStoppedKeys_error_sum_le {Salt : Type} (rounds : List Round)
-    (errors : RoundErrors rounds) (guards : GuardSchedule Salt rounds)
-    (messages : Messages Salt rounds) (table : PrefixTable Salt rounds) :
-    ((prefixStoppedKeys rounds guards messages table).map (prefixError errors)).sum ≤
-      ∑ j, errors j := by
-  induction rounds with
-  | nil => cases messages; simp [prefixStoppedKeys]
-  | cons round rounds ih =>
-      rcases messages with ⟨message, salt, messages⟩
-      by_cases hg : guards.1 message salt = true
-      · have htail := ih (fun j => errors j.succ)
-          (guards.2 message salt (table (Prefix.here message salt))) messages
-          (fun q => table (Prefix.later message salt q))
-        simpa only [prefixStoppedKeys, hg, ite_true, List.map_cons, List.sum_cons,
-          List.map_map, Function.comp_def, prefixError, List.length_cons,
-          Fin.sum_univ_succ]
-          using add_le_add_right htail (errors 0)
-      · have hg' : guards.1 message salt = false := Bool.eq_false_iff.mpr hg
-        simp only [prefixStoppedKeys, hg']
-        exact zero_le
+/-- The cost of the reached challenges is at most the largest path sum of errors. -/
+theorem prefixStoppedKeys_error_sum_le {Salt : Type} {protocol : Protocol}
+    (coin : PublicCoin protocol) (errors : Errors coin) (guards : GuardSchedule Salt coin)
+    (messages : Messages Salt coin) (table : PrefixTable Salt coin) :
+    ((prefixStoppedKeys coin guards messages table).map (prefixError errors)).sum ≤
+      pathError coin errors := by
+  induction coin with
+  | done => simp [prefixStoppedKeys]
+  | sender next ih =>
+      rcases messages with ⟨move, messages⟩
+      simp only [prefixStoppedKeys, List.map_map, pathError]
+      exact (ih move (fun q => errors ⟨move, q⟩) _ messages _).trans
+        (le_iSup (fun move => pathError (next move) fun q => errors ⟨move, q⟩) move)
+  | oracle next ih =>
+      rcases messages with ⟨message, messages⟩
+      simp only [prefixStoppedKeys, List.map_map, pathError]
+      exact (ih (fun q => errors ⟨message, q⟩) _ messages _).trans
+        (le_iSup (fun message => pathError next fun q => errors ⟨message, q⟩) message)
+  | challenge next ih =>
+      rcases messages with ⟨salt, messages⟩
+      simp only [prefixStoppedKeys, pathError]
+      split
+      · simp only [List.map_cons, List.sum_cons, List.map_map]
+        exact add_le_add le_rfl (ih (fun q => errors (.inr ⟨PUnit.unit, q⟩)) _ messages _)
+      · exact zero_le
 
-/-- The cost of reached stopped rounds is at most the largest total error of one input's
-rounds. -/
-theorem stoppedKeys_error_sum_le (rounds : Input → List Round)
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (z : Input) (messages : Messages Salt (rounds z)) (table : Table Input Salt rounds) :
-    ((stoppedKeys rounds guards z messages table).map (keyError errors)).sum ≤
+/-- The cost of reached stopped coin is at most the largest total error of one input's
+coin. -/
+theorem stoppedKeys_error_sum_le (coin : (z : Input) → PublicCoin (protocol z))
+    (errors : (z : Input) → Errors (coin z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (z : Input) (messages : Messages Salt (coin z)) (table : Table Input Salt coin) :
+    ((stoppedKeys coin guards z messages table).map (keyError errors)).sum ≤
       sumError errors := by
   simp only [stoppedKeys, List.map_map]
-  exact (prefixStoppedKeys_error_sum_le (rounds z) (errors z) (guards z) messages
-    (Table.fibre table z)).trans (le_iSup (fun z => ∑ j, errors z j) z)
+  exact (prefixStoppedKeys_error_sum_le (coin z) (errors z) (guards z) messages
+    (Table.fibre table z)).trans (le_iSup (fun z => pathError (coin z) (errors z)) z)
 
 /-- A joint stopped log charges the adversary's distinct keys and only verifier calls that
 actually executed. Repeated or previously cached verifier keys can make the bound strict. -/
 theorem roundFreshCharge_append_le_stopped [DecidableEq Input] [DecidableEq Salt]
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt rounds))
-    (suffixLog : QueryLog (oracleSpec Input Salt rounds)) :
+    (errors : (z : Input) → Errors (coin z))
+    (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt coin))
+    (suffixLog : QueryLog (oracleSpec Input Salt coin)) :
     roundFreshCharge errors (adversaryLog.snd ++ suffixLog) ≤
       (adversaryHashKeys adversaryLog).card * maxError errors +
         ((suffixLog.map Sigma.fst).map (keyError errors)).sum := by
-  let A : Finset (Key Input Salt rounds) := (adversaryLog.snd.map Sigma.fst).toFinset
-  let C : Finset (Key Input Salt rounds) := (suffixLog.map Sigma.fst).toFinset
+  let A : Finset (Key Input Salt coin) := (adversaryLog.snd.map Sigma.fst).toFinset
+  let C : Finset (Key Input Salt coin) := (suffixLog.map Sigma.fst).toFinset
   have hA : (∑ key ∈ A, keyError errors key) ≤ A.card * maxError errors := by
     calc
       (∑ key ∈ A, keyError errors key) ≤ ∑ _key ∈ A, maxError errors :=
@@ -680,32 +734,32 @@ theorem roundFreshCharge_append_le_stopped [DecidableEq Input] [DecidableEq Salt
 
 /-- Actual executed verifier-round cost: remove the adversary phase's ordered hash prefix
 from the joint log and sum the round error of each remaining call. -/
-def stoppedVerifierRoundCost [DecidableEq Input] [DecidableEq Salt]
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt rounds))
-    (jointLog : QueryLog (oracleSpec Input Salt rounds)) : ENNReal :=
+noncomputable def stoppedVerifierRoundCost [DecidableEq Input] [DecidableEq Salt]
+    (errors : (z : Input) → Errors (coin z))
+    (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt coin))
+    (jointLog : QueryLog (oracleSpec Input Salt coin)) : ENNReal :=
   (((jointLog.drop adversaryLog.snd.length).map Sigma.fst).map (keyError errors)).sum
 
 /-- Every supported fixed-table stopped run pays at most the source distinct-key cost plus
-the sum for its actually executed verifier rounds. Failed selections still pay source costs. -/
+the sum for its actually executed verifier coin. Failed selections still pay source costs. -/
 theorem fixedTable_stopped_freshCharge_le_actualRounds
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (table : Table Input Salt rounds)
-    (result : (((Option (Outcome Input W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (errors : (z : Input) → Errors (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
+    (table : Table Input Salt coin)
+    (result : (((Option (Outcome Input W protocol) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary)
+      (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary)
       table ∅)) :
     freshQueryCharge (keyError errors) result.1.2 ≤
       (adversaryHashKeys result.1.1.2).card * maxError errors +
         stoppedVerifierRoundCost errors result.1.1.2 result.1.2 := by
   change roundFreshCharge errors result.1.2 ≤ _
-  rcases fixedTable_stopped_trace rounds guards adversary table result supported with
+  rcases fixedTable_stopped_trace coin guards adversary table result supported with
     ⟨_, hlog⟩ | ⟨z, messages, witness, suffixLog, _, hlog, hkeys⟩
   · rw [hlog]
     simpa [stoppedVerifierRoundCost] using
@@ -718,24 +772,24 @@ theorem fixedTable_stopped_freshCharge_le_actualRounds
 run. This is a separate estimate; the refined bound above retains the early-stop savings. -/
 theorem fixedTable_stopped_verifierCost_le_sum
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (table : Table Input Salt rounds)
-    (result : (((Option (Outcome Input W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (errors : (z : Input) → Errors (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
+    (table : Table Input Salt coin)
+    (result : (((Option (Outcome Input W protocol) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary)
+      (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary)
       table ∅)) :
     stoppedVerifierRoundCost errors result.1.1.2 result.1.2 ≤ sumError errors := by
-  rcases fixedTable_stopped_trace rounds guards adversary table result supported with
+  rcases fixedTable_stopped_trace coin guards adversary table result supported with
     ⟨_, hlog⟩ | ⟨z, messages, witness, suffixLog, _, hlog, hkeys⟩
   · rw [hlog]
     simp [stoppedVerifierRoundCost]
   · rw [hlog]
     simpa [stoppedVerifierRoundCost, hkeys] using
-      stoppedKeys_error_sum_le rounds errors guards z messages table
+      stoppedKeys_error_sum_le coin errors guards z messages table
 
 end Interaction.Oracle.Security.StateRestoration

@@ -5,7 +5,7 @@ Authors: Quang Dao
 -/
 module
 
-public import ArkLib.Interaction.Oracle.Security.StateRestorationBudget
+public import ArkLib.Interaction.Oracle.Security.StateRestorationOracle
 public import VCVio.OracleComp.QueryTracking.RandomOracle.ExpectedFreshQueryInfinite
 
 /-!
@@ -28,58 +28,59 @@ namespace Interaction.Oracle.Security.StateRestoration
 
 universe w
 
-variable {Input Salt W : Type} {rounds : Input → List Round}
+variable {Input Salt W : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
 
 /-- The adversary's interleaved private sampling and restoration-oracle effects. Repeated uniform
 sampling queries are forwarded to `ProbComp`, so each operation draws a new private sample. -/
-abbrev RandomizedRestorationAdversary (Input Salt W : Type) (rounds : Input → List Round) :=
-  OracleComp (unifSpec + oracleSpec Input Salt rounds)
-    (Option (Selection Input Salt W rounds))
+abbrev RandomizedRestorationAdversary (Input Salt W : Type) {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z)) :=
+  OracleComp (unifSpec + oracleSpec Input Salt coin)
+    (Option (Selection Input Salt W coin))
 
 /-- Route completion's challenge queries into the cached side of the randomized signature. -/
-def restorationQueries (Input Salt : Type) (rounds : Input → List Round) :
-    QueryImpl (oracleSpec Input Salt rounds)
-      (OracleComp (unifSpec + oracleSpec Input Salt rounds)) :=
-  fun key => liftM ((unifSpec + oracleSpec Input Salt rounds).query (.inr key))
+def restorationQueries (Input Salt : Type) {protocol : Input → Protocol}
+    (coin : (z : Input) → PublicCoin (protocol z)) :
+    QueryImpl (oracleSpec Input Salt coin)
+      (OracleComp (unifSpec + oracleSpec Input Salt coin)) :=
+  fun key => liftM ((unifSpec + oracleSpec Input Salt coin).query (.inr key))
 
 /-- Only restoration-oracle calls count as adversarial challenge queries. Private uniform samples
 use the other summand and are discarded by this projection. -/
 def adversaryHashKeys [DecidableEq Input] [DecidableEq Salt]
-    (log : QueryLog (unifSpec + oracleSpec Input Salt rounds)) :
-    Finset (Key Input Salt rounds) :=
+    (log : QueryLog (unifSpec + oracleSpec Input Salt coin)) :
+    Finset (Key Input Salt coin) :=
   (log.snd.map Sigma.fst).toFinset
 
-/-- Prefix completion has exactly one syntactic prefix at each round, carrying that round's
-error. -/
-theorem prefixKeys_error_sum {Salt : Type} (rounds : List Round) (errors : RoundErrors rounds)
-    (messages : Messages Salt rounds) :
-    ((prefixKeys rounds messages).map (prefixError errors)).sum = ∑ j, errors j := by
-  induction rounds with
-  | nil => cases messages; rfl
-  | cons round rounds ih =>
-      rcases messages with ⟨message, salt, messages⟩
-      simpa only [prefixKeys, List.map_cons, List.sum_cons, List.map_map,
-        Function.comp_def, prefixError, List.length_cons, Fin.sum_univ_succ]
-        using congrArg (fun x : ENNReal => errors 0 + x)
-          (ih (fun j => errors j.succ) messages)
+/-- The errors of the prefixes read by prefix completion sum to at most the largest path sum. -/
+theorem prefixKeys_error_sum_le {Salt : Type} {protocol : Protocol} (coin : PublicCoin protocol)
+    (errors : Errors coin) (messages : Messages Salt coin) :
+    ((prefixKeys coin messages).map (prefixError errors)).sum ≤ pathError coin errors := by
+  induction coin with
+  | done => simp [prefixKeys]
+  | sender next ih =>
+      rcases messages with ⟨move, messages⟩
+      simp only [prefixKeys, List.map_map, pathError]
+      exact (ih move (fun q => errors ⟨move, q⟩) messages).trans
+        (le_iSup (fun move => pathError (next move) fun q => errors ⟨move, q⟩) move)
+  | oracle next ih =>
+      rcases messages with ⟨message, messages⟩
+      simp only [prefixKeys, List.map_map, pathError]
+      exact (ih (fun q => errors ⟨message, q⟩) messages).trans
+        (le_iSup (fun message => pathError next fun q => errors ⟨message, q⟩) message)
+  | challenge next ih =>
+      rcases messages with ⟨salt, messages⟩
+      simp only [prefixKeys, List.map_cons, List.sum_cons, List.map_map, pathError]
+      exact add_le_add le_rfl (ih (fun q => errors (.inr ⟨PUnit.unit, q⟩)) messages)
 
-/-- Completion has exactly one syntactic challenge key at each round of the selected input,
-carrying that round's error. This identity also applies when a key was already cached by the
-adversary. -/
-theorem completionKeys_error_sum (rounds : Input → List Round)
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (z : Input) (messages : Messages Salt (rounds z)) :
-    ((completionKeys rounds z messages).map (keyError errors)).sum = ∑ j, errors z j := by
+/-- Completion pays at most the largest path sum of errors. This also applies when a key was
+already cached by the adversary. -/
+theorem completionKeys_error_sum_le (coin : (z : Input) → PublicCoin (protocol z))
+    (errors : (z : Input) → Errors (coin z))
+    (z : Input) (messages : Messages Salt (coin z)) :
+    ((completionKeys coin z messages).map (keyError errors)).sum ≤ sumError errors := by
   simp only [completionKeys, List.map_map]
-  exact prefixKeys_error_sum (rounds z) (errors z) messages
-
-/-- Completion pays at most the largest total error of one input's rounds. -/
-theorem completionKeys_error_sum_le (rounds : Input → List Round)
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (z : Input) (messages : Messages Salt (rounds z)) :
-    ((completionKeys rounds z messages).map (keyError errors)).sum ≤ sumError errors := by
-  rw [completionKeys_error_sum]
-  exact le_iSup (fun z => ∑ j, errors z j) z
+  exact (prefixKeys_error_sum_le (coin z) (errors z) messages).trans
+    (le_iSup (fun z => pathError (coin z) (errors z)) z)
 
 /-- Deduplicating a finite nonnegative charge list cannot increase its sum. -/
 theorem sum_toFinset_le_list_sum {A : Type} [DecidableEq A]
@@ -97,22 +98,22 @@ theorem sum_toFinset_le_list_sum {A : Type} [DecidableEq A]
 
 /-- Distinct challenge-key charge on an ordered hash-query log. -/
 noncomputable def roundFreshCharge [DecidableEq Input] [DecidableEq Salt]
-    (errors : (z : Input) → RoundErrors (rounds z)) (log : QueryLog (oracleSpec Input Salt
-        rounds)) : ENNReal :=
+    (errors : (z : Input) → Errors (coin z)) (log : QueryLog (oracleSpec Input Salt
+        coin)) : ENNReal :=
   ∑ key ∈ (log.map Sigma.fst).toFinset, keyError errors key
 
 /-- The joint fresh charge is bounded pointwise by the distinct adversarial challenge keys plus
 one completion key per round. No probability estimate or query bound enters this step. -/
 theorem roundFreshCharge_append_le [DecidableEq Input] [DecidableEq Salt]
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt rounds))
-    (completionLog : QueryLog (oracleSpec Input Salt rounds))
-    (z : Input) (messages : Messages Salt (rounds z))
-    (hkeys : completionLog.map Sigma.fst = completionKeys rounds z messages) :
+    (errors : (z : Input) → Errors (coin z))
+    (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt coin))
+    (completionLog : QueryLog (oracleSpec Input Salt coin))
+    (z : Input) (messages : Messages Salt (coin z))
+    (hkeys : completionLog.map Sigma.fst = completionKeys coin z messages) :
     roundFreshCharge errors (adversaryLog.snd ++ completionLog) ≤
       (adversaryHashKeys adversaryLog).card * maxError errors + sumError errors := by
-  let A : Finset (Key Input Salt rounds) := (adversaryLog.snd.map Sigma.fst).toFinset
-  let C : Finset (Key Input Salt rounds) := (completionLog.map Sigma.fst).toFinset
+  let A : Finset (Key Input Salt coin) := (adversaryLog.snd.map Sigma.fst).toFinset
+  let C : Finset (Key Input Salt coin) := (completionLog.map Sigma.fst).toFinset
   have hA : (∑ key ∈ A, keyError errors key) ≤ A.card * maxError errors := by
     calc
       (∑ key ∈ A, keyError errors key) ≤ ∑ _key ∈ A, maxError errors :=
@@ -126,7 +127,7 @@ theorem roundFreshCharge_append_le [DecidableEq Input] [DecidableEq Salt]
         sum_toFinset_le_list_sum (keyError errors) (completionLog.map Sigma.fst)
       _ ≤ sumError errors := by
         rw [hkeys]
-        exact completionKeys_error_sum_le rounds errors z messages
+        exact completionKeys_error_sum_le coin errors z messages
   have hUnion :
       (∑ key ∈ A ∪ C, keyError errors key) ≤
         (∑ key ∈ A, keyError errors key) + (∑ key ∈ C, keyError errors key) := by
@@ -146,11 +147,11 @@ theorem roundFreshCharge_append_le [DecidableEq Input] [DecidableEq Salt]
 /-- A pathwise cap on the actual distinct adversary keys recovers the familiar worst-case
 `Q * max + sum` charge without counting repeated cached calls. -/
 theorem roundFreshCharge_append_le_queryBound [DecidableEq Input] [DecidableEq Salt]
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt rounds))
-    (completionLog : QueryLog (oracleSpec Input Salt rounds))
-    (z : Input) (messages : Messages Salt (rounds z))
-    (hkeys : completionLog.map Sigma.fst = completionKeys rounds z messages)
+    (errors : (z : Input) → Errors (coin z))
+    (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt coin))
+    (completionLog : QueryLog (oracleSpec Input Salt coin))
+    (z : Input) (messages : Messages Salt (coin z))
+    (hkeys : completionLog.map Sigma.fst = completionKeys coin z messages)
     (Q : ℕ) (hQ : (adversaryHashKeys adversaryLog).card ≤ Q) :
     roundFreshCharge errors (adversaryLog.snd ++ completionLog) ≤
       Q * maxError errors + sumError errors := by
@@ -164,11 +165,11 @@ theorem roundFreshCharge_append_le_queryBound [DecidableEq Input] [DecidableEq S
 /-- The shared extraction failure event. An adversary that returns `none` contributes no bad
 extraction event, while its preceding oracle calls remain in the surrounding logged run. -/
 def badExtractOnPath (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Z : Set Input)
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
-    (result : Option (Outcome Input W rounds)) : Prop :=
+    (result : Option (Outcome Input W protocol)) : Prop :=
   match result with
   | none => False
   | some ⟨z, path, witness⟩ =>
@@ -181,79 +182,79 @@ def badExtractOnPath (state : Input → KnowledgeState.{w})
 path's actual challenge keys is bad in the same answer table. -/
 theorem badExtractOnPath_completion
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
+    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
-    (z : Input) (messages : Messages Salt (rounds z)) (witness : W)
-    (table : Table Input Salt rounds)
+    (z : Input) (messages : Messages Salt (coin z)) (witness : W)
+    (table : Table Input Salt coin)
     (bad : badExtractOnPath state extractor Z terminalWitness
-      (some ⟨z, completedPath rounds z messages table, witness⟩)) :
-    ∃ key ∈ completionKeys rounds z messages,
+      (some ⟨z, completedPath coin z messages table, witness⟩)) :
+    ∃ key ∈ completionKeys coin z messages,
       badKey state extractor Z key table := by
   change z ∈ Z ∧
-    ((extractor z).terminalState (completedPath rounds z messages table)).holds
-      (terminalWitness z (completedPath rounds z messages table) witness) ∧
+    ((extractor z).terminalState (completedPath coin z messages table)).holds
+      (terminalWitness z (completedPath coin z messages table) witness) ∧
     ¬ (state z).holds ((extractor z).extractWitness
-      (completedPath rounds z messages table)
-      (terminalWitness z (completedPath rounds z messages table) witness)) at bad
+      (completedPath coin z messages table)
+      (terminalWitness z (completedPath coin z messages table) witness)) at bad
   exact badKey_of_completedPath state extractor Z preserving terminalWitness z messages witness
     table bad.1 bad.2.1 bad.2.2
 
 /-- Continue a logged adversary output through completion, preserving the source phase log. -/
-def randomizedCompletionAfterAdversaryLog (rounds : Input → List Round)
-    (selectedAndLog : Option (Selection Input Salt W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) :
-    OracleComp (unifSpec + oracleSpec Input Salt rounds)
-      (Option (Outcome Input W rounds) ×
-        QueryLog (unifSpec + oracleSpec Input Salt rounds)) := do
+def randomizedCompletionAfterAdversaryLog (coin : (z : Input) → PublicCoin (protocol z))
+    (selectedAndLog : Option (Selection Input Salt W coin) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) :
+    OracleComp (unifSpec + oracleSpec Input Salt coin)
+      (Option (Outcome Input W protocol) ×
+        QueryLog (unifSpec + oracleSpec Input Salt coin)) := do
   match selectedAndLog.1 with
   | none => pure (none, selectedAndLog.2)
   | some ⟨z, messages, witness⟩ =>
-      let path ← simulateQ (restorationQueries Input Salt rounds) (complete rounds z messages)
+      let path ← simulateQ (restorationQueries Input Salt coin) (complete coin z messages)
       pure (some ⟨z, path, witness⟩, selectedAndLog.2)
 
 /-- Log the adversary before completion to keep the phase boundary as ordinary returned data.
 This observes source calls without introducing new uniform or restoration queries. -/
-def randomizedRestoredExecutionWithAdversaryLog (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
-    OracleComp (unifSpec + oracleSpec Input Salt rounds)
-      (Option (Outcome Input W rounds) ×
-        QueryLog (unifSpec + oracleSpec Input Salt rounds)) :=
-  adversary.withQueryLog >>= randomizedCompletionAfterAdversaryLog rounds
+def randomizedRestoredExecutionWithAdversaryLog (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) :
+    OracleComp (unifSpec + oracleSpec Input Salt coin)
+      (Option (Outcome Input W protocol) ×
+        QueryLog (unifSpec + oracleSpec Input Salt coin)) :=
+  adversary.withQueryLog >>= randomizedCompletionAfterAdversaryLog coin
 
 /-- Complete only a selected transcript. This remains a computation in the original randomized
 oracle signature, so the adversary and completion share one stateful random-oracle run. -/
-def randomizedRestoredExecution (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
-    OracleComp (unifSpec + oracleSpec Input Salt rounds)
-      (Option (Outcome Input W rounds)) := do
+def randomizedRestoredExecution (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) :
+    OracleComp (unifSpec + oracleSpec Input Salt coin)
+      (Option (Outcome Input W protocol)) := do
   match (← adversary) with
   | none => pure none
   | some ⟨z, messages, witness⟩ =>
-      let path ← simulateQ (restorationQueries Input Salt rounds) (complete rounds z messages)
+      let path ← simulateQ (restorationQueries Input Salt coin) (complete coin z messages)
       pure (some ⟨z, path, witness⟩)
 
 /-- Erasing the phase log recovers the ordinary joint adversary and completion program exactly. -/
-theorem randomizedRestoredExecutionWithAdversaryLog_erase (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
-    Prod.fst <$> randomizedRestoredExecutionWithAdversaryLog rounds adversary =
-      randomizedRestoredExecution rounds adversary := by
-  have hstep (selected : Option (Selection Input Salt W rounds))
-      (log : QueryLog (unifSpec + oracleSpec Input Salt rounds)) :
+theorem randomizedRestoredExecutionWithAdversaryLog_erase (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) :
+    Prod.fst <$> randomizedRestoredExecutionWithAdversaryLog coin adversary =
+      randomizedRestoredExecution coin adversary := by
+  have hstep (selected : Option (Selection Input Salt W coin))
+      (log : QueryLog (unifSpec + oracleSpec Input Salt coin)) :
       Prod.fst <$> (match selected with
-        | none => (pure (none, log) : OracleComp (unifSpec + oracleSpec Input Salt rounds) _)
+        | none => (pure (none, log) : OracleComp (unifSpec + oracleSpec Input Salt coin) _)
         | some ⟨z, messages, witness⟩ => do
-            let path ← simulateQ (restorationQueries Input Salt rounds)
-              (complete rounds z messages)
-            pure (some (⟨z, path, witness⟩ : Outcome Input W rounds), log)) =
+            let path ← simulateQ (restorationQueries Input Salt coin)
+              (complete coin z messages)
+            pure (some (⟨z, path, witness⟩ : Outcome Input W protocol), log)) =
         (match selected with
         | none => pure none
         | some ⟨z, messages, witness⟩ => do
-            let path ← simulateQ (restorationQueries Input Salt rounds)
-              (complete rounds z messages)
-            pure (some (⟨z, path, witness⟩ : Outcome Input W rounds))) := by
+            let path ← simulateQ (restorationQueries Input Salt coin)
+              (complete coin z messages)
+            pure (some (⟨z, path, witness⟩ : Outcome Input W protocol))) := by
     cases selected with
     | none => rfl
     | some data =>
@@ -263,15 +264,15 @@ theorem randomizedRestoredExecutionWithAdversaryLog_erase (rounds : Input → Li
     randomizedCompletionAfterAdversaryLog, randomizedRestoredExecution,
     map_bind]
   simp_rw [hstep]
-  let finish : Option (Selection Input Salt W rounds) →
-      OracleComp (unifSpec + oracleSpec Input Salt rounds)
-        (Option (Outcome Input W rounds)) :=
+  let finish : Option (Selection Input Salt W coin) →
+      OracleComp (unifSpec + oracleSpec Input Salt coin)
+        (Option (Outcome Input W protocol)) :=
     fun selected => match selected with
       | none => pure none
       | some ⟨z, messages, witness⟩ => do
-          let path ← simulateQ (restorationQueries Input Salt rounds)
-            (complete rounds z messages)
-          pure (some (⟨z, path, witness⟩ : Outcome Input W rounds))
+          let path ← simulateQ (restorationQueries Input Salt coin)
+            (complete coin z messages)
+          pure (some (⟨z, path, witness⟩ : Outcome Input W protocol))
   change (adversary.withQueryLog >>= fun x => finish x.1) = adversary >>= finish
   exact loggingOracle.run_simulateQ_bind_fst adversary finish
 
@@ -280,50 +281,50 @@ appends completion's ordered hash log after the adversary's log. This is a joint
 cache and log, valid also when the adversary returns `none` after making queries. -/
 theorem randomizedRestoredExecutionWithAdversaryLog_handoff
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache) :
-    randomOracleLoggedRun (randomizedRestoredExecutionWithAdversaryLog rounds adversary) cache =
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache) :
+    randomOracleLoggedRun (randomizedRestoredExecutionWithAdversaryLog coin adversary) cache =
       randomOracleLoggedRun adversary.withQueryLog cache >>= fun phase =>
         (fun suffix => ((suffix.1.1, phase.1.2 ++ suffix.1.2), suffix.2)) <$>
           randomOracleLoggedRun
-            (randomizedCompletionAfterAdversaryLog rounds phase.1.1) phase.2 := by
+            (randomizedCompletionAfterAdversaryLog coin phase.1.1) phase.2 := by
   exact randomOracleLoggedRun_bind adversary.withQueryLog
-    (randomizedCompletionAfterAdversaryLog rounds) cache
+    (randomizedCompletionAfterAdversaryLog coin) cache
 
 /-- The fixed-table interpreter has the same state and ordered-log handoff, with private uniform
 sampling still interleaved in both phases. -/
 theorem randomizedRestoredExecutionWithAdversaryLog_fixedTable_handoff
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (table : Table Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache) :
-    fixedTableLoggedRun (randomizedRestoredExecutionWithAdversaryLog rounds adversary)
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
+    (table : Table Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache) :
+    fixedTableLoggedRun (randomizedRestoredExecutionWithAdversaryLog coin adversary)
         table cache =
       fixedTableLoggedRun adversary.withQueryLog table cache >>= fun phase =>
         (fun suffix => ((suffix.1.1, phase.1.2 ++ suffix.1.2), suffix.2)) <$>
           fixedTableLoggedRun
-            (randomizedCompletionAfterAdversaryLog rounds phase.1.1) table phase.2 := by
+            (randomizedCompletionAfterAdversaryLog coin phase.1.1) table phase.2 := by
   exact fixedTableLoggedRun_bind adversary.withQueryLog
-    (randomizedCompletionAfterAdversaryLog rounds) table cache
+    (randomizedCompletionAfterAdversaryLog coin) table cache
 
 /-- A single private sample contributes no hash-log entry; a single restoration query records
 its actual answer, whether the answer came from the cache or the fixed table. -/
 private theorem fixedTable_single_query_log
     [DecidableEq Input] [DecidableEq Salt]
-    (query : (unifSpec + oracleSpec Input Salt rounds).Domain)
-    (table : Table Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache)
-    (result : (((unifSpec + oracleSpec Input Salt rounds).Range query ×
-      QueryLog (oracleSpec Input Salt rounds)) ×
-      (oracleSpec Input Salt rounds).QueryCache))
+    (query : (unifSpec + oracleSpec Input Salt coin).Domain)
+    (table : Table Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache)
+    (result : (((unifSpec + oracleSpec Input Salt coin).Range query ×
+      QueryLog (oracleSpec Input Salt coin)) ×
+      (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (liftM ((unifSpec + oracleSpec Input Salt rounds).query query)) table cache)) :
+      (liftM ((unifSpec + oracleSpec Input Salt coin).query query)) table cache)) :
     result.1.2 = QueryLog.snd ([(⟨query, result.1.1⟩ :
-      (q : (unifSpec + oracleSpec Input Salt rounds).Domain) ×
-        (unifSpec + oracleSpec Input Salt rounds).Range q)] :
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) := by
+      (q : (unifSpec + oracleSpec Input Salt coin).Domain) ×
+        (unifSpec + oracleSpec Input Salt coin).Range q)] :
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) := by
   cases query with
   | inl coin =>
       rw [fixedTableLoggedRun_uniformQuery] at supported
@@ -339,22 +340,22 @@ private theorem fixedTable_single_query_log
 /-- Source-level query logging prepends exactly the query and answer before the continuation's
 log, with the same oracle effects as the uninstrumented computation. -/
 private theorem withQueryLog_query_bind {A : Type}
-    (query : (unifSpec + oracleSpec Input Salt rounds).Domain)
-    (next : (unifSpec + oracleSpec Input Salt rounds).Range query →
-      OracleComp (unifSpec + oracleSpec Input Salt rounds) A) :
-    (liftM ((unifSpec + oracleSpec Input Salt rounds).query query) >>= next).withQueryLog =
-      (liftM ((unifSpec + oracleSpec Input Salt rounds).query query) >>= fun answer =>
+    (query : (unifSpec + oracleSpec Input Salt coin).Domain)
+    (next : (unifSpec + oracleSpec Input Salt coin).Range query →
+      OracleComp (unifSpec + oracleSpec Input Salt coin) A) :
+    (liftM ((unifSpec + oracleSpec Input Salt coin).query query) >>= next).withQueryLog =
+      (liftM ((unifSpec + oracleSpec Input Salt coin).query query) >>= fun answer =>
         (fun p => (p.1, (⟨query, answer⟩ :
-          (q : (unifSpec + oracleSpec Input Salt rounds).Domain) ×
-            (unifSpec + oracleSpec Input Salt rounds).Range q) :: p.2)) <$>
+          (q : (unifSpec + oracleSpec Input Salt coin).Domain) ×
+            (unifSpec + oracleSpec Input Salt coin).Range q) :: p.2)) <$>
           (next answer).withQueryLog) := by
   exact OracleComp.run_simulateQ_loggingOracle_query_bind query next
 
 /-- Mapping the returned value leaves the fixed-table cache and ordered hash log untouched. -/
 theorem fixedTableLoggedRun_map {A B : Type} [DecidableEq Input] [DecidableEq Salt]
-    (f : A → B) (program : OracleComp (unifSpec + oracleSpec Input Salt rounds) A)
-    (table : Table Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache) :
+    (f : A → B) (program : OracleComp (unifSpec + oracleSpec Input Salt coin) A)
+    (table : Table Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache) :
     fixedTableLoggedRun (f <$> program) table cache =
       (fun result => ((f result.1.1, result.1.2), result.2)) <$>
         fixedTableLoggedRun program table cache := by
@@ -364,12 +365,12 @@ theorem fixedTableLoggedRun_map {A B : Type} [DecidableEq Input] [DecidableEq Sa
 hash-query log for the adversary phase. Uniform samples are omitted from both hash logs. -/
 theorem fixedTable_withQueryLog_hashLog_eq {A : Type}
     [DecidableEq Input] [DecidableEq Salt]
-    (adversary : OracleComp (unifSpec + oracleSpec Input Salt rounds) A)
-    (table : Table Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache)
-    (result : ((A × QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-      QueryLog (oracleSpec Input Salt rounds)) ×
-        (oracleSpec Input Salt rounds).QueryCache)
+    (adversary : OracleComp (unifSpec + oracleSpec Input Salt coin) A)
+    (table : Table Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache)
+    (result : ((A × QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+      QueryLog (oracleSpec Input Salt coin)) ×
+        (oracleSpec Input Salt coin).QueryCache)
     (supported : result ∈ support (fixedTableLoggedRun adversary.withQueryLog table cache)) :
     result.1.1.2.snd = result.1.2 := by
   induction adversary using OracleComp.inductionOn generalizing cache result with
@@ -393,8 +394,8 @@ theorem fixedTable_withQueryLog_hashLog_eq {A : Type}
 
 theorem randomOracleLoggedRun_map {A B : Type}
     [DecidableEq Input] [DecidableEq Salt]
-    (f : A → B) (program : OracleComp (unifSpec + oracleSpec Input Salt rounds) A)
-    (cache : (oracleSpec Input Salt rounds).QueryCache) :
+    (f : A → B) (program : OracleComp (unifSpec + oracleSpec Input Salt coin) A)
+    (cache : (oracleSpec Input Salt coin).QueryCache) :
     randomOracleLoggedRun (f <$> program) cache =
       (fun result => ((f result.1.1, result.1.2), result.2)) <$>
         randomOracleLoggedRun program cache := by
@@ -404,11 +405,11 @@ theorem randomOracleLoggedRun_map {A B : Type}
 hash log, including cache hits and branches that later return `none`. -/
 theorem randomOracle_withQueryLog_hashLog_eq {A : Type}
     [DecidableEq Input] [DecidableEq Salt]
-    (adversary : OracleComp (unifSpec + oracleSpec Input Salt rounds) A)
-    (cache : (oracleSpec Input Salt rounds).QueryCache)
-    (result : ((A × QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-      QueryLog (oracleSpec Input Salt rounds)) ×
-        (oracleSpec Input Salt rounds).QueryCache)
+    (adversary : OracleComp (unifSpec + oracleSpec Input Salt coin) A)
+    (cache : (oracleSpec Input Salt coin).QueryCache)
+    (result : ((A × QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+      QueryLog (oracleSpec Input Salt coin)) ×
+        (oracleSpec Input Salt coin).QueryCache)
     (supported : result ∈ support (randomOracleLoggedRun adversary.withQueryLog cache)) :
     result.1.1.2.snd = result.1.2 := by
   induction adversary using OracleComp.inductionOn generalizing cache result with
@@ -426,9 +427,9 @@ theorem randomOracle_withQueryLog_hashLog_eq {A : Type}
       obtain ⟨tail, htail, rfl⟩ := hmapped
       have hsource := ih phase.1.1 phase.2 tail htail
       have hone : phase.1.2 = QueryLog.snd ([(⟨query, phase.1.1⟩ :
-          (q : (unifSpec + oracleSpec Input Salt rounds).Domain) ×
-            (unifSpec + oracleSpec Input Salt rounds).Range q)] :
-          QueryLog (unifSpec + oracleSpec Input Salt rounds)) := by
+          (q : (unifSpec + oracleSpec Input Salt coin).Domain) ×
+            (unifSpec + oracleSpec Input Salt coin).Range q)] :
+          QueryLog (unifSpec + oracleSpec Input Salt coin)) := by
         cases query with
         | inl coin =>
             rw [randomOracleLoggedRun_uniformQuery] at hphase
@@ -448,13 +449,13 @@ theorem randomOracle_withQueryLog_hashLog_eq {A : Type}
 ordered query entry even on a hit, and leaves a cache that still agrees with the table. -/
 private theorem fixedTable_hash_query_support
     [DecidableEq Input] [DecidableEq Salt]
-    (key : Key Input Salt rounds) (table : Table Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache)
+    (key : Key Input Salt coin) (table : Table Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache)
     (agree : cache.AgreesWithFn (QueryImpl.ofFn table))
-    (result : ((key.Challenge × QueryLog (oracleSpec Input Salt rounds)) ×
-      (oracleSpec Input Salt rounds).QueryCache))
+    (result : ((key.Challenge × QueryLog (oracleSpec Input Salt coin)) ×
+      (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (liftM ((unifSpec + oracleSpec Input Salt rounds).query (.inr key))) table cache)) :
+      (liftM ((unifSpec + oracleSpec Input Salt coin).query (.inr key))) table cache)) :
     result.1.1 = table key ∧ result.1.2 = [⟨key, table key⟩] ∧
       result.2.AgreesWithFn (QueryImpl.ofFn table) := by
   rw [fixedTableLoggedRun_hashQuery] at supported
@@ -480,15 +481,15 @@ private theorem fixedTable_hash_query_support
 Private samples leave the cache alone. -/
 private theorem fixedTable_single_query_cache_agrees
     [DecidableEq Input] [DecidableEq Salt]
-    (query : (unifSpec + oracleSpec Input Salt rounds).Domain)
-    (table : Table Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache)
+    (query : (unifSpec + oracleSpec Input Salt coin).Domain)
+    (table : Table Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache)
     (agree : cache.AgreesWithFn (QueryImpl.ofFn table))
-    (result : (((unifSpec + oracleSpec Input Salt rounds).Range query ×
-      QueryLog (oracleSpec Input Salt rounds)) ×
-      (oracleSpec Input Salt rounds).QueryCache))
+    (result : (((unifSpec + oracleSpec Input Salt coin).Range query ×
+      QueryLog (oracleSpec Input Salt coin)) ×
+      (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (liftM ((unifSpec + oracleSpec Input Salt rounds).query query)) table cache)) :
+      (liftM ((unifSpec + oracleSpec Input Salt coin).query query)) table cache)) :
     result.2.AgreesWithFn (QueryImpl.ofFn table) := by
   cases query with
   | inl coin =>
@@ -502,12 +503,12 @@ private theorem fixedTable_single_query_cache_agrees
 table, even when private samples and hash queries are interleaved adaptively. -/
 theorem fixedTable_cache_agrees {A : Type}
     [DecidableEq Input] [DecidableEq Salt]
-    (program : OracleComp (unifSpec + oracleSpec Input Salt rounds) A)
-    (table : Table Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache)
+    (program : OracleComp (unifSpec + oracleSpec Input Salt coin) A)
+    (table : Table Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache)
     (agree : cache.AgreesWithFn (QueryImpl.ofFn table))
-    (result : ((A × QueryLog (oracleSpec Input Salt rounds)) ×
-      (oracleSpec Input Salt rounds).QueryCache))
+    (result : ((A × QueryLog (oracleSpec Input Salt coin)) ×
+      (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun program table cache)) :
     result.2.AgreesWithFn (QueryImpl.ofFn table) := by
   induction program using OracleComp.inductionOn generalizing cache result with
@@ -530,14 +531,14 @@ table evaluation and its complete ordered query log. The cache may be nonempty p
 agrees with the table; this is exactly the invariant at the adversary/completion handoff. -/
 theorem fixedTable_restorationQueries_run {A : Type}
     [DecidableEq Input] [DecidableEq Salt]
-    (program : OracleComp (oracleSpec Input Salt rounds) A)
-    (table : Table Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache)
+    (program : OracleComp (oracleSpec Input Salt coin) A)
+    (table : Table Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache)
     (agree : cache.AgreesWithFn (QueryImpl.ofFn table))
-    (result : ((A × QueryLog (oracleSpec Input Salt rounds)) ×
-      (oracleSpec Input Salt rounds).QueryCache))
+    (result : ((A × QueryLog (oracleSpec Input Salt coin)) ×
+      (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (simulateQ (restorationQueries Input Salt rounds) program) table cache)) :
+      (simulateQ (restorationQueries Input Salt coin) program) table cache)) :
     result.1.1 = evalWithAnswerFn (QueryImpl.ofFn table) program ∧
       result.1.2 = tableQueryLog program table ∧
       result.2.AgreesWithFn (QueryImpl.ofFn table) := by
@@ -567,67 +568,67 @@ theorem fixedTable_restorationQueries_run {A : Type}
 /-- Completion after an agreeing adversary cache yields the selected native path and exactly
 the protocol's challenge-key sequence, including queries that hit the adversary cache. -/
 theorem fixedTable_completion_path_keys [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round) (z : Input) (messages : Messages Salt (rounds z))
-    (table : Table Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache)
+    (coin : (z : Input) → PublicCoin (protocol z)) (z : Input) (messages : Messages Salt (coin z))
+    (table : Table Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache)
     (agree : cache.AgreesWithFn (QueryImpl.ofFn table))
-    (result : (((protocol (rounds z)).tree.ExecutionPath ×
-      QueryLog (oracleSpec Input Salt rounds)) ×
-      (oracleSpec Input Salt rounds).QueryCache))
+    (result : (((protocol z).tree.ExecutionPath ×
+      QueryLog (oracleSpec Input Salt coin)) ×
+      (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (simulateQ (restorationQueries Input Salt rounds) (complete rounds z messages))
+      (simulateQ (restorationQueries Input Salt coin) (complete coin z messages))
       table cache)) :
-    result.1.1 = completedPath rounds z messages table ∧
-      result.1.2.map Sigma.fst = completionKeys rounds z messages := by
+    result.1.1 = completedPath coin z messages table ∧
+      result.1.2.map Sigma.fst = completionKeys coin z messages := by
   obtain ⟨hpath, hlog, _⟩ := fixedTable_restorationQueries_run
-    (complete rounds z messages) table cache agree result supported
+    (complete coin z messages) table cache agree result supported
   refine ⟨?_, ?_⟩
   · simpa only [complete_eval] using hpath
   · rw [hlog]
-    exact complete_log_keys rounds z messages table
+    exact complete_log_keys coin z messages table
 
 /-- A selected adversary output is completed in the same fixed-table run; the retained phase log
 is returned verbatim, while the suffix hash log contains exactly the completion keys. -/
 theorem fixedTable_completionAfterAdversaryLog_selected
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round) (z : Input) (messages : Messages Salt (rounds z)) (witness : W)
-    (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt rounds))
-    (table : Table Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache)
+    (coin : (z : Input) → PublicCoin (protocol z)) (z : Input) (messages : Messages Salt (coin z)) (witness : W)
+    (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt coin))
+    (table : Table Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache)
     (agree : cache.AgreesWithFn (QueryImpl.ofFn table))
-    (result : (((Option (Outcome Input W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache))
+    (result : (((Option (Outcome Input W protocol) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (randomizedCompletionAfterAdversaryLog rounds
+      (randomizedCompletionAfterAdversaryLog coin
         (some ⟨z, messages, witness⟩, adversaryLog)) table cache)) :
-    result.1.1 = (some ⟨z, completedPath rounds z messages table, witness⟩, adversaryLog) ∧
-      result.1.2.map Sigma.fst = completionKeys rounds z messages := by
-  have hprogram : randomizedCompletionAfterAdversaryLog rounds
+    result.1.1 = (some ⟨z, completedPath coin z messages table, witness⟩, adversaryLog) ∧
+      result.1.2.map Sigma.fst = completionKeys coin z messages := by
+  have hprogram : randomizedCompletionAfterAdversaryLog coin
       (some ⟨z, messages, witness⟩, adversaryLog) =
       (fun path => (some ⟨z, path, witness⟩, adversaryLog)) <$>
-        simulateQ (restorationQueries Input Salt rounds) (complete rounds z messages) := by
+        simulateQ (restorationQueries Input Salt coin) (complete coin z messages) := by
     simp only [randomizedCompletionAfterAdversaryLog, map_eq_pure_bind]
   rw [hprogram, fixedTableLoggedRun_map, support_map] at supported
   obtain ⟨completion, hcompletion, rfl⟩ := supported
   obtain ⟨hpath, hkeys⟩ := fixedTable_completion_path_keys
-    rounds z messages table cache agree completion hcompletion
+    coin z messages table cache agree completion hcompletion
   exact ⟨by simp [hpath], hkeys⟩
 
 /-- Completion returns the adversary's source log unchanged in the actual cached run. This
 holds for both selected and failed adversary outputs. -/
 theorem randomOracle_completion_sourceLog [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (selectedAndLog : Option (Selection Input Salt W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds))
-    (cache : (oracleSpec Input Salt rounds).QueryCache)
-    (result : (((Option (Outcome Input W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache))
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (selectedAndLog : Option (Selection Input Salt W coin) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin))
+    (cache : (oracleSpec Input Salt coin).QueryCache)
+    (result : (((Option (Outcome Input W protocol) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (randomOracleLoggedRun
-      (randomizedCompletionAfterAdversaryLog rounds selectedAndLog) cache)) :
+      (randomizedCompletionAfterAdversaryLog coin selectedAndLog) cache)) :
     result.1.1.2 = selectedAndLog.2 := by
   rcases selectedAndLog with ⟨selected, adversaryLog⟩
   cases selected with
@@ -637,10 +638,10 @@ theorem randomOracle_completion_sourceLog [DecidableEq Input] [DecidableEq Salt]
       rfl
   | some data =>
       rcases data with ⟨z, messages, witness⟩
-      have hprogram : randomizedCompletionAfterAdversaryLog rounds
+      have hprogram : randomizedCompletionAfterAdversaryLog coin
           (some ⟨z, messages, witness⟩, adversaryLog) =
           (fun path => (some ⟨z, path, witness⟩, adversaryLog)) <$>
-            simulateQ (restorationQueries Input Salt rounds) (complete rounds z messages) := by
+            simulateQ (restorationQueries Input Salt coin) (complete coin z messages) := by
         simp only [randomizedCompletionAfterAdversaryLog, map_eq_pure_bind]
       rw [hprogram, randomOracleLoggedRun_map, support_map] at supported
       obtain ⟨completion, _, rfl⟩ := supported
@@ -649,20 +650,20 @@ theorem randomOracle_completion_sourceLog [DecidableEq Input] [DecidableEq Salt]
 /-- Every interleaved fixed-table run retains the adversary's hash log; selected runs append
 exactly the selected path's completion log, while failed selections append nothing. -/
 theorem fixedTable_restored_trace [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (table : Table Input Salt rounds)
-    (result : (((Option (Outcome Input W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache))
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
+    (table : Table Input Salt coin)
+    (result : (((Option (Outcome Input W protocol) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (randomizedRestoredExecutionWithAdversaryLog rounds adversary) table ∅)) :
+      (randomizedRestoredExecutionWithAdversaryLog coin adversary) table ∅)) :
     (result.1.1.1 = none ∧ result.1.2 = result.1.1.2.snd) ∨
       ∃ z messages witness suffixLog,
-        result.1.1.1 = some ⟨z, completedPath rounds z messages table, witness⟩ ∧
+        result.1.1.1 = some ⟨z, completedPath coin z messages table, witness⟩ ∧
         result.1.2 = result.1.1.2.snd ++ suffixLog ∧
-        suffixLog.map Sigma.fst = completionKeys rounds z messages := by
+        suffixLog.map Sigma.fst = completionKeys coin z messages := by
   rw [randomizedRestoredExecutionWithAdversaryLog_fixedTable_handoff] at supported
   obtain ⟨phase, hphase, hrest⟩ := (mem_support_bind_iff _ _ _).mp supported
   rw [support_map] at hrest
@@ -682,7 +683,7 @@ theorem fixedTable_restored_trace [DecidableEq Input] [DecidableEq Salt]
   | some selected =>
       rcases selected with ⟨z, messages, witness⟩
       obtain ⟨hout, hkeys⟩ := fixedTable_completionAfterAdversaryLog_selected
-        rounds z messages witness sourceLog table phaseCache hagree suffix hsuffix
+        coin z messages witness sourceLog table phaseCache hagree suffix hsuffix
       right
       refine ⟨z, messages, witness, suffix.1.2, ?_, ?_, hkeys⟩
       · exact congrArg Prod.fst hout
@@ -690,26 +691,26 @@ theorem fixedTable_restored_trace [DecidableEq Input] [DecidableEq Salt]
 
 /-- A bad extraction must lie on the selected side of the joint trace decomposition. -/
 theorem fixedTable_badExtract_trace [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Z : Set Input)
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
-    (table : Table Input Salt rounds)
-    (result : (((Option (Outcome Input W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache))
+    (table : Table Input Salt coin)
+    (result : (((Option (Outcome Input W protocol) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (randomizedRestoredExecutionWithAdversaryLog rounds adversary) table ∅))
+      (randomizedRestoredExecutionWithAdversaryLog coin adversary) table ∅))
     (bad : badExtractOnPath state extractor Z terminalWitness result.1.1.1) :
     ∃ z messages witness suffixLog,
-      result.1.1.1 = some ⟨z, completedPath rounds z messages table, witness⟩ ∧
+      result.1.1.1 = some ⟨z, completedPath coin z messages table, witness⟩ ∧
       result.1.2 = result.1.1.2.snd ++ suffixLog ∧
-      suffixLog.map Sigma.fst = completionKeys rounds z messages := by
-  rcases fixedTable_restored_trace rounds adversary table result supported with
+      suffixLog.map Sigma.fst = completionKeys coin z messages := by
+  rcases fixedTable_restored_trace coin adversary table result supported with
     ⟨hnone, _⟩ | hselected
   · rw [hnone] at bad
     exact False.elim bad
@@ -718,28 +719,28 @@ theorem fixedTable_badExtract_trace [DecidableEq Input] [DecidableEq Salt]
 /-- Every bad extraction event in the actual interleaved game is witnessed by a queried
 restoration key in the same fixed table and the same joint execution trace. -/
 theorem fixedTable_badExtract_has_bad_query [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
+    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
-    (table : Table Input Salt rounds)
-    (result : (((Option (Outcome Input W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache))
+    (table : Table Input Salt coin)
+    (result : (((Option (Outcome Input W protocol) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (randomizedRestoredExecutionWithAdversaryLog rounds adversary) table ∅))
+      (randomizedRestoredExecutionWithAdversaryLog coin adversary) table ∅))
     (bad : badExtractOnPath state extractor Z terminalWitness result.1.1.1) :
     ∃ query ∈ result.1.2, badKey state extractor Z query.1 table := by
   obtain ⟨z, messages, witness, suffixLog, hresult, hlog, hkeys⟩ :=
-    fixedTable_badExtract_trace rounds adversary state extractor Z terminalWitness
+    fixedTable_badExtract_trace coin adversary state extractor Z terminalWitness
       table result supported bad
   have hbad : badExtractOnPath state extractor Z terminalWitness
-      (some ⟨z, completedPath rounds z messages table, witness⟩) := by
+      (some ⟨z, completedPath coin z messages table, witness⟩) := by
     simpa only [hresult] using bad
   obtain ⟨key, hkey, hbadkey⟩ := badExtractOnPath_completion
     state extractor Z preserving terminalWitness z messages witness table hbad
@@ -752,8 +753,8 @@ theorem fixedTable_badExtract_has_bad_query [DecidableEq Input] [DecidableEq Sal
 
 /-- A failed adversary selection still pays for every distinct restoration key it queried. -/
 theorem roundFreshCharge_adversary_le [DecidableEq Input] [DecidableEq Salt]
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt rounds)) :
+    (errors : (z : Input) → Errors (coin z))
+    (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt coin)) :
     roundFreshCharge errors adversaryLog.snd ≤
       (adversaryHashKeys adversaryLog).card * maxError errors := by
   unfold roundFreshCharge adversaryHashKeys
@@ -768,20 +769,20 @@ theorem roundFreshCharge_adversary_le [DecidableEq Input] [DecidableEq Salt]
 /-- The actual distinct-key charge of every joint fixed-table trace is bounded by the
 adversary's observed distinct-key count and one local error per completion round. -/
 theorem fixedTable_joint_freshCharge_le [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round) (errors : (z : Input) → RoundErrors (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (table : Table Input Salt rounds)
-    (result : (((Option (Outcome Input W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache))
+    (coin : (z : Input) → PublicCoin (protocol z)) (errors : (z : Input) → Errors (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
+    (table : Table Input Salt coin)
+    (result : (((Option (Outcome Input W protocol) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
-      (randomizedRestoredExecutionWithAdversaryLog rounds adversary) table ∅)) :
+      (randomizedRestoredExecutionWithAdversaryLog coin adversary) table ∅)) :
     freshQueryCharge (keyError errors) result.1.2 ≤
       (adversaryHashKeys result.1.1.2).card * maxError errors +
         sumError errors := by
   change roundFreshCharge errors result.1.2 ≤ _
-  rcases fixedTable_restored_trace rounds adversary table result supported with
+  rcases fixedTable_restored_trace coin adversary table result supported with
     ⟨_, hlog⟩ | ⟨z, messages, witness, suffixLog, _, hlog, hkeys⟩
   · rw [hlog]
     exact (roundFreshCharge_adversary_le errors result.1.1.2).trans
@@ -792,44 +793,44 @@ theorem fixedTable_joint_freshCharge_le [DecidableEq Input] [DecidableEq Salt]
 /-- The pointwise bound holds on the actual cached random-oracle support, over arbitrary input
 and salt types. The support bridge keeps the entire output, log and cache tuple unchanged. -/
 theorem randomOracle_joint_freshCharge_le [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (result : (((Option (Outcome Input W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache))
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (errors : (z : Input) → Errors (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
+    (result : (((Option (Outcome Input W protocol) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (randomOracleLoggedRun
-      (randomizedRestoredExecutionWithAdversaryLog rounds adversary) ∅)) :
+      (randomizedRestoredExecutionWithAdversaryLog coin adversary) ∅)) :
     freshQueryCharge (keyError errors) result.1.2 ≤
       (adversaryHashKeys result.1.1.2).card * maxError errors +
         sumError errors := by
   obtain ⟨table, htable⟩ := mem_support_fixedTableLoggedRun_of_randomOracle
-    (randomizedRestoredExecutionWithAdversaryLog rounds adversary) ∅ result supported
-  exact fixedTable_joint_freshCharge_le rounds errors adversary table result htable
+    (randomizedRestoredExecutionWithAdversaryLog coin adversary) ∅ result supported
+  exact fixedTable_joint_freshCharge_le coin errors adversary table result htable
 
 /-- A cap on distinct keys in the actual cached adversary phase reaches the returned
 adversary log of every joint run, including failed selections. -/
 theorem randomOracle_joint_adversaryKeys_le [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (Q : ℕ)
     (actualQueryBound : ∀ phase ∈ support (randomOracleLoggedRun adversary.withQueryLog ∅),
       (freshKeysOfLog phase.1.2).card ≤ Q)
-    (result : (((Option (Outcome Input W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache))
+    (result : (((Option (Outcome Input W protocol) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (randomOracleLoggedRun
-      (randomizedRestoredExecutionWithAdversaryLog rounds adversary) ∅)) :
+      (randomizedRestoredExecutionWithAdversaryLog coin adversary) ∅)) :
     (adversaryHashKeys result.1.1.2).card ≤ Q := by
   change result ∈ support (randomOracleLoggedRun
-    (adversary.withQueryLog >>= randomizedCompletionAfterAdversaryLog rounds) ∅) at supported
+    (adversary.withQueryLog >>= randomizedCompletionAfterAdversaryLog coin) ∅) at supported
   rw [randomOracleLoggedRun_bind] at supported
   obtain ⟨phase, hphase, hrest⟩ := (mem_support_bind_iff _ _ _).mp supported
   rw [support_map] at hrest
   obtain ⟨suffix, hsuffix, rfl⟩ := hrest
-  have hlog := randomOracle_completion_sourceLog rounds phase.1.1 phase.2 suffix hsuffix
+  have hlog := randomOracle_completion_sourceLog coin phase.1.1 phase.2 suffix hsuffix
   have hsource := randomOracle_withQueryLog_hashLog_eq adversary ∅ phase hphase
   change (adversaryHashKeys suffix.1.1.2).card ≤ Q
   rw [hlog]
@@ -840,91 +841,91 @@ theorem randomOracle_joint_adversaryKeys_le [DecidableEq Input] [DecidableEq Sal
 /-- The familiar `Q * max + sum` budget follows from the actual distinct-query cap, not from
 a syntactic count of all abstract paths. -/
 theorem randomOracle_joint_freshCharge_le_queryBound [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (errors : (z : Input) → Errors (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (Q : ℕ)
     (actualQueryBound : ∀ phase ∈ support (randomOracleLoggedRun adversary.withQueryLog ∅),
       (freshKeysOfLog phase.1.2).card ≤ Q)
-    (result : (((Option (Outcome Input W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache))
+    (result : (((Option (Outcome Input W protocol) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache))
     (supported : result ∈ support (randomOracleLoggedRun
-      (randomizedRestoredExecutionWithAdversaryLog rounds adversary) ∅)) :
+      (randomizedRestoredExecutionWithAdversaryLog coin adversary) ∅)) :
     freshQueryCharge (keyError errors) result.1.2 ≤
       Q * maxError errors + sumError errors := by
   calc
     freshQueryCharge (keyError errors) result.1.2 ≤
         (adversaryHashKeys result.1.1.2).card * maxError errors +
           sumError errors :=
-      randomOracle_joint_freshCharge_le rounds errors adversary result supported
+      randomOracle_joint_freshCharge_le coin errors adversary result supported
     _ ≤ Q * maxError errors + sumError errors := by
       gcongr
-      exact randomOracle_joint_adversaryKeys_le rounds adversary Q actualQueryBound
+      exact randomOracle_joint_adversaryKeys_le coin adversary Q actualQueryBound
         result supported
 
 /-- Expected distinct adversary keys as carried in the actual joint run. The source phase log
 is part of the returned value, so this includes keys queried on failed selections. -/
 noncomputable def expectedJointAdversaryKeys [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) : ENNReal :=
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) : ENNReal :=
   letI : MeasurableSpace
-      (((Option (Outcome Input W rounds) ×
-        QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-          QueryLog (oracleSpec Input Salt rounds)) ×
-            (oracleSpec Input Salt rounds).QueryCache) := ⊤
+      (((Option (Outcome Input W protocol) ×
+        QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+          QueryLog (oracleSpec Input Salt coin)) ×
+            (oracleSpec Input Salt coin).QueryCache) := ⊤
   ∫⁻ result, ((adversaryHashKeys result.1.1.2).card : ENNReal)
     ∂𝒟[randomOracleLoggedRun
-      (randomizedRestoredExecutionWithAdversaryLog rounds adversary) ∅]
+      (randomizedRestoredExecutionWithAdversaryLog coin adversary) ∅]
 
 /-- Expected number of distinct hash keys in the actual cached adversary phase. -/
 noncomputable def expectedAdversaryFreshKeys [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) : ENNReal :=
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) : ENNReal :=
   letI : MeasurableSpace
-      (((Option (Selection Input Salt W rounds) ×
-        QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-          QueryLog (oracleSpec Input Salt rounds)) ×
-            (oracleSpec Input Salt rounds).QueryCache) := ⊤
+      (((Option (Selection Input Salt W coin) ×
+        QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+          QueryLog (oracleSpec Input Salt coin)) ×
+            (oracleSpec Input Salt coin).QueryCache) := ⊤
   ∫⁻ phase, ((freshKeysOfLog phase.1.2).card : ENNReal)
     ∂𝒟[randomOracleLoggedRun adversary.withQueryLog ∅]
 
 private theorem completion_expected_adversaryKeys
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (selectedAndLog : Option (Selection Input Salt W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds))
-    (cache : (oracleSpec Input Salt rounds).QueryCache) :
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (selectedAndLog : Option (Selection Input Salt W coin) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin))
+    (cache : (oracleSpec Input Salt coin).QueryCache) :
     letI : MeasurableSpace
-      (((Option (Outcome Input W rounds) ×
-        QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-          QueryLog (oracleSpec Input Salt rounds)) ×
-            (oracleSpec Input Salt rounds).QueryCache) := ⊤
+      (((Option (Outcome Input W protocol) ×
+        QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+          QueryLog (oracleSpec Input Salt coin)) ×
+            (oracleSpec Input Salt coin).QueryCache) := ⊤
     (∫⁻ result, ((adversaryHashKeys result.1.1.2).card : ENNReal)
       ∂𝒟[randomOracleLoggedRun
-        (randomizedCompletionAfterAdversaryLog rounds selectedAndLog) cache]) =
+        (randomizedCompletionAfterAdversaryLog coin selectedAndLog) cache]) =
       (adversaryHashKeys selectedAndLog.2).card := by
   let : MeasurableSpace
-      (((Option (Outcome Input W rounds) ×
-        QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-          QueryLog (oracleSpec Input Salt rounds)) ×
-            (oracleSpec Input Salt rounds).QueryCache) := ⊤
+      (((Option (Outcome Input W protocol) ×
+        QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+          QueryLog (oracleSpec Input Salt coin)) ×
+            (oracleSpec Input Salt coin).QueryCache) := ⊤
   have hae := evalDist.ae_of_forall_mem_support
-    (randomOracleLoggedRun (randomizedCompletionAfterAdversaryLog rounds selectedAndLog)
+    (randomOracleLoggedRun (randomizedCompletionAfterAdversaryLog coin selectedAndLog)
       cache)
     (fun result => ((adversaryHashKeys result.1.1.2).card : ENNReal) =
       (adversaryHashKeys selectedAndLog.2).card)
     MeasurableSet.of_discrete
     (fun result hresult => by
-      rw [randomOracle_completion_sourceLog rounds selectedAndLog cache result hresult])
+      rw [randomOracle_completion_sourceLog coin selectedAndLog cache result hresult])
   calc
     (∫⁻ result, ((adversaryHashKeys result.1.1.2).card : ENNReal)
       ∂𝒟[randomOracleLoggedRun
-        (randomizedCompletionAfterAdversaryLog rounds selectedAndLog) cache]) =
+        (randomizedCompletionAfterAdversaryLog coin selectedAndLog) cache]) =
         ∫⁻ _, ((adversaryHashKeys selectedAndLog.2).card : ENNReal)
           ∂𝒟[randomOracleLoggedRun
-            (randomizedCompletionAfterAdversaryLog rounds selectedAndLog) cache] :=
+            (randomizedCompletionAfterAdversaryLog coin selectedAndLog) cache] :=
       lintegral_congr_ae hae
     _ = (adversaryHashKeys selectedAndLog.2).card := by
       rw [lintegral_const, evalDist_apply_univ_eq_one, mul_one]
@@ -933,46 +934,46 @@ private theorem completion_expected_adversaryKeys
 carried by the joint run is exactly the count measured at the actual adversary-phase boundary. -/
 theorem expectedJointAdversaryKeys_eq_expectedAdversaryFreshKeys
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
-    expectedJointAdversaryKeys rounds adversary =
-      expectedAdversaryFreshKeys rounds adversary := by
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) :
+    expectedJointAdversaryKeys coin adversary =
+      expectedAdversaryFreshKeys coin adversary := by
   let Phase :=
-    (((Option (Selection Input Salt W rounds) ×
-      QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache)
+    (((Option (Selection Input Salt W coin) ×
+      QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache)
   let : MeasurableSpace
-      (((Option (Selection Input Salt W rounds) ×
-        QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-          QueryLog (oracleSpec Input Salt rounds)) ×
-            (oracleSpec Input Salt rounds).QueryCache) := ⊤
+      (((Option (Selection Input Salt W coin) ×
+        QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+          QueryLog (oracleSpec Input Salt coin)) ×
+            (oracleSpec Input Salt coin).QueryCache) := ⊤
   let : MeasurableSpace
-      (((Option (Outcome Input W rounds) ×
-        QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-          QueryLog (oracleSpec Input Salt rounds)) ×
-            (oracleSpec Input Salt rounds).QueryCache) := ⊤
+      (((Option (Outcome Input W protocol) ×
+        QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+          QueryLog (oracleSpec Input Salt coin)) ×
+            (oracleSpec Input Salt coin).QueryCache) := ⊤
   let phaseRun := randomOracleLoggedRun adversary.withQueryLog ∅
   let jointRun := randomOracleLoggedRun
-    (randomizedRestoredExecutionWithAdversaryLog rounds adversary) ∅
+    (randomizedRestoredExecutionWithAdversaryLog coin adversary) ∅
   change (∫⁻ result, ((adversaryHashKeys result.1.1.2).card : ENNReal)
     ∂𝒟[jointRun]) =
     ∫⁻ phase, ((freshKeysOfLog phase.1.2).card : ENNReal) ∂𝒟[phaseRun]
   have hbind : jointRun = phaseRun >>= fun phase =>
       (fun suffix => ((suffix.1.1, phase.1.2 ++ suffix.1.2), suffix.2)) <$>
         randomOracleLoggedRun
-          (randomizedCompletionAfterAdversaryLog rounds phase.1.1) phase.2 := by
+          (randomizedCompletionAfterAdversaryLog coin phase.1.1) phase.2 := by
     simpa only [jointRun, phaseRun] using
-      randomizedRestoredExecutionWithAdversaryLog_handoff rounds adversary ∅
+      randomizedRestoredExecutionWithAdversaryLog_handoff coin adversary ∅
   rw [hbind, lintegral_evalDist_bind_of_discrete _ _ Measurable.of_discrete]
   have hinner (phase : Phase) :
       (∫⁻ result, ((adversaryHashKeys result.1.1.2).card : ENNReal)
         ∂𝒟[(fun suffix => ((suffix.1.1, phase.1.2 ++ suffix.1.2), suffix.2)) <$>
           randomOracleLoggedRun
-            (randomizedCompletionAfterAdversaryLog rounds phase.1.1) phase.2]) =
+            (randomizedCompletionAfterAdversaryLog coin phase.1.1) phase.2]) =
       (adversaryHashKeys phase.1.1.2).card := by
     rw [lintegral_evalDist_map_of_discrete]
-    exact completion_expected_adversaryKeys rounds phase.1.1 phase.2
+    exact completion_expected_adversaryKeys coin phase.1.1 phase.2
   simp_rw [hinner]
   apply lintegral_congr_ae
   have hae := evalDist.ae_of_forall_mem_support phaseRun
@@ -985,20 +986,20 @@ theorem expectedJointAdversaryKeys_eq_expectedAdversaryFreshKeys
 /-- The expected charge of the *actual* joint cached run obeys the roundwise budget.
 No global query cap is assumed, and `ENNReal` handles zero and infinite errors directly. -/
 theorem expectedJointFreshCharge_le [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (errors : (z : Input) → RoundErrors (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (errors : (z : Input) → Errors (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) :
     expectedFreshQueryCharge
-      (randomizedRestoredExecutionWithAdversaryLog rounds adversary)
+      (randomizedRestoredExecutionWithAdversaryLog coin adversary)
       (keyError errors) ≤
-      maxError errors * expectedJointAdversaryKeys rounds adversary +
+      maxError errors * expectedJointAdversaryKeys coin adversary +
         sumError errors := by
-  let program := randomizedRestoredExecutionWithAdversaryLog rounds adversary
+  let program := randomizedRestoredExecutionWithAdversaryLog coin adversary
   let : MeasurableSpace
-      (((Option (Outcome Input W rounds) ×
-        QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-          QueryLog (oracleSpec Input Salt rounds)) ×
-            (oracleSpec Input Salt rounds).QueryCache) := ⊤
+      (((Option (Outcome Input W protocol) ×
+        QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+          QueryLog (oracleSpec Input Salt coin)) ×
+            (oracleSpec Input Salt coin).QueryCache) := ⊤
   have hae := evalDist.ae_of_forall_mem_support
     (randomOracleLoggedRun program ∅)
     (fun result => freshQueryCharge (keyError errors) result.1.2 ≤
@@ -1006,7 +1007,7 @@ theorem expectedJointFreshCharge_le [DecidableEq Input] [DecidableEq Salt]
         sumError errors)
     MeasurableSet.of_discrete
     (fun result hresult => by
-      have h := randomOracle_joint_freshCharge_le rounds errors adversary result hresult
+      have h := randomOracle_joint_freshCharge_le coin errors adversary result hresult
       simpa only [mul_comm] using h)
   change (∫⁻ result, freshQueryCharge (keyError errors) result.1.2
     ∂𝒟[randomOracleLoggedRun program ∅]) ≤ _
@@ -1016,7 +1017,7 @@ theorem expectedJointFreshCharge_le [DecidableEq Input] [DecidableEq Salt]
         ∫⁻ result, maxError errors *
           (adversaryHashKeys result.1.1.2).card + sumError errors
           ∂𝒟[randomOracleLoggedRun program ∅] := lintegral_mono_ae hae
-    _ = maxError errors * expectedJointAdversaryKeys rounds adversary +
+    _ = maxError errors * expectedJointAdversaryKeys coin adversary +
           sumError errors := by
       rw [lintegral_add_left Measurable.of_discrete,
         lintegral_const_mul _ Measurable.of_discrete, lintegral_const,
@@ -1027,31 +1028,31 @@ theorem expectedJointFreshCharge_le [DecidableEq Input] [DecidableEq Salt]
 phase boundary rather than reconstructed from a separate execution. -/
 theorem expectedJointFreshCharge_le_actualAdversary
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round) (errors : (z : Input) → RoundErrors (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
+    (coin : (z : Input) → PublicCoin (protocol z)) (errors : (z : Input) → Errors (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) :
     expectedFreshQueryCharge
-      (randomizedRestoredExecutionWithAdversaryLog rounds adversary)
+      (randomizedRestoredExecutionWithAdversaryLog coin adversary)
       (keyError errors) ≤
-      maxError errors * expectedAdversaryFreshKeys rounds adversary +
+      maxError errors * expectedAdversaryFreshKeys coin adversary +
         sumError errors := by
-  simpa only [expectedJointAdversaryKeys_eq_expectedAdversaryFreshKeys rounds adversary]
-    using expectedJointFreshCharge_le rounds errors adversary
+  simpa only [expectedJointAdversaryKeys_eq_expectedAdversaryFreshKeys coin adversary]
+    using expectedJointFreshCharge_le coin errors adversary
 
 /-- A support-level cap on distinct hash keys in the actual cached adversary run bounds its
 expectation. The cap is measured on the adversary phase itself, including failure branches. -/
 theorem expectedAdversaryFreshKeys_le_queryBound
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (Q : ℕ)
     (actualQueryBound : ∀ phase ∈ support (randomOracleLoggedRun adversary.withQueryLog ∅),
       (freshKeysOfLog phase.1.2).card ≤ Q) :
-    expectedAdversaryFreshKeys rounds adversary ≤ Q := by
+    expectedAdversaryFreshKeys coin adversary ≤ Q := by
   let : MeasurableSpace
-      (((Option (Selection Input Salt W rounds) ×
-        QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-          QueryLog (oracleSpec Input Salt rounds)) ×
-            (oracleSpec Input Salt rounds).QueryCache) := ⊤
+      (((Option (Selection Input Salt W coin) ×
+        QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+          QueryLog (oracleSpec Input Salt coin)) ×
+            (oracleSpec Input Salt coin).QueryCache) := ⊤
   have hae := evalDist.ae_of_forall_mem_support
     (randomOracleLoggedRun adversary.withQueryLog ∅)
     (fun phase => ((freshKeysOfLog phase.1.2).card : ENNReal) ≤ Q)
@@ -1069,8 +1070,8 @@ theorem expectedAdversaryFreshKeys_le_queryBound
 equivalent to an almost-sure cap. Every supported finite transcript has positive mass. -/
 theorem actualAdversaryQueryBound_iff_probOne
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds)
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (Q : ℕ) :
     (∀ phase ∈ support (randomOracleLoggedRun adversary.withQueryLog ∅),
       (freshKeysOfLog phase.1.2).card ≤ Q) ↔
@@ -1081,26 +1082,26 @@ theorem actualAdversaryQueryBound_iff_probOne
     (fun phase => (freshKeysOfLog phase.1.2).card ≤ Q)).symm
 
 /-- Execute the existing native verifier on the same completed challenge path. -/
-def randomizedVerificationGame (initial : PFunctor)
+noncomputable def randomizedVerificationGame (initial : PFunctor)
     (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Out : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
-    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
-        (protocol (rounds z)).oracles initial p)) (Out z p))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
-    OracleComp (unifSpec + oracleSpec Input Salt rounds)
-      (Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
+    (Out : (z : Input) → (protocol z).tree.BranchPath → Type)
+    (terminal : (z : Input) → (p : (protocol z).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol z).tree
+        (protocol z).oracles initial p)) (Out z p))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) :
+    OracleComp (unifSpec + oracleSpec Input Salt coin)
+      (Option ((z : Input) × (path : (protocol z).tree.ExecutionPath) ×
         Out z path.toBranchPath × W)) := do
   match (← adversary) with
   | none => pure none
   | some ⟨z, messages, witness⟩ =>
-      let path ← simulateQ (restorationQueries Input Salt rounds) (complete rounds z messages)
-      let result ← executeStrategies (unifSpec + oracleSpec Input Salt rounds)
-        (protocol (rounds z)).tree (protocol (rounds z)).roles (protocol (rounds z)).oracles initial
+      let path ← simulateQ (restorationQueries Input Salt coin) (complete coin z messages)
+      let result ← executeStrategies (unifSpec + oracleSpec Input Salt coin)
+        (protocol z).tree (protocol z).roles (protocol z).oracles initial
         (impl z)
-        (scriptedProver (unifSpec + oracleSpec Input Salt rounds) (rounds z) messages)
-        (challengeVerifier (unifSpec + oracleSpec Input Salt rounds) (rounds z) initial
-          (pathPrograms (unifSpec + oracleSpec Input Salt rounds) (rounds z) path) (Out z)
+        (pathProver (unifSpec + oracleSpec Input Salt coin) (coin z) path)
+        (challengeVerifier (unifSpec + oracleSpec Input Salt coin) (coin z) initial
+          (pathPrograms (unifSpec + oracleSpec Input Salt coin) (coin z) path) (Out z)
           (terminal z))
       pure (some ⟨z, result.1, result.2.2, witness⟩)
 
@@ -1108,19 +1109,19 @@ def randomizedVerificationGame (initial : PFunctor)
 queries after completion, and the terminal value comes from the actual source-only interpreter. -/
 theorem randomizedVerificationGame_eq (initial : PFunctor)
     (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Out : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
-    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
-        (protocol (rounds z)).oracles initial p)) (Out z p))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
+    (Out : (z : Input) → (protocol z).tree.BranchPath → Type)
+    (terminal : (z : Input) → (p : (protocol z).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol z).tree
+        (protocol z).oracles initial p)) (Out z p))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) :
     randomizedVerificationGame initial impl Out terminal adversary =
       (fun result => result.map fun outcome =>
         (⟨outcome.1, outcome.2.1,
           terminalObservation initial impl Out terminal outcome.1 outcome.2.1,
           outcome.2.2⟩ :
-          (z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
+          (z : Input) × (path : (protocol z).tree.ExecutionPath) ×
             Out z path.toBranchPath × W)) <$>
-        randomizedRestoredExecution rounds adversary := by
+        randomizedRestoredExecution coin adversary := by
   simp only [randomizedVerificationGame, randomizedRestoredExecution,
     map_eq_pure_bind, bind_assoc]
   apply bind_congr
@@ -1130,32 +1131,30 @@ theorem randomizedVerificationGame_eq (initial : PFunctor)
   | some data =>
       rcases data with ⟨z, messages, witness⟩
       simp only [bind_assoc, pure_bind, Option.map_some]
-      apply OracleComp.bind_congr_of_forall_mem_support
-      intro path supported
-      rw [execute_pathReplay _ _ _ _ messages path
-        (complete_support_matches rounds z messages path
-          (simulateQ_support_subset _ _ supported))]
+      apply bind_congr
+      intro path
+      rw [execute_pathReplay]
       rfl
 
 /-- Close the actual native verifier output under the completed path's own source handler. -/
-def randomizedClosedVerificationGame (initial : PFunctor)
+noncomputable def randomizedClosedVerificationGame (initial : PFunctor)
     (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Stmt : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
-    {Idx : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+    (Stmt : (z : Input) → (protocol z).tree.BranchPath → Type)
+    {Idx : (z : Input) → (protocol z).tree.BranchPath → Type}
+    {Realization : (z : Input) → (p : (protocol z).tree.BranchPath) → Idx z p → Type}
+    (family : (z : Input) → (p : (protocol z).tree.BranchPath) →
       OracleFamily (Idx z p) (Realization z p))
-    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
-        (protocol (rounds z)).oracles initial p)) (OracleOutput initial Stmt family z p))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
-    OracleComp (unifSpec + oracleSpec Input Salt rounds)
-      (Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
+    (terminal : (z : Input) → (p : (protocol z).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol z).tree
+        (protocol z).oracles initial p)) (OracleOutput initial Stmt family z p))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) :
+    OracleComp (unifSpec + oracleSpec Input Salt coin)
+      (Option ((z : Input) × (path : (protocol z).tree.ExecutionPath) ×
         Option (ClosedClaim (Stmt z path.toBranchPath) (family z path.toBranchPath)) × W)) :=
   (fun result => result.map fun outcome =>
     ⟨outcome.1, outcome.2.1,
       outcome.2.2.1.map (fun claim => claim.closeWith
-        (outcome.2.1.closingImpl (protocol (rounds outcome.1)).oracles initial
+        (outcome.2.1.closingImpl (protocol outcome.1).oracles initial
           (impl outcome.1))),
       outcome.2.2.2⟩) <$>
     randomizedVerificationGame initial impl (OracleOutput initial Stmt family) terminal adversary
@@ -1163,24 +1162,24 @@ def randomizedClosedVerificationGame (initial : PFunctor)
 /-- The closed game observes the same native terminal output and the same completion path. -/
 theorem randomizedClosedVerificationGame_eq (initial : PFunctor)
     (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Stmt : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
-    {Idx : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+    (Stmt : (z : Input) → (protocol z).tree.BranchPath → Type)
+    {Idx : (z : Input) → (protocol z).tree.BranchPath → Type}
+    {Realization : (z : Input) → (p : (protocol z).tree.BranchPath) → Idx z p → Type}
+    (family : (z : Input) → (p : (protocol z).tree.BranchPath) →
       OracleFamily (Idx z p) (Realization z p))
-    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
-        (protocol (rounds z)).oracles initial p)) (OracleOutput initial Stmt family z p))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
+    (terminal : (z : Input) → (p : (protocol z).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol z).tree
+        (protocol z).oracles initial p)) (OracleOutput initial Stmt family z p))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) :
     randomizedClosedVerificationGame initial impl Stmt family terminal adversary =
       (fun result => result.map fun outcome =>
         (⟨outcome.1, outcome.2.1,
           closedTerminalObservation initial impl Stmt family terminal outcome.1 outcome.2.1,
           outcome.2.2⟩ :
-          (z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
+          (z : Input) × (path : (protocol z).tree.ExecutionPath) ×
             Option (ClosedClaim (Stmt z path.toBranchPath)
               (family z path.toBranchPath)) × W)) <$>
-        randomizedRestoredExecution rounds adversary := by
+        randomizedRestoredExecution coin adversary := by
   rw [randomizedClosedVerificationGame, randomizedVerificationGame_eq, Functor.map_map]
   congr 1
   funext result

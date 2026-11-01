@@ -92,6 +92,64 @@ theorem keyError_le_maxError {Salt : Type} {coin : (z : Input) → PublicCoin (p
 
 end
 
+/-! ### Errors of alternating rounds -/
+
+/-- A vector of local knowledge errors of alternating rounds, indexed in protocol order. -/
+abbrev RoundErrors (rounds : List Round) := Fin rounds.length → ENNReal
+
+/-- The node errors of alternating rounds: each challenge node has its round's error. -/
+def roundErrors : (rounds : List Round) → RoundErrors rounds → Errors (Round.coin rounds)
+  | [], _ => fun node => nomatch node
+  | _ :: rounds, errors => fun node =>
+      Sum.casesOn node.2 (fun _ => errors 0) fun later =>
+        roundErrors rounds (fun j => errors j.succ) later.2
+
+/-- Each challenge is sampled uniformly with its round's error. -/
+abbrev roundErrorSchedule (rounds : List Round) (errors : RoundErrors rounds) :
+    RoundExtractor.ChallengeSchedule (protocol rounds).tree (protocol rounds).roles :=
+  errorSchedule (Round.coin rounds) (roundErrors rounds errors)
+
+/-- Every node error of alternating rounds is at most the largest round error. -/
+theorem roundErrors_le (rounds : List Round) (errors : RoundErrors rounds)
+    (node : Prefix PUnit (Round.coin rounds)) :
+    roundErrors rounds errors node ≤ Finset.univ.sup errors := by
+  induction rounds with
+  | nil => exact node.elim
+  | cons round rounds ih =>
+      rcases node with ⟨message, node⟩
+      cases node with
+      | inl _ => exact Finset.le_sup (f := errors) (Finset.mem_univ 0)
+      | inr later =>
+          refine (ih (fun j => errors j.succ) later.2).trans (Finset.sup_le fun j _ => ?_)
+          exact Finset.le_sup (f := errors) (Finset.mem_univ j.succ)
+
+/-- The largest path sum of errors of alternating rounds is at most the sum of the round
+errors. -/
+theorem pathError_roundErrors_le (rounds : List Round) (errors : RoundErrors rounds) :
+    pathError (Round.coin rounds) (roundErrors rounds errors) ≤ ∑ j, errors j := by
+  induction rounds with
+  | nil => simp [pathError, Round.coin]
+  | cons round rounds ih =>
+      simp only [Round.coin, pathError]
+      exact iSup_le fun _ => (add_le_add (le_refl (errors 0)) (ih (fun j => errors j.succ))).trans
+        (Fin.sum_univ_succ (n := rounds.length) errors).ge
+
+/-- With the same alternating rounds and errors for every input, the largest node error is at
+most the largest round error. -/
+theorem maxError_roundErrors_le {Input : Type} (rounds : List Round)
+    (errors : RoundErrors rounds) :
+    maxError (coin := fun _ : Input => Round.coin rounds) (fun _ => roundErrors rounds errors) ≤
+      Finset.univ.sup errors :=
+  iSup_le fun _ => iSup_le fun node => roundErrors_le rounds errors node
+
+/-- With the same alternating rounds and errors for every input, the largest path sum is at most
+the sum of the round errors. -/
+theorem sumError_roundErrors_le {Input : Type} (rounds : List Round)
+    (errors : RoundErrors rounds) :
+    sumError (coin := fun _ : Input => Round.coin rounds) (fun _ => roundErrors rounds errors) ≤
+      ∑ j, errors j :=
+  iSup_le fun _ => pathError_roundErrors_le rounds errors
+
 /-- All authored-prefix local bounds apply to each prefix's reconstructed pre-challenge state. -/
 theorem prefixExtractor_bound {Salt : Type} {protocol : Protocol} (coin : PublicCoin protocol)
     {state : KnowledgeState.{w}} (extractor : RoundExtractor protocol.tree state)
