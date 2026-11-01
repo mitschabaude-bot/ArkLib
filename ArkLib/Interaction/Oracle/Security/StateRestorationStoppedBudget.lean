@@ -25,12 +25,12 @@ namespace Interaction.Oracle.Security.StateRestoration
 
 universe w
 
-variable {Input Salt W : Type} {rounds : List Round}
+variable {Input Salt W : Type} {rounds : Input → List Round}
 
 /-- The full result of a stopped logged random-oracle run, including the source phase log and
 the final hash log and cache. -/
-abbrev StoppedJointResult (Input Salt W : Type) (rounds : List Round) :=
-  (((Option (Input × (protocol rounds).tree.ExecutionPath × W) ×
+abbrev StoppedJointResult (Input Salt W : Type) (rounds : Input → List Round) :=
+  (((Option (Outcome Input W rounds) ×
       QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
         QueryLog (oracleSpec Input Salt rounds)) ×
           (oracleSpec Input Salt rounds).QueryCache)
@@ -39,7 +39,7 @@ abbrev StoppedJointResult (Input Salt W : Type) (rounds : List Round) :=
 phase of the stopped joint run. Failure branches remain in this expectation. -/
 noncomputable def expectedStoppedJointAdversaryKeys
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (guards : GuardSchedule Input Salt rounds)
+    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) : ENNReal :=
   letI : MeasurableSpace (StoppedJointResult Input Salt W rounds) := ⊤
   ∫⁻ result, ((adversaryHashKeys result.1.1.2).card : ENNReal)
@@ -50,8 +50,8 @@ noncomputable def expectedStoppedJointAdversaryKeys
 counts executed calls even when they hit an adversarially populated cache. -/
 noncomputable def expectedStoppedVerifierRoundCost
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (guards : GuardSchedule Input Salt rounds)
-    (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) : ENNReal :=
   letI : MeasurableSpace (StoppedJointResult Input Salt W rounds) := ⊤
   ∫⁻ result, stoppedVerifierRoundCost errors result.1.1.2 result.1.2
@@ -61,14 +61,14 @@ noncomputable def expectedStoppedVerifierRoundCost
 /-- The actual random-oracle support inherits the fixed-table bound on distinct charge. -/
 theorem randomOracle_stopped_freshCharge_le_actualRounds
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (guards : GuardSchedule Input Salt rounds)
-    (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
     (result : StoppedJointResult Input Salt W rounds)
     (supported : result ∈ support (randomOracleLoggedRun
       (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary) ∅)) :
     freshQueryCharge (keyError errors) result.1.2 ≤
-      (adversaryHashKeys result.1.1.2).card * Finset.univ.sup errors +
+      (adversaryHashKeys result.1.1.2).card * maxError errors +
         stoppedVerifierRoundCost errors result.1.1.2 result.1.2 := by
   obtain ⟨table, htable⟩ := mem_support_fixedTableLoggedRun_of_randomOracle
     (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary)
@@ -80,13 +80,13 @@ theorem randomOracle_stopped_freshCharge_le_actualRounds
 in the verifier phase, including rejected runs. -/
 theorem randomOracle_stopped_verifierCost_le_sum
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (guards : GuardSchedule Input Salt rounds)
-    (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
     (result : StoppedJointResult Input Salt W rounds)
     (supported : result ∈ support (randomOracleLoggedRun
       (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary) ∅)) :
-    stoppedVerifierRoundCost errors result.1.1.2 result.1.2 ≤ ∑ j, errors j := by
+    stoppedVerifierRoundCost errors result.1.1.2 result.1.2 ≤ sumError errors := by
   obtain ⟨table, htable⟩ := mem_support_fixedTableLoggedRun_of_randomOracle
     (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary)
     ∅ result supported
@@ -97,13 +97,13 @@ theorem randomOracle_stopped_verifierCost_le_sum
 is bounded by adversary distinct keys plus exactly the cost of executed verifier rounds. -/
 theorem expectedStoppedFreshCharge_le_actualRounds
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (guards : GuardSchedule Input Salt rounds)
-    (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
     expectedFreshQueryCharge
       (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary)
       (keyError errors) ≤
-      Finset.univ.sup errors *
+      maxError errors *
         expectedStoppedJointAdversaryKeys rounds guards adversary +
       expectedStoppedVerifierRoundCost rounds guards errors adversary := by
   let program := randomizedStoppedRestoredExecutionWithAdversaryLog
@@ -112,7 +112,7 @@ theorem expectedStoppedFreshCharge_le_actualRounds
   have hae := evalDist.ae_of_forall_mem_support
     (randomOracleLoggedRun program ∅)
     (fun result => freshQueryCharge (keyError errors) result.1.2 ≤
-      Finset.univ.sup errors * (adversaryHashKeys result.1.1.2).card +
+      maxError errors * (adversaryHashKeys result.1.1.2).card +
         stoppedVerifierRoundCost errors result.1.1.2 result.1.2)
     MeasurableSet.of_discrete
     (fun result hresult => by
@@ -124,11 +124,11 @@ theorem expectedStoppedFreshCharge_le_actualRounds
   calc
     (∫⁻ result, freshQueryCharge (keyError errors) result.1.2
       ∂𝒟[randomOracleLoggedRun program ∅]) ≤
-        ∫⁻ result, Finset.univ.sup errors *
+        ∫⁻ result, maxError errors *
           (adversaryHashKeys result.1.1.2).card +
           stoppedVerifierRoundCost errors result.1.1.2 result.1.2
           ∂𝒟[randomOracleLoggedRun program ∅] := lintegral_mono_ae hae
-    _ = Finset.univ.sup errors *
+    _ = maxError errors *
           expectedStoppedJointAdversaryKeys rounds guards adversary +
           expectedStoppedVerifierRoundCost rounds guards errors adversary := by
       rw [lintegral_add_left Measurable.of_discrete,
@@ -139,48 +139,48 @@ theorem expectedStoppedFreshCharge_le_actualRounds
 so expected executed-round cost is at most the total local-error sum. -/
 theorem expectedStoppedVerifierRoundCost_le_sum
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (guards : GuardSchedule Input Salt rounds)
-    (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
     expectedStoppedVerifierRoundCost rounds guards errors adversary ≤
-      ∑ j, errors j := by
+      sumError errors := by
   let program := randomizedStoppedRestoredExecutionWithAdversaryLog
     rounds guards adversary
   let : MeasurableSpace (StoppedJointResult Input Salt W rounds) := ⊤
   have hae := evalDist.ae_of_forall_mem_support
     (randomOracleLoggedRun program ∅)
     (fun result => stoppedVerifierRoundCost errors result.1.1.2 result.1.2 ≤
-      ∑ j, errors j)
+      sumError errors)
     MeasurableSet.of_discrete
     (fun result hresult => randomOracle_stopped_verifierCost_le_sum
       rounds guards errors adversary result hresult)
   change (∫⁻ result, stoppedVerifierRoundCost errors result.1.1.2 result.1.2
     ∂𝒟[randomOracleLoggedRun program ∅]) ≤ _
   calc
-    _ ≤ ∫⁻ _, (∑ j, errors j)
+    _ ≤ ∫⁻ _, (sumError errors)
           ∂𝒟[randomOracleLoggedRun program ∅] := lintegral_mono_ae hae
-    _ = ∑ j, errors j := by
+    _ = sumError errors := by
       rw [lintegral_const, evalDist_apply_univ_eq_one, mul_one]
 
 /-- The actual stopped distinct-query budget, with both the refined verifier term and the
 coarser full-schedule consequence. The adversary count belongs to this same joint run. -/
 theorem expectedStoppedFreshCharge_le_actualAdversary_and_sum
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (guards : GuardSchedule Input Salt rounds)
-    (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
     expectedFreshQueryCharge
         (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary)
         (keyError errors) ≤
-      Finset.univ.sup errors *
+      maxError errors *
         expectedStoppedJointAdversaryKeys rounds guards adversary +
       expectedStoppedVerifierRoundCost rounds guards errors adversary ∧
-    Finset.univ.sup errors *
+    maxError errors *
         expectedStoppedJointAdversaryKeys rounds guards adversary +
       expectedStoppedVerifierRoundCost rounds guards errors adversary ≤
-      Finset.univ.sup errors *
+      maxError errors *
         expectedStoppedJointAdversaryKeys rounds guards adversary +
-      ∑ j, errors j := by
+      sumError errors := by
   exact ⟨expectedStoppedFreshCharge_le_actualRounds rounds guards errors adversary,
     add_le_add_right
       (expectedStoppedVerifierRoundCost_le_sum rounds guards errors adversary) _⟩
@@ -191,18 +191,18 @@ The first bound uses the actual stopped verifier's executed rounds, and the seco
 rounds by the full finite schedule. No finite input or salt domain is required. -/
 theorem randomizedStopped_knowledge_soundness_actualRounds
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (guards : GuardSchedule Input Salt rounds)
-    (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol rounds).roles (roundErrorSchedule rounds errors))
+      (protocol (rounds z)).roles (roundErrorSchedule (rounds z) (errors z)))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (Rout : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → W → Prop)
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
@@ -211,15 +211,15 @@ theorem randomizedStopped_knowledge_soundness_actualRounds
     Pr{let joint ← (randomOracleLoggedRun
       (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary) ∅)}[
       badStoppedRelation state extractor Rin Rout terminalWitness Z joint.1.1.1] ≤
-      Finset.univ.sup errors *
+      maxError errors *
         expectedStoppedJointAdversaryKeys rounds guards adversary +
       expectedStoppedVerifierRoundCost rounds guards errors adversary ∧
-    Finset.univ.sup errors *
+    maxError errors *
         expectedStoppedJointAdversaryKeys rounds guards adversary +
       expectedStoppedVerifierRoundCost rounds guards errors adversary ≤
-      Finset.univ.sup errors *
+      maxError errors *
         expectedStoppedJointAdversaryKeys rounds guards adversary +
-      ∑ j, errors j := by
+      sumError errors := by
   have hsecurity := randomizedStopped_badRelation_le_expectedFreshCharge
     rounds guards errors adversary state extractor Z preserving bounded
     Rin Rout terminalWitness inputLaw outputLaw
@@ -231,8 +231,8 @@ theorem randomizedStopped_knowledge_soundness_actualRounds
 and rejection. This identifies the joint count with the actual cached source phase. -/
 theorem randomOracle_stoppedCompletion_sourceLog
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (guards : GuardSchedule Input Salt rounds)
-    (selectedAndLog : Option (Input × Messages Salt rounds × W) ×
+    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (selectedAndLog : Option (Selection Input Salt W rounds) ×
       QueryLog (unifSpec + oracleSpec Input Salt rounds))
     (cache : (oracleSpec Input Salt rounds).QueryCache)
     (result : StoppedJointResult Input Salt W rounds)
@@ -250,8 +250,8 @@ theorem randomOracle_stoppedCompletion_sourceLog
   | some data =>
       rcases data with ⟨z, messages, witness⟩
       have hprogram : randomizedStoppedCompletionAfterAdversaryLog rounds guards
-          (some (z, messages, witness), adversaryLog) =
-          (fun path => (path.map (fun p => (z, p, witness)), adversaryLog)) <$>
+          (some ⟨z, messages, witness⟩, adversaryLog) =
+          (fun path => (path.map (fun p => ⟨z, p, witness⟩), adversaryLog)) <$>
             simulateQ (restorationQueries Input Salt rounds)
               (stoppedComplete rounds guards z messages) := by
         simp only [randomizedStoppedCompletionAfterAdversaryLog, map_eq_pure_bind]
@@ -261,8 +261,8 @@ theorem randomOracle_stoppedCompletion_sourceLog
 
 private theorem stoppedCompletion_expected_adversaryKeys
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (guards : GuardSchedule Input Salt rounds)
-    (selectedAndLog : Option (Input × Messages Salt rounds × W) ×
+    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (selectedAndLog : Option (Selection Input Salt W rounds) ×
       QueryLog (unifSpec + oracleSpec Input Salt rounds))
     (cache : (oracleSpec Input Salt rounds).QueryCache) :
     letI : MeasurableSpace (StoppedJointResult Input Salt W rounds) := ⊤
@@ -298,12 +298,12 @@ private theorem stoppedCompletion_expected_adversaryKeys
 actual cached adversary phase. The stopping decision cannot change its earlier key set. -/
 theorem expectedStoppedJointAdversaryKeys_eq_expectedAdversaryFreshKeys
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (guards : GuardSchedule Input Salt rounds)
+    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
     expectedStoppedJointAdversaryKeys rounds guards adversary =
       expectedAdversaryFreshKeys rounds adversary := by
   let Phase :=
-    (((Option (Input × Messages Salt rounds × W) ×
+    (((Option (Selection Input Salt W rounds) ×
       QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
         QueryLog (oracleSpec Input Salt rounds)) ×
           (oracleSpec Input Salt rounds).QueryCache)
@@ -347,18 +347,18 @@ retains the expected cost of rounds actually queried, and the second replaces it
 schedule sum. -/
 theorem randomizedStopped_knowledge_soundness_actualAdversary
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (guards : GuardSchedule Input Salt rounds)
-    (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol rounds).roles (roundErrorSchedule rounds errors))
+      (protocol (rounds z)).roles (roundErrorSchedule (rounds z) (errors z)))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (Rout : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → W → Prop)
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
@@ -367,12 +367,12 @@ theorem randomizedStopped_knowledge_soundness_actualAdversary
     Pr{let joint ← (randomOracleLoggedRun
       (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary) ∅)}[
       badStoppedRelation state extractor Rin Rout terminalWitness Z joint.1.1.1] ≤
-      Finset.univ.sup errors * expectedAdversaryFreshKeys rounds adversary +
+      maxError errors * expectedAdversaryFreshKeys rounds adversary +
         expectedStoppedVerifierRoundCost rounds guards errors adversary ∧
-    Finset.univ.sup errors * expectedAdversaryFreshKeys rounds adversary +
+    maxError errors * expectedAdversaryFreshKeys rounds adversary +
         expectedStoppedVerifierRoundCost rounds guards errors adversary ≤
-      Finset.univ.sup errors * expectedAdversaryFreshKeys rounds adversary +
-        ∑ j, errors j := by
+      maxError errors * expectedAdversaryFreshKeys rounds adversary +
+        sumError errors := by
   simpa only [expectedStoppedJointAdversaryKeys_eq_expectedAdversaryFreshKeys]
     using randomizedStopped_knowledge_soundness_actualRounds rounds guards errors
       adversary state extractor Z preserving bounded Rin Rout terminalWitness
@@ -383,18 +383,18 @@ bound. The cap counts distinct hash keys even on failed selections; private unif
 not hash queries. -/
 theorem randomizedStopped_knowledge_soundness_queryBound
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (guards : GuardSchedule Input Salt rounds)
-    (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol rounds).roles (roundErrorSchedule rounds errors))
+      (protocol (rounds z)).roles (roundErrorSchedule (rounds z) (errors z)))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (Rout : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → W → Prop)
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
@@ -406,20 +406,20 @@ theorem randomizedStopped_knowledge_soundness_queryBound
     Pr{let joint ← (randomOracleLoggedRun
       (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary) ∅)}[
       badStoppedRelation state extractor Rin Rout terminalWitness Z joint.1.1.1] ≤
-      Q * Finset.univ.sup errors + ∑ j, errors j := by
+      Q * maxError errors + sumError errors := by
   have h := randomizedStopped_knowledge_soundness_actualAdversary
     rounds guards errors adversary state extractor Z preserving bounded
     Rin Rout terminalWitness inputLaw outputLaw
   calc
-    _ ≤ Finset.univ.sup errors * expectedAdversaryFreshKeys rounds adversary +
+    _ ≤ maxError errors * expectedAdversaryFreshKeys rounds adversary +
           expectedStoppedVerifierRoundCost rounds guards errors adversary := h.1
-    _ ≤ Finset.univ.sup errors * expectedAdversaryFreshKeys rounds adversary +
-          ∑ j, errors j := h.2
-    _ ≤ Q * Finset.univ.sup errors + ∑ j, errors j := by
+    _ ≤ maxError errors * expectedAdversaryFreshKeys rounds adversary +
+          sumError errors := h.2
+    _ ≤ Q * maxError errors + sumError errors := by
       calc
-        Finset.univ.sup errors * expectedAdversaryFreshKeys rounds adversary +
-            ∑ j, errors j ≤
-          Finset.univ.sup errors * Q + ∑ j, errors j := by
+        maxError errors * expectedAdversaryFreshKeys rounds adversary +
+            sumError errors ≤
+          maxError errors * Q + sumError errors := by
             gcongr
             exact expectedAdversaryFreshKeys_le_queryBound
               rounds adversary Q actualQueryBound

@@ -127,21 +127,29 @@ theorem simulateQ_support_subset {ι κ : Type}
       obtain ⟨response, _, hs⟩ := OracleComp.mem_support_bind_peel _ _ supported
       exact MonadAttach.mem_support_bind.mpr ⟨response, by simp, ih response hs⟩
 
-/-- Every path in the actual open completion program has exactly the authored oracle messages. -/
-theorem complete_support_matches {Input Salt : Type} (rounds : List Round) (z : Input)
+/-- Every path in the open prefix completion program has exactly the authored oracle messages. -/
+theorem completePrefix_support_matches {Salt : Type} (rounds : List Round)
     (messages : Messages Salt rounds) (path : (protocol rounds).tree.ExecutionPath)
-    (supported : path ∈ support (complete rounds z messages)) :
+    (supported : path ∈ support (completePrefix rounds messages)) :
     MatchesMessages rounds messages path := by
   induction rounds with
   | nil => trivial
   | cons round rounds ih =>
       rcases messages with ⟨message, salt, messages⟩
-      simp only [complete] at supported
+      simp only [completePrefix] at supported
       obtain ⟨challenge, _, hs⟩ := OracleComp.mem_support_bind_peel _ _ supported
       obtain ⟨tail, htail, hpure⟩ := OracleComp.mem_support_bind_peel _ _ hs
       have same := OracleComp.eq_of_mem_support_pure _ hpure
       subst path
       exact ⟨rfl, ih messages tail (simulateQ_support_subset _ _ htail)⟩
+
+/-- Every path in the actual open completion program has exactly the authored oracle messages. -/
+theorem complete_support_matches {Input Salt : Type} (rounds : Input → List Round) (z : Input)
+    (messages : Messages Salt (rounds z)) (path : (protocol (rounds z)).tree.ExecutionPath)
+    (supported : path ∈ support (complete rounds z messages)) :
+    MatchesMessages (rounds z) messages path :=
+  completePrefix_support_matches (rounds z) messages path
+    (simulateQ_support_subset _ _ supported)
 
 /-- Ordinary fresh uniform challenge programs. -/
 def uniformPrograms : (rounds : List Round) → ChallengePrograms unifSpec rounds

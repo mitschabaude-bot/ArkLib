@@ -11,7 +11,7 @@ public import VCVio.EvalDist.Monad.Option
 /-!
 # State-restoration knowledge soundness with pre-sampled private coins
 
-Both actual restoration games satisfy the same `(Q + rounds.length) * error` bound
+Both actual restoration games satisfy the same `(Q + k) * error` bound
 when the adversary's private coins are sampled before the fresh cached game.
 The possibly failing coin author runs independently before a fresh empty cached game.
 For each returned coin, the deterministic adversary adapts to all oracle answers
@@ -28,26 +28,26 @@ namespace Interaction.Oracle.Security.StateRestoration
 
 universe w
 
-variable {Input Salt W : Type} {rounds : List Round}
+variable {Input Salt W : Type} {rounds : Input → List Round}
 
 /-- Average actual restoration soundness over independent, possibly failing private coins.
 Every fixed-coin adversary may adapt to all oracle responses and has the same all-branch bound. -/
 theorem stateRestoration_knowledge_soundness_privateCoins
     [DecidableEq Input] [DecidableEq Salt]
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input) (error : ENNReal)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
-    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol rounds).roles
-      (uniformSchedule error rounds))
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
+    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol (rounds z)).roles
+      (uniformSchedule error (rounds z)))
     (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Out : Input → (protocol rounds).tree.BranchPath → Type)
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (Out z p))
+    (Out : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (Out z p))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (p : (protocol rounds).tree.BranchPath) → Out z p → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (Rout : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Out z p → W → Prop)
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W ≃ ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
@@ -55,20 +55,21 @@ theorem stateRestoration_knowledge_soundness_privateCoins
         Rout z path.toBranchPath (terminalObservation initial impl Out terminal z path) witness)
     {Coins : Type} (coins : OptionT ProbComp Coins)
     (adversary : Coins →
-      OracleComp (oracleSpec Input Salt rounds) (Input × Messages Salt rounds × W))
-    (Q : ℕ) (queryBound : ∀ c, IsTotalQueryBound (adversary c) Q) :
+      OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds))
+    (Q k : ℕ) (queryBound : ∀ c, IsTotalQueryBound (adversary c) Q)
+    (length_le : ∀ z, (rounds z).length ≤ k) :
     Pr{let result ← (coins >>= fun c => OptionT.lift
         ((simulateQ randomOracle
           (verificationGame initial impl Out terminal (adversary c))).run' ∅))}[
       result.1 ∈ Z ∧ Rout result.1 result.2.1.toBranchPath result.2.2.1 result.2.2.2 ∧
       ¬ Rin result.1 (extractInputWitness state extractor terminalWitness
-        result.1 result.2.1 result.2.2.2)] ≤ (Q + rounds.length) * error := by
+        result.1 result.2.1 result.2.2.2)] ≤ (Q + k) * error := by
   apply prEvent_bind_le_of_forall_le
   intro c
   rw [OptionT.prEvent_lift]
   exact stateRestoration_knowledge_soundness state extractor Z error preserving bounded
     initial impl Out terminal Rin Rout terminalWitness inputLaw outputLaw
-    (adversary c) Q (queryBound c)
+    (adversary c) Q k (queryBound c) length_le
 
 
 /-- The private-coins extension for actual closed oracle outputs, with rejection unsuccessful.
@@ -76,24 +77,24 @@ The relation observes the same run's closed behavior. Coin failure contributes m
 theorem stateRestoration_oracle_knowledge_soundness_privateCoins
     [DecidableEq Input] [DecidableEq Salt]
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input) (error : ENNReal)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
-    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol rounds).roles
-      (uniformSchedule error rounds))
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
+    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol (rounds z)).roles
+      (uniformSchedule error (rounds z)))
     (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Stmt : Input → (protocol rounds).tree.BranchPath → Type)
-    {Idx : Input → (protocol rounds).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol rounds).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Stmt : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    {Idx : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type}
+    {Realization : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Idx z p → Type}
+    (family : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       OracleFamily (Idx z p) (Realization z p))
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (OracleOutput initial Stmt family z p))
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (OracleOutput initial Stmt family z p))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Rout : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       ClosedClaim (Stmt z p) (family z p) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W ≃ ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
@@ -102,8 +103,9 @@ theorem stateRestoration_oracle_knowledge_soundness_privateCoins
           Rout z path.toBranchPath claim witness)
     {Coins : Type} (coins : OptionT ProbComp Coins)
     (adversary : Coins →
-      OracleComp (oracleSpec Input Salt rounds) (Input × Messages Salt rounds × W))
-    (Q : ℕ) (queryBound : ∀ c, IsTotalQueryBound (adversary c) Q) :
+      OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds))
+    (Q k : ℕ) (queryBound : ∀ c, IsTotalQueryBound (adversary c) Q)
+    (length_le : ∀ z, (rounds z).length ≤ k) :
     Pr{let result ← (coins >>= fun c => OptionT.lift
         ((simulateQ randomOracle
           (closedVerificationGame initial impl Stmt family terminal (adversary c))).run' ∅))}[
@@ -111,13 +113,13 @@ theorem stateRestoration_oracle_knowledge_soundness_privateCoins
       (∃ claim, result.2.2.1 = some claim ∧
         Rout result.1 result.2.1.toBranchPath claim result.2.2.2) ∧
       ¬ Rin result.1 (extractInputWitness state extractor terminalWitness
-        result.1 result.2.1 result.2.2.2)] ≤ (Q + rounds.length) * error := by
+        result.1 result.2.1 result.2.2.2)] ≤ (Q + k) * error := by
   apply prEvent_bind_le_of_forall_le
   intro c
   rw [OptionT.prEvent_lift]
   exact stateRestoration_oracle_knowledge_soundness state extractor Z error preserving bounded
     initial impl Stmt family terminal Rin Rout terminalWitness inputLaw outputLaw
-    (adversary c) Q (queryBound c)
+    (adversary c) Q k (queryBound c) length_le
 
 
 end Interaction.Oracle.Security.StateRestoration

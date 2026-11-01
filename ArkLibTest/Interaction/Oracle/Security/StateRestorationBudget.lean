@@ -218,13 +218,14 @@ def messages : Messages Unit rounds := ⟨(5 : Fin 8), (), (7 : Fin 8), (), PUni
 def path (first : Fin 8) (second : Fin 16) : tree.ExecutionPath :=
   ⟨(5 : Fin 8), first, (7 : Fin 8), second, PUnit.unit⟩
 
-def lateKey : Key Nat Unit rounds :=
-  Key.later (5 : Fin 8) () (Key.here 0 (7 : Fin 8) ())
+def lateKey : Key Nat Unit (fun _ => rounds) :=
+  ⟨0, Prefix.later (5 : Fin 8) () (Prefix.here (7 : Fin 8) ())⟩
 
 /-- Query the later round first, twice, before completing the selected transcript. -/
-def adversary : OracleComp (oracleSpec Nat Unit rounds) (Nat × Messages Unit rounds × Nat) := do
-  let _ ← liftM ((oracleSpec Nat Unit rounds).query lateKey)
-  let _ ← liftM ((oracleSpec Nat Unit rounds).query lateKey)
+def adversary : OracleComp (oracleSpec Nat Unit (fun _ => rounds))
+    (Selection Nat Unit Nat (fun _ => rounds)) := do
+  let _ ← liftM ((oracleSpec Nat Unit (fun _ => rounds)).query lateKey)
+  let _ ← liftM ((oracleSpec Nat Unit (fun _ => rounds)).query lateKey)
   pure ⟨0, messages, 6⟩
 
 theorem queryBound : IsTotalQueryBound adversary 2 := by
@@ -261,7 +262,7 @@ theorem actual_nonuniform_game_bound :
         Rout result.1 result.2.1.toBranchPath claim result.2.2.2) ∧
       ¬ Rin result.1 (extractInputWitness inputState extractor terminalWitness
         result.1 result.2.1 result.2.2.2)] ≤ 7 / 16 := by
-  have general := stateRestoration_oracle_knowledge_soundness_nonuniform
+  have general := stateRestoration_oracle_knowledge_soundness_nonuniform_fixed
     inputState extractor Set.univ errors (fun z _ => preserving z) (fun z _ => bounded z)
     initial inputImpl Out family oracleTerminal Rin Rout terminalWitness inputLaw outputLaw
     adversary 2 queryBound
@@ -379,10 +380,11 @@ example : Pr{let result ← (simulateQ randomOracle
         Rout result.1 result.2.1.toBranchPath claim result.2.2.2) ∧
       ¬ Rin result.1 (extractInputWitness inputState (fun z => (measuredCertificate z).extractor)
         terminalWitness result.1 result.2.1 result.2.2.2)] ≤
-      2 * Finset.univ.sup errors + ∑ j, errors j ∧
+      2 * maxError (rounds := fun _ : Nat => rounds) (fun _ => errors) +
+        sumError (rounds := fun _ : Nat => rounds) (fun _ => errors) ∧
       ∀ z ∈ Set.univ, (measuredCertificate z).stages.BudgetAtMost 1 :=
   MeasuredKnowledgeCertificate.stateRestoration_oracle_knowledge_soundness_nonuniform inputState
-    measuredCertificate Set.univ errors (fun _ _ => rfl) 1
+    measuredCertificate Set.univ (fun _ => errors) (fun _ _ => rfl) 1
     (fun z _ => stages_budgetAtMost_one z) initial inputImpl Out family oracleTerminal
     Rin Rout terminalWitness inputLaw outputLaw adversary 2 queryBound
 

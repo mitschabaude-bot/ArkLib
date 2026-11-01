@@ -26,75 +26,75 @@ namespace Interaction.Oracle.Security.StateRestoration
 
 universe w
 
-variable {Input Salt W : Type} {rounds : List Round}
+variable {Input Salt W : Type} {rounds : Input → List Round}
 
 /-- The terminal program may reject or return an open claim over declared source access. -/
 abbrev OracleOutput (initial : PFunctor)
-    (Stmt : Input → (protocol rounds).tree.BranchPath → Type)
-    {Idx : Input → (protocol rounds).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol rounds).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Stmt : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    {Idx : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type}
+    {Realization : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Idx z p → Type}
+    (family : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       OracleFamily (Idx z p) (Realization z p))
-    (z : Input) (p : (protocol rounds).tree.BranchPath) :=
+    (z : Input) (p : (protocol (rounds z)).tree.BranchPath) :=
   Option (OpenClaim
-    (ofPFunctor (accessAfter (protocol rounds).tree (protocol rounds).oracles initial p))
+    (ofPFunctor (accessAfter (protocol (rounds z)).tree (protocol (rounds z)).oracles initial p))
     (Stmt z p) (family z p))
 
 /-- Close the actual verifier's returned virtual output under that same run's handler.
 Closing interprets the relation and grants no concrete payload access to verifier authoring. -/
 def closedVerificationGame (initial : PFunctor)
     (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Stmt : Input → (protocol rounds).tree.BranchPath → Type)
-    {Idx : Input → (protocol rounds).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol rounds).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Stmt : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    {Idx : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type}
+    {Realization : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Idx z p → Type}
+    (family : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       OracleFamily (Idx z p) (Realization z p))
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (OracleOutput initial Stmt family z p))
-    (adversary : OracleComp (oracleSpec Input Salt rounds) (Input × Messages Salt rounds × W)) :
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (OracleOutput initial Stmt family z p))
+    (adversary : OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds)) :
     OracleComp (oracleSpec Input Salt rounds)
-      ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+      ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
         Option (ClosedClaim (Stmt z path.toBranchPath) (family z path.toBranchPath)) × W) :=
   (fun result => ⟨result.1, result.2.1,
     result.2.2.1.map (fun claim => claim.closeWith
-      (result.2.1.closingImpl (protocol rounds).oracles initial (impl result.1))),
+      (result.2.1.closingImpl (protocol (rounds result.1)).oracles initial (impl result.1))),
     result.2.2.2⟩) <$>
     verificationGame initial impl (OracleOutput initial Stmt family) terminal adversary
 
 /-- Observe the output oracle behavior using the accumulated handler of the completed path. -/
 def closedTerminalObservation (initial : PFunctor)
     (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Stmt : Input → (protocol rounds).tree.BranchPath → Type)
-    {Idx : Input → (protocol rounds).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol rounds).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Stmt : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    {Idx : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type}
+    {Realization : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Idx z p → Type}
+    (family : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       OracleFamily (Idx z p) (Realization z p))
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (OracleOutput initial Stmt family z p))
-    (z : Input) (path : (protocol rounds).tree.ExecutionPath) :
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (OracleOutput initial Stmt family z p))
+    (z : Input) (path : (protocol (rounds z)).tree.ExecutionPath) :
     Option (ClosedClaim (Stmt z path.toBranchPath) (family z path.toBranchPath)) :=
   (terminalObservation initial impl (OracleOutput initial Stmt family) terminal z path).map
     (fun claim => claim.closeWith
-      (path.closingImpl (protocol rounds).oracles initial (impl z)))
+      (path.closingImpl (protocol (rounds z)).oracles initial (impl z)))
 
 /-- Exact actual-execution equation, including the verifier's virtual output interpretation. -/
 theorem closedVerificationGame_eq (initial : PFunctor)
     (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Stmt : Input → (protocol rounds).tree.BranchPath → Type)
-    {Idx : Input → (protocol rounds).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol rounds).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Stmt : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    {Idx : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type}
+    {Realization : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Idx z p → Type}
+    (family : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       OracleFamily (Idx z p) (Realization z p))
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (OracleOutput initial Stmt family z p))
-    (adversary : OracleComp (oracleSpec Input Salt rounds) (Input × Messages Salt rounds × W)) :
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (OracleOutput initial Stmt family z p))
+    (adversary : OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds)) :
     closedVerificationGame initial impl Stmt family terminal adversary =
       (fun result => (⟨result.1, result.2.1,
         closedTerminalObservation initial impl Stmt family terminal result.1 result.2.1,
-        result.2.2⟩ : (z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+        result.2.2⟩ : (z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
           Option (ClosedClaim (Stmt z path.toBranchPath) (family z path.toBranchPath)) × W)) <$>
         restoredExecution rounds adversary := by
   rw [closedVerificationGame, verificationGame_eq, Functor.map_map]
@@ -106,43 +106,44 @@ unobserved concrete realizations. Rejection is never a valid output. -/
 theorem stateRestoration_oracle_knowledge_soundness
     [DecidableEq Input] [DecidableEq Salt]
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input) (error : ENNReal)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
-    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol rounds).roles
-      (uniformSchedule error rounds))
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
+    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol (rounds z)).roles
+      (uniformSchedule error (rounds z)))
     (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Stmt : Input → (protocol rounds).tree.BranchPath → Type)
-    {Idx : Input → (protocol rounds).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol rounds).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Stmt : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    {Idx : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type}
+    {Realization : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Idx z p → Type}
+    (family : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       OracleFamily (Idx z p) (Realization z p))
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (OracleOutput initial Stmt family z p))
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (OracleOutput initial Stmt family z p))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Rout : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       ClosedClaim (Stmt z p) (family z p) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W ≃ ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
       ((extractor z).terminalState path).holds (terminalWitness z path witness) ↔
         ∃ claim, closedTerminalObservation initial impl Stmt family terminal z path = some claim ∧
           Rout z path.toBranchPath claim witness)
-    (adversary : OracleComp (oracleSpec Input Salt rounds) (Input × Messages Salt rounds × W))
-    (Q : ℕ) (queryBound : IsTotalQueryBound adversary Q) :
+    (adversary : OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds))
+    (Q k : ℕ) (queryBound : IsTotalQueryBound adversary Q)
+    (length_le : ∀ z, (rounds z).length ≤ k) :
     Pr{let result ← (simulateQ randomOracle
         (closedVerificationGame initial impl Stmt family terminal adversary)).run' ∅}[
       result.1 ∈ Z ∧
       (∃ claim, result.2.2.1 = some claim ∧
         Rout result.1 result.2.1.toBranchPath claim result.2.2.2) ∧
       ¬ Rin result.1 (extractInputWitness state extractor terminalWitness
-        result.1 result.2.1 result.2.2.2)] ≤ (Q + rounds.length) * error := by
+        result.1 result.2.1 result.2.2.2)] ≤ (Q + k) * error := by
   rw [closedVerificationGame_eq, simulateQ_map]
   simp only [StateT.run'_map', prEvent_map]
   simp only [extractInputWitness, ← inputLaw, ← outputLaw]
   exact restored_extraction_bound state extractor Z error preserving bounded
-    (fun z path => terminalWitness z path) adversary Q queryBound
+    (fun z path => terminalWitness z path) adversary Q k queryBound length_le
 
 end Interaction.Oracle.Security.StateRestoration

@@ -20,7 +20,7 @@ open OracleComp OracleSpec MeasureTheory ProbabilityTheory
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-variable {Input Salt C : Type} {rounds : List Round}
+variable {Input Salt C : Type} {rounds : Input → List Round}
 
 @[simp] theorem CommonChallenge.toCommonCache_apply
     (common : CommonChallenge Input Salt C rounds)
@@ -71,7 +71,7 @@ end Interaction.Oracle.Security.StateRestoration
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-variable {Input Salt C : Type} {rounds : List Round}
+variable {Input Salt C : Type} {rounds : Input → List Round}
 
 /-- Encode the entire observed native result, including ordered responses and final cache. -/
 def CommonChallenge.encodeJoint

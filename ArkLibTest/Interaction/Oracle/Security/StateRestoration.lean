@@ -140,7 +140,8 @@ theorem bounded (z : Nat) : RoundExtractor.IsLocallyBounded (extractor z) roles
 def messages : Messages Unit rounds := ⟨(7 : Fin 8), (), PUnit.unit⟩
 def path (challenge : Bool) : tree.ExecutionPath := ⟨(7 : Fin 8), challenge, PUnit.unit⟩
 
-def adversary : OracleComp (oracleSpec Nat Unit rounds) (Nat × Messages Unit rounds × Nat) :=
+def adversary :
+    OracleComp (oracleSpec Nat Unit (fun _ => rounds)) (Selection Nat Unit Nat (fun _ => rounds)) :=
   pure ⟨0, messages, 6⟩
 
 example (challenge : Bool) :
@@ -161,7 +162,7 @@ theorem actual_game_bound :
         result.1 result.2.1 result.2.2.2)] ≤ 1 / 2 := by
   have general := stateRestoration_knowledge_soundness inputState extractor Set.univ (1 / 2)
     (fun z _ => preserving z) (fun z _ => bounded z) initial inputImpl Out terminal Rin Rout
-    terminalWitness inputLaw outputLaw adversary 0 (by trivial)
+    terminalWitness inputLaw outputLaw adversary 0 1 (by trivial) (fun _ => le_rfl)
   simpa [rounds] using general
 
 def nativeResult (challenge : Bool) : OracleComp emptySpec (Nat × Bool × Nat) :=
@@ -252,7 +253,9 @@ theorem actual_oracle_game_bound :
         result.1 result.2.1 result.2.2.2)] ≤ 1 / 2 := by
   have general := stateRestoration_oracle_knowledge_soundness inputState extractor Set.univ
     (1 / 2) (fun z _ => preserving z) (fun z _ => bounded z) initial inputImpl Out family
-    oracleTerminal Rin oracleRout terminalWitness inputLaw oracleOutputLaw adversary 0 (by trivial)
+    oracleTerminal Rin oracleRout terminalWitness inputLaw oracleOutputLaw adversary 0 1 (by
+        trivial)
+    (fun _ => le_rfl)
   simpa [rounds] using general
 
 example (z : Nat) (message : Fin 8) (witness : Nat) :
@@ -268,7 +271,7 @@ example (z : Nat) (message : Fin 8) (witness : Nat) :
     (claim.oracles ⟨(), ()⟩).val)))
 
 def coinAdversary (coin : Bool) :
-    OracleComp (oracleSpec Nat Unit rounds) (Nat × Messages Unit rounds × Nat) :=
+    OracleComp (oracleSpec Nat Unit (fun _ => rounds)) (Selection Nat Unit Nat (fun _ => rounds)) :=
   if coin then adversary else pure ⟨0, ⟨(3 : Fin 8), (), PUnit.unit⟩, 2⟩
 
 theorem actual_coin_oracle_game_bound :
@@ -284,8 +287,8 @@ theorem actual_coin_oracle_game_bound :
   have general := stateRestoration_oracle_knowledge_soundness_privateCoins
     inputState extractor Set.univ (1 / 2) (fun z _ => preserving z) (fun z _ => bounded z)
     initial inputImpl Out family oracleTerminal Rin oracleRout terminalWitness inputLaw
-    oracleOutputLaw (OptionT.lift ($ᵗ Bool) : OptionT ProbComp Bool) coinAdversary 0
-    (fun coin => by cases coin <;> trivial)
+    oracleOutputLaw (OptionT.lift ($ᵗ Bool) : OptionT ProbComp Bool) coinAdversary 0 1
+    (fun coin => by cases coin <;> trivial) (fun _ => le_rfl)
   simpa [rounds] using general
 
 example : Pr{let _result ← ((failure : OptionT ProbComp Bool) >>= fun coin => OptionT.lift

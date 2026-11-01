@@ -44,18 +44,6 @@ theorem rounds_length : (rounds F deg k).length = k := by
   | zero => rfl
   | succ k ih => simp [rounds, ih]
 
-/-- A constant error vector gives the same challenge schedule as the certificate's schedule. -/
-theorem roundErrorSchedule_const (rs : List Security.StateRestoration.Round) (ε : ENNReal) :
-    roundErrorSchedule rs (fun _ => ε) = uniformSchedule ε rs := by
-  induction rs with
-  | nil => rfl
-  | cons r rs ih =>
-      simp only [roundErrorSchedule, uniformSchedule]
-      funext message
-      congr 1
-      funext challenge
-      exact ih
-
 omit [DecidableEq F] in
 /-- The certificate's authored-prefix bound in the round-error vector form used by the
 randomized restoration theorem. This includes every failed-check prefix. -/
@@ -94,21 +82,18 @@ theorem constant_round_budget_le (Q : ℕ) :
 
 omit [DecidableEq F] in
 /-- The same constant-round simplification with an arbitrary expected adversary count. -/
-theorem constant_round_expected_budget_le (count : ENNReal) :
-    Finset.univ.sup
-        (fun _ : Fin (rounds F deg k).length => fieldError F deg) * count +
-      (∑ _ : Fin (rounds F deg k).length, fieldError F deg) ≤
+theorem constant_round_expected_budget_le {Input : Type} (count : ENNReal) :
+    maxError (rounds := fun _ : Input => rounds F deg k) (fun _ _ => fieldError F deg) * count +
+      sumError (rounds := fun _ : Input => rounds F deg k) (fun _ _ => fieldError F deg) ≤
         fieldError F deg * count + (k : ENNReal) * fieldError F deg := by
-  have hmax : Finset.univ.sup
-      (fun _ : Fin (rounds F deg k).length => fieldError F deg) ≤ fieldError F deg := by
-    apply Finset.sup_le
-    intro i hi
-    exact le_rfl
-  have hsum : (∑ _ : Fin (rounds F deg k).length, fieldError F deg) =
-      (k : ENNReal) * fieldError F deg := by
+  have hmax : maxError (rounds := fun _ : Input => rounds F deg k)
+      (fun _ _ => fieldError F deg) ≤ fieldError F deg :=
+    (maxError_const_le _).trans (Finset.sup_le fun _ _ => le_rfl)
+  have hsum : sumError (rounds := fun _ : Input => rounds F deg k)
+      (fun _ _ => fieldError F deg) ≤ (k : ENNReal) * fieldError F deg := by
+    refine (sumError_const_le _).trans (le_of_eq ?_)
     simp only [Finset.sum_const, nsmul_eq_mul, Finset.card_univ, Fintype.card_fin,
       rounds_length]
-  rw [hsum]
   gcongr
 
 variable {Input Salt : Type} [DecidableEq Input] [DecidableEq Salt]
@@ -157,8 +142,8 @@ theorem terminal_certificate_holds_iff_native
 
 /-- Source-only native replay game. Its output contains the actual closed claim, if accepted. -/
 noncomputable def nativeRestorationGame
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (rounds F deg k)) :
-    OracleComp (unifSpec + oracleSpec Input Salt (rounds F deg k))
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => rounds F deg k)) :
+    OracleComp (unifSpec + oracleSpec Input Salt (fun _ => rounds F deg k))
       (Option ((_ : Input) ×
         (_ : (Security.StateRestoration.protocol (rounds F deg k)).tree.ExecutionPath) ×
         Option (ClosedClaim (Native.FinalStatement F k) (polynomialFamily F k deg)) × Unit)) :=
@@ -169,7 +154,7 @@ noncomputable def nativeRestorationGame
       (_ : Input) ×
         (_ : (Security.StateRestoration.protocol (rounds F deg k)).tree.ExecutionPath) ×
         Option (ClosedClaim (Native.FinalStatement F k) (polynomialFamily F k deg)) × Unit)) <$>
-    randomizedRestoredExecution (rounds F deg k) adversary
+    randomizedRestoredExecution (fun _ => rounds F deg k) adversary
 
 /-- A false selected initial claim with a successful, true native closed output. Rejection and
 adversary failure both make this event false. -/
@@ -186,7 +171,7 @@ omit [DecidableEq Input] [DecidableEq Salt] in
 /-- The native replay game is exactly the source-log erasure of the owner-level joint game.
 This equation retains the original source-only execution; it assumes no probability bridge. -/
 theorem nativeRestorationGame_eq_observedErase
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (rounds F deg k)) :
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => rounds F deg k)) :
     nativeRestorationGame F k deg D A stmt originalOracle impl adversary =
       Prod.fst <$> randomizedObservedGameWithAdversaryLog
         (fun _ _ => Option (ClosedClaim (Native.FinalStatement F k)
@@ -199,8 +184,8 @@ theorem nativeRestorationGame_eq_observedErase
 
 /-- The actual native cached output marginal equals the instrumented joint output marginal. -/
 theorem nativeRestorationGame_marginal
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (rounds F deg k)) :
-    (simulateQ (oracleSpec Input Salt (rounds F deg k)).romImpl
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => rounds F deg k)) :
+    (simulateQ (oracleSpec Input Salt (fun _ => rounds F deg k)).romImpl
       (nativeRestorationGame F k deg D A stmt originalOracle impl adversary)).run' ∅ =
     (fun joint => joint.1.1.1) <$>
       randomOracleLoggedRun
@@ -216,8 +201,8 @@ theorem nativeRestorationGame_marginal
 
 /-- The false-acceptance event has the same probability on the exact logged joint run. -/
 theorem nativeRestorationGame_falseAccept_event
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (rounds F deg k)) :
-    Pr{let result ← (simulateQ (oracleSpec Input Salt (rounds F deg k)).romImpl
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => rounds F deg k)) :
+    Pr{let result ← (simulateQ (oracleSpec Input Salt (fun _ => rounds F deg k)).romImpl
       (nativeRestorationGame F k deg D A stmt originalOracle impl adversary)).run' ∅}[
       nativeFalseAccepts F k deg D stmt p result] =
     Pr{let joint ← (randomOracleLoggedRun
@@ -259,8 +244,8 @@ branches on which the adversary returns no transcript. -/
 theorem nativeRestoration_expected_soundness
     (sourceLaw : ∀ z, (originalOracle z).eval (impl z) =
       (polynomialFamily F k deg).behaviorOfRealizations (fun _ => p z))
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (rounds F deg k)) :
-    Pr{let result ← (simulateQ (oracleSpec Input Salt (rounds F deg k)).romImpl
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => rounds F deg k)) :
+    Pr{let result ← (simulateQ (oracleSpec Input Salt (fun _ => rounds F deg k)).romImpl
       (nativeRestorationGame F k deg D A stmt originalOracle impl adversary)).run' ∅}[
         nativeFalseAccepts F k deg D stmt p result] ≤
       expectedFreshQueryCharge
@@ -268,14 +253,14 @@ theorem nativeRestoration_expected_soundness
           (fun _ _ => Option (ClosedClaim (Native.FinalStatement F k)
             (polynomialFamily F k deg)))
           (nativeObservedOutput F k deg D A stmt originalOracle impl) adversary)
-        (keyError (fun _ : Fin (rounds F deg k).length => fieldError F deg)) ∧
+        (keyError (fun _ (_ : Fin (rounds F deg k).length) => fieldError F deg)) ∧
     expectedFreshQueryCharge
         (randomizedObservedGameWithAdversaryLog
           (fun _ _ => Option (ClosedClaim (Native.FinalStatement F k)
             (polynomialFamily F k deg)))
           (nativeObservedOutput F k deg D A stmt originalOracle impl) adversary)
-        (keyError (fun _ : Fin (rounds F deg k).length => fieldError F deg)) ≤
-      fieldError F deg * expectedAdversaryFreshKeys (rounds F deg k) adversary +
+        (keyError (fun _ (_ : Fin (rounds F deg k).length) => fieldError F deg)) ≤
+      fieldError F deg * expectedAdversaryFreshKeys (fun _ => rounds F deg k) adversary +
         (k : ENNReal) * fieldError F deg := by
   let Out := fun (_ : Input)
       (_ : (Security.StateRestoration.protocol (rounds F deg k)).tree.ExecutionPath) =>
@@ -292,7 +277,7 @@ theorem nativeRestoration_expected_soundness
   let terminalWitness := fun z path =>
     terminalWitnessEquiv F k deg D (p z) k 0 (by omega) (stmt z) True path
   have howner := randomizedObserved_badRelation_le_expectedFreshCharge
-    (rounds F deg k) (fun _ => fieldError F deg) adversary Out observe
+    (fun _ => rounds F deg k) (fun _ _ => fieldError F deg) adversary Out observe
     state extractor Set.univ
     (by intro z _; exact certificate_preserving F k deg D (p z) k 0 (by omega) (stmt z) True)
     (by intro z _; exact certificate_bounded_constant F k deg D (p z) (stmt z))
@@ -312,9 +297,9 @@ theorem nativeRestoration_expected_soundness
       (fun joint => nativeFalseAccepts_iff_ownerEvent F k deg D stmt p joint.1.1.1)
     exact hevent.le.trans howner
   · exact (expectedObservedFreshCharge_le_actualAdversary
-      (rounds F deg k) (fun _ => fieldError F deg) adversary Out observe).trans
+      (fun _ => rounds F deg k) (fun _ _ => fieldError F deg) adversary Out observe).trans
         (constant_round_expected_budget_le F k deg
-          (expectedAdversaryFreshKeys (rounds F deg k) adversary))
+          (expectedAdversaryFreshKeys (fun _ => rounds F deg k) adversary))
 
 /-- A cap on distinct keys in the actual cached adversary phase gives the standard native
 Sumcheck false-acceptance bound. The cap includes failed selections; `k = 0` and `deg = 0`
@@ -322,24 +307,33 @@ are covered by the same `ENNReal` statement. -/
 theorem nativeRestoration_queryBound_soundness
     (sourceLaw : ∀ z, (originalOracle z).eval (impl z) =
       (polynomialFamily F k deg).behaviorOfRealizations (fun _ => p z))
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (rounds F deg k))
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => rounds F deg k))
     (Q : ℕ)
     (actualQueryBound : ∀ phase ∈ support (randomOracleLoggedRun adversary.withQueryLog ∅),
       (freshKeysOfLog phase.1.2).card ≤ Q) :
-    Pr{let result ← (simulateQ (oracleSpec Input Salt (rounds F deg k)).romImpl
+    Pr{let result ← (simulateQ (oracleSpec Input Salt (fun _ => rounds F deg k)).romImpl
       (nativeRestorationGame F k deg D A stmt originalOracle impl adversary)).run' ∅}[
         nativeFalseAccepts F k deg D stmt p result] ≤
       (Q + k : ℕ) * fieldError F deg := by
-  have h := nativeRestoration_expected_soundness F k deg D A stmt p originalOracle impl
-    sourceLaw adversary
-  have hQ : expectedAdversaryFreshKeys (rounds F deg k) adversary ≤ Q :=
-    expectedAdversaryFreshKeys_le_queryBound (rounds F deg k) adversary Q actualQueryBound
-  calc
-    _ ≤ fieldError F deg * expectedAdversaryFreshKeys (rounds F deg k) adversary +
-          (k : ENNReal) * fieldError F deg := h.1.trans h.2
-    _ ≤ fieldError F deg * (Q : ENNReal) + (k : ENNReal) * fieldError F deg := by
-      gcongr
-    _ = (Q + k : ℕ) * fieldError F deg := by
-      rw [mul_comm (fieldError F deg) (Q : ENNReal), ← add_mul, Nat.cast_add]
+  have bound := randomizedObserved_badRelation_le_queryBound_fixed (rounds F deg k)
+    (fun _ => fieldError F deg) adversary
+    (fun _ _ => Option (ClosedClaim (Native.FinalStatement F k) (polynomialFamily F k deg)))
+    (nativeObservedOutput F k deg D A stmt originalOracle impl)
+    (fun z => claimState F k deg D ⟨0, by omega⟩ (stmt z) (p z) True)
+    (fun z => certificate F k deg D (p z) k 0 (by omega) (stmt z) True) Set.univ
+    (by intro z _; exact certificate_preserving F k deg D (p z) k 0 (by omega) (stmt z) True)
+    (by intro z _; exact certificate_bounded_constant F k deg D (p z) (stmt z))
+    (fun z _ => initialClaimTrue F k deg D stmt p z)
+    (fun _ _ output _ => ∃ claim, output = some claim ∧ Native.outputRelation F k deg claim)
+    (fun z path => terminalWitnessEquiv F k deg D (p z) k 0 (by omega) (stmt z) True path)
+    (by intro z w; exact initial_certificate_holds_iff F k deg D stmt p z w)
+    (by intro z path w
+        exact terminal_certificate_holds_iff_native F k deg D A stmt p originalOracle impl
+          sourceLaw z path w)
+    Q actualQueryBound
+  rw [nativeRestorationGame_falseAccept_event]
+  refine le_trans (le_of_eq (prEvent_congr _ _ _ fun joint => ?_))
+    (bound.trans (constant_round_budget_le F k deg Q))
+  exact nativeFalseAccepts_iff_ownerEvent F k deg D stmt p joint.1.1.1
 
 end Sumcheck.Interaction.Restoration

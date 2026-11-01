@@ -11,8 +11,9 @@ public import ArkLib.Interaction.Oracle.Security.StateRestorationRandomized
 /-!
 # Single-salt proof and induced restoration adversary
 
-The public proof carries one global salt. Repackaging the selected statement and proof gives the
-native restoration experiment input `(statement, salt)` and a complete sequence with trivial
+The rounds of a proof are a function of its statement. The public proof carries one global salt.
+Repackaging the selected statement and proof gives the native restoration experiment input
+`(statement, salt)`, whose rounds are the statement's rounds, and a complete sequence with trivial
 per-round salts. This transformation runs no oracle query, so the adversary's ordered challenge
 log and final lazy cache are identical, including when it returns failure.
 -/
@@ -25,33 +26,50 @@ namespace Interaction.Oracle.FiatShamir
 
 open Security.StateRestoration
 
+/-- The rounds of a restoration input `(statement, salt)` are the statement's rounds. -/
+abbrev saltedRounds (GlobalSalt : Type) {Statement : Type} (rounds : Statement → List Round) :
+    Statement × GlobalSalt → List Round :=
+  fun z => rounds z.1
+
+/-- The challenge oracle of single-salt Fiat–Shamir: the restoration keys of `(statement, salt)`
+inputs. -/
+abbrev saltedSpec (Statement GlobalSalt : Type) (rounds : Statement → List Round) :=
+  oracleSpec (Statement × GlobalSalt) PUnit (saltedRounds GlobalSalt rounds)
+
 /-- A single global salt followed by every public prover message. -/
 abbrev SaltedProof (GlobalSalt : Type) (rounds : List Round) :=
   GlobalSalt × PublicMessages rounds
 
+/-- A malicious prover's selection: a statement, a salted proof for its rounds, and a terminal
+witness. -/
+abbrev SaltedSelection (Statement GlobalSalt Witness : Type) (rounds : Statement → List Round) :=
+  (statement : Statement) × SaltedProof GlobalSalt (rounds statement) × Witness
+
 /-- The output rearrangement of a malicious single-salt proof producer. -/
-def toRestorationSelection {Statement GlobalSalt Witness : Type} {rounds : List Round} :
-    Option (Statement × SaltedProof GlobalSalt rounds × Witness) →
-      Option ((Statement × GlobalSalt) × Messages PUnit rounds × Witness)
+def toRestorationSelection {Statement GlobalSalt Witness : Type}
+    {rounds : Statement → List Round} :
+    Option (SaltedSelection Statement GlobalSalt Witness rounds) →
+      Option (Selection (Statement × GlobalSalt) PUnit Witness (saltedRounds GlobalSalt rounds))
   | none => none
-  | some (statement, (salt, messages), witness) =>
-      some ((statement, salt), withUnitSalts rounds messages, witness)
+  | some ⟨statement, (salt, messages), witness⟩ =>
+      some ⟨(statement, salt), withUnitSalts (rounds statement) messages, witness⟩
 
 /-- The induced native restoration adversary shares the typed challenge oracle verbatim. -/
-def inducedAdversary {Statement GlobalSalt Witness : Type} {rounds : List Round}
+def inducedAdversary {Statement GlobalSalt Witness : Type} {rounds : Statement → List Round}
     (adversary : OracleComp
-      (unifSpec + oracleSpec (Statement × GlobalSalt) PUnit rounds)
-      (Option (Statement × SaltedProof GlobalSalt rounds × Witness))) :
-    RandomizedRestorationAdversary (Statement × GlobalSalt) PUnit Witness rounds :=
+      (unifSpec + saltedSpec Statement GlobalSalt rounds)
+      (Option (SaltedSelection Statement GlobalSalt Witness rounds))) :
+    RandomizedRestorationAdversary (Statement × GlobalSalt) PUnit Witness
+      (saltedRounds GlobalSalt rounds) :=
   toRestorationSelection <$> adversary
 
 /-- Output mapping does not change the ordered oracle log or the final lazy cache. -/
 theorem inducedAdversary_loggedRun {Statement GlobalSalt Witness : Type}
-    {rounds : List Round} [DecidableEq Statement] [DecidableEq GlobalSalt]
+    {rounds : Statement → List Round} [DecidableEq Statement] [DecidableEq GlobalSalt]
     (adversary : OracleComp
-      (unifSpec + oracleSpec (Statement × GlobalSalt) PUnit rounds)
-      (Option (Statement × SaltedProof GlobalSalt rounds × Witness)))
-    (cache : (oracleSpec (Statement × GlobalSalt) PUnit rounds).QueryCache) :
+      (unifSpec + saltedSpec Statement GlobalSalt rounds)
+      (Option (SaltedSelection Statement GlobalSalt Witness rounds)))
+    (cache : (saltedSpec Statement GlobalSalt rounds).QueryCache) :
     randomOracleLoggedRun (inducedAdversary adversary) cache =
       (fun result => ((toRestorationSelection result.1.1, result.1.2), result.2)) <$>
         randomOracleLoggedRun adversary cache := by

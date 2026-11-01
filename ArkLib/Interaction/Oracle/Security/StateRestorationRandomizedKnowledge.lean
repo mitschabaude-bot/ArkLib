@@ -24,54 +24,54 @@ namespace Interaction.Oracle.Security.StateRestoration
 
 universe w
 
-variable {Input Salt W : Type} {rounds : List Round}
+variable {Input Salt W : Type} {rounds : Input → List Round}
 
 /-- Observe the selected native path while retaining the adversary's exact source query log.
 Both scalar observations and closed oracle outputs use this one owner-level wrapper. -/
 def randomizedObservedGameWithAdversaryLog
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
-    (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path)
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
     OracleComp (unifSpec + oracleSpec Input Salt rounds)
-      (Option ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+      (Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
         Out z path × W) × QueryLog (unifSpec + oracleSpec Input Salt rounds)) :=
   (fun result =>
     (result.1.map fun outcome =>
       (⟨outcome.1, outcome.2.1, observe outcome.1 outcome.2.1, outcome.2.2⟩ :
-        (z : Input) × (path : (protocol rounds).tree.ExecutionPath) × Out z path × W),
+        (z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) × Out z path × W),
       result.2)) <$> randomizedRestoredExecutionWithAdversaryLog rounds adversary
 
 /-- The extraction event viewed through any native observation. The observed output stays in
 the result type, so scalar and closed claims retain their actual same-path behavior. -/
 def badExtractObserved
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
-    (result : Option ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+    (result : Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
       Out z path × W)) : Prop :=
   match result with
   | none => False
   | some ⟨z, path, _, witness⟩ =>
-      badExtractOnPath state extractor Z terminalWitness (some (z, path, witness))
+      badExtractOnPath state extractor Z terminalWitness (some ⟨z, path, witness⟩)
 
 /-- Any observed scalar or closed bad extraction is witnessed by a bad key in the very same
 fixed-table joint run; observation does not introduce or erase hash queries. -/
 theorem fixedTable_observed_badExtract_has_bad_query [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round)
+    (rounds : Input → List Round)
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
-    (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path)
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
     (table : Table Input Salt rounds)
-    (result : (((Option ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+    (result : (((Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
       Out z path × W) × QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
         QueryLog (oracleSpec Input Salt rounds)) ×
           (oracleSpec Input Salt rounds).QueryCache))
@@ -92,20 +92,20 @@ theorem fixedTable_observed_badExtract_has_bad_query [DecidableEq Input] [Decida
 
 /-- The pointwise charge bound is unchanged by the actual scalar or closed native observation. -/
 theorem fixedTable_observed_freshCharge_le [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
-    (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path)
     (table : Table Input Salt rounds)
-    (result : (((Option ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+    (result : (((Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
       Out z path × W) × QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
         QueryLog (oracleSpec Input Salt rounds)) ×
           (oracleSpec Input Salt rounds).QueryCache))
     (supported : result ∈ support (fixedTableLoggedRun
       (randomizedObservedGameWithAdversaryLog Out observe adversary) table ∅)) :
     freshQueryCharge (keyError errors) result.1.2 ≤
-      (adversaryHashKeys result.1.1.2).card * Finset.univ.sup errors +
-        ∑ j, errors j := by
+      (adversaryHashKeys result.1.1.2).card * maxError errors +
+        sumError errors := by
   rw [randomizedObservedGameWithAdversaryLog, fixedTableLoggedRun_map, support_map]
     at supported
   obtain ⟨base, hbase, rfl⟩ := supported
@@ -114,19 +114,19 @@ theorem fixedTable_observed_freshCharge_le [DecidableEq Input] [DecidableEq Salt
 /-- The scalar and closed observed games inherit the same pointwise bound on the actual cached
 run. Optional failure remains in the returned value and its preceding queries stay charged. -/
 theorem randomOracle_observed_freshCharge_le [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
-    (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path)
-    (result : (((Option ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path)
+    (result : (((Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
       Out z path × W) × QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
         QueryLog (oracleSpec Input Salt rounds)) ×
           (oracleSpec Input Salt rounds).QueryCache))
     (supported : result ∈ support (randomOracleLoggedRun
       (randomizedObservedGameWithAdversaryLog Out observe adversary) ∅)) :
     freshQueryCharge (keyError errors) result.1.2 ≤
-      (adversaryHashKeys result.1.1.2).card * Finset.univ.sup errors +
-        ∑ j, errors j := by
+      (adversaryHashKeys result.1.1.2).card * maxError errors +
+        sumError errors := by
   obtain ⟨table, htable⟩ := mem_support_fixedTableLoggedRun_of_randomOracle
     (randomizedObservedGameWithAdversaryLog Out observe adversary) ∅ result supported
   exact fixedTable_observed_freshCharge_le rounds errors adversary Out observe table result htable
@@ -134,14 +134,14 @@ theorem randomOracle_observed_freshCharge_le [DecidableEq Input] [DecidableEq Sa
 /-- The actual adversary-phase support cap also bounds the adversary count carried by every
 scalar or closed observed execution. -/
 theorem randomOracle_observed_adversaryKeys_le [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round)
+    (rounds : Input → List Round)
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
-    (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path)
     (Q : ℕ)
     (actualQueryBound : ∀ phase ∈ support (randomOracleLoggedRun adversary.withQueryLog ∅),
       (freshKeysOfLog phase.1.2).card ≤ Q)
-    (result : (((Option ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+    (result : (((Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
       Out z path × W) × QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
         QueryLog (oracleSpec Input Salt rounds)) ×
           (oracleSpec Input Salt rounds).QueryCache))
@@ -156,22 +156,22 @@ theorem randomOracle_observed_adversaryKeys_le [DecidableEq Input] [DecidableEq 
 /-- Native observation changes only the returned value. Its expected distinct hash-key charge
 is exactly that of the underlying joint restoration run. -/
 theorem expectedObservedFreshQueryCharge_eq [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round)
+    (rounds : Input → List Round)
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
-    (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path)
     (error : Key Input Salt rounds → ENNReal) :
     expectedFreshQueryCharge
       (randomizedObservedGameWithAdversaryLog Out observe adversary) error =
       expectedFreshQueryCharge
         (randomizedRestoredExecutionWithAdversaryLog rounds adversary) error := by
   let : MeasurableSpace
-      (((Option ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+      (((Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
         Out z path × W) × QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
           QueryLog (oracleSpec Input Salt rounds)) ×
             (oracleSpec Input Salt rounds).QueryCache) := ⊤
   let : MeasurableSpace
-      (((Option (Input × (protocol rounds).tree.ExecutionPath × W) ×
+      (((Option (Outcome Input W rounds) ×
         QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
           QueryLog (oracleSpec Input Salt rounds)) ×
             (oracleSpec Input Salt rounds).QueryCache) := ⊤
@@ -182,14 +182,14 @@ theorem expectedObservedFreshQueryCharge_eq [DecidableEq Input] [DecidableEq Sal
 /-- Shared second inequality for both scalar and closed native observations. -/
 theorem expectedObservedFreshCharge_le_actualAdversary
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
-    (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path) :
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path) :
     expectedFreshQueryCharge
       (randomizedObservedGameWithAdversaryLog Out observe adversary) (keyError errors) ≤
-      Finset.univ.sup errors * expectedAdversaryFreshKeys rounds adversary +
-        ∑ j, errors j := by
+      maxError errors * expectedAdversaryFreshKeys rounds adversary +
+        sumError errors := by
   rw [expectedObservedFreshQueryCharge_eq rounds adversary Out observe]
   exact expectedJointFreshCharge_le_actualAdversary rounds errors adversary
 
@@ -197,25 +197,25 @@ theorem expectedObservedFreshCharge_le_actualAdversary
 for either native observation, with repetitions and failed branches counted correctly. -/
 theorem expectedObservedFreshCharge_le_queryBound
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
-    (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path)
     (Q : ℕ)
     (actualQueryBound : ∀ phase ∈ support (randomOracleLoggedRun adversary.withQueryLog ∅),
       (freshKeysOfLog phase.1.2).card ≤ Q) :
     expectedFreshQueryCharge
       (randomizedObservedGameWithAdversaryLog Out observe adversary) (keyError errors) ≤
-      Q * Finset.univ.sup errors + ∑ j, errors j := by
+      Q * maxError errors + sumError errors := by
   calc
-    _ ≤ Finset.univ.sup errors * expectedAdversaryFreshKeys rounds adversary +
-          ∑ j, errors j :=
+    _ ≤ maxError errors * expectedAdversaryFreshKeys rounds adversary +
+          sumError errors :=
       expectedObservedFreshCharge_le_actualAdversary rounds errors adversary Out observe
-    _ ≤ Q * Finset.univ.sup errors + ∑ j, errors j := by
+    _ ≤ Q * maxError errors + sumError errors := by
       calc
-        Finset.univ.sup errors * expectedAdversaryFreshKeys rounds adversary +
-            ∑ j, errors j ≤
-          Finset.univ.sup errors * Q + ∑ j, errors j := by
+        maxError errors * expectedAdversaryFreshKeys rounds adversary +
+            sumError errors ≤
+          maxError errors * Q + sumError errors := by
             gcongr
             exact expectedAdversaryFreshKeys_le_queryBound rounds adversary Q actualQueryBound
         _ = _ := by rw [mul_comm]
@@ -223,16 +223,16 @@ theorem expectedObservedFreshCharge_le_queryBound
 /-- The relation-level event on an actual native observation, including the output carried in
 that run. For a closed oracle output, `Rout` requires an accepted closed claim. -/
 def badObservedRelation
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (Rout : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       Out z path → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W ≃ ((extractor z).terminalState path).Witness)
     (Z : Set Input)
-    (result : Option ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+    (result : Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
       Out z path × W)) : Prop :=
   match result with
   | none => False
@@ -243,25 +243,25 @@ def badObservedRelation
 /-- Relation laws identify the actual observed failure with the named extractor failure on
 every fixed-table supported execution; no independent output reconstruction is used. -/
 theorem fixedTable_observed_badRelation_has_bad_query [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round)
+    (rounds : Input → List Round)
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
-    (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path)
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (Rout : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       Out z path → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W ≃ ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
       ((extractor z).terminalState path).holds (terminalWitness z path witness) ↔
         Rout z path (observe z path) witness)
     (table : Table Input Salt rounds)
-    (result : (((Option ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+    (result : (((Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
       Out z path × W) × QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
         QueryLog (oracleSpec Input Salt rounds)) ×
           (oracleSpec Input Salt rounds).QueryCache))
@@ -288,25 +288,25 @@ theorem fixedTable_observed_badRelation_has_bad_query [DecidableEq Input] [Decid
 theorem: the failure event on the returned value yields a bad distinct key in the joint log. -/
 theorem fixedTable_observed_badRelation_fresh_htrace
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round)
+    (rounds : Input → List Round)
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
-    (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path)
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (Rout : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       Out z path → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W ≃ ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
       ((extractor z).terminalState path).holds (terminalWitness z path witness) ↔
         Rout z path (observe z path) witness)
     (table : Table Input Salt rounds)
-    (result : (((Option ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+    (result : (((Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
       Out z path × W) × QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
         QueryLog (oracleSpec Input Salt rounds)) ×
           (oracleSpec Input Salt rounds).QueryCache))
@@ -325,20 +325,20 @@ theorem fixedTable_observed_badRelation_fresh_htrace
 native observation is charged by the expected distinct keys of that same cached joint run. -/
 theorem randomizedObserved_badRelation_le_expectedFreshCharge
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
-    (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path)
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol rounds).roles (roundErrorSchedule rounds errors))
+      (protocol (rounds z)).roles (roundErrorSchedule (rounds z) (errors z)))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (Rout : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       Out z path → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W ≃ ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
@@ -365,9 +365,45 @@ theorem randomizedObserved_badRelation_le_expectedFreshCharge
 traditional `Q * max + sum` bound for the shared scalar/closed failure event. -/
 theorem randomizedObserved_badRelation_le_queryBound
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (errors : (z : Input) → RoundErrors (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path)
+    (state : Input → KnowledgeState.{w})
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
+    (Z : Set Input)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
+    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
+      (protocol (rounds z)).roles (roundErrorSchedule (rounds z) (errors z)))
+    (Rin : (z : Input) → (state z).Witness → Prop)
+    (Rout : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+      Out z path → W → Prop)
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+      W ≃ ((extractor z).terminalState path).Witness)
+    (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
+    (outputLaw : ∀ z path witness,
+      ((extractor z).terminalState path).holds (terminalWitness z path witness) ↔
+        Rout z path (observe z path) witness)
+    (Q : ℕ)
+    (actualQueryBound : ∀ phase ∈ support (randomOracleLoggedRun adversary.withQueryLog ∅),
+      (freshKeysOfLog phase.1.2).card ≤ Q) :
+    Pr{let joint ← (randomOracleLoggedRun
+      (randomizedObservedGameWithAdversaryLog Out observe adversary) ∅)}[
+        badObservedRelation Out state extractor Rin Rout terminalWitness Z joint.1.1.1] ≤
+      Q * maxError errors + sumError errors := by
+  exact (randomizedObserved_badRelation_le_expectedFreshCharge rounds errors adversary
+    Out observe state extractor Z preserving bounded Rin Rout terminalWitness
+    inputLaw outputLaw).trans
+      (expectedObservedFreshCharge_le_queryBound rounds errors adversary Out observe
+        Q actualQueryBound)
+
+/-- Rounds and errors that are the same for every input: the bound is
+`Q * max_j error_j + sum_j error_j`. -/
+theorem randomizedObserved_badRelation_le_queryBound_fixed
+    [DecidableEq Input] [DecidableEq Salt]
+    (rounds : List Round) (errors : RoundErrors rounds)
+    (adversary : RandomizedRestorationAdversary Input Salt W fun _ => rounds)
+    (Out : Input → (protocol rounds).tree.ExecutionPath → Type)
     (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path)
     (state : Input → KnowledgeState.{w})
     (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
@@ -376,8 +412,7 @@ theorem randomizedObserved_badRelation_le_queryBound
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
       (protocol rounds).roles (roundErrorSchedule rounds errors))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
-      Out z path → W → Prop)
+    (Rout : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path → W → Prop)
     (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
       W ≃ ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
@@ -390,23 +425,22 @@ theorem randomizedObserved_badRelation_le_queryBound
     Pr{let joint ← (randomOracleLoggedRun
       (randomizedObservedGameWithAdversaryLog Out observe adversary) ∅)}[
         badObservedRelation Out state extractor Rin Rout terminalWitness Z joint.1.1.1] ≤
-      Q * Finset.univ.sup errors + ∑ j, errors j := by
-  exact (randomizedObserved_badRelation_le_expectedFreshCharge rounds errors adversary
-    Out observe state extractor Z preserving bounded Rin Rout terminalWitness
-    inputLaw outputLaw).trans
-      (expectedObservedFreshCharge_le_queryBound rounds errors adversary Out observe
-        Q actualQueryBound)
+      Q * Finset.univ.sup errors + ∑ j, errors j :=
+  (randomizedObserved_badRelation_le_queryBound (fun _ => rounds) (fun _ => errors) adversary
+    Out observe state extractor Z preserving bounded Rin Rout terminalWitness inputLaw outputLaw
+    Q actualQueryBound).trans
+      (add_le_add (by gcongr; exact maxError_const_le errors) (sumError_const_le errors))
 
 /-- Erasing the adversary-phase log gives the ordinary observed joint game as an exact
 `OracleComp` equation; every stateful logged interpreter therefore preserves its cache and log. -/
 theorem randomizedObservedGameWithAdversaryLog_erase
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
-    (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path)
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
     Prod.fst <$> randomizedObservedGameWithAdversaryLog Out observe adversary =
       (fun result => result.map fun outcome =>
         (⟨outcome.1, outcome.2.1, observe outcome.1 outcome.2.1, outcome.2.2⟩ :
-          (z : Input) × (path : (protocol rounds).tree.ExecutionPath) × Out z path × W)) <$>
+          (z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) × Out z path × W)) <$>
         randomizedRestoredExecution rounds adversary := by
   rw [randomizedObservedGameWithAdversaryLog, Functor.map_map]
   conv_rhs => rw [← randomizedRestoredExecutionWithAdversaryLog_erase rounds adversary]
@@ -415,10 +449,10 @@ theorem randomizedObservedGameWithAdversaryLog_erase
 /-- The scalar observed game erases to the existing native verifier exactly. -/
 theorem randomizedObservedGame_scalar_erase (initial : PFunctor)
     (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Out : Input → (protocol rounds).tree.BranchPath → Type)
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (Out z p))
+    (Out : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (Out z p))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
     Prod.fst <$> randomizedObservedGameWithAdversaryLog
       (fun z path => Out z path.toBranchPath)
@@ -429,14 +463,14 @@ theorem randomizedObservedGame_scalar_erase (initial : PFunctor)
 /-- The closed observed game erases to the existing native verifier and actual closing handler. -/
 theorem randomizedObservedGame_closed_erase (initial : PFunctor)
     (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Stmt : Input → (protocol rounds).tree.BranchPath → Type)
-    {Idx : Input → (protocol rounds).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol rounds).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Stmt : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    {Idx : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type}
+    {Realization : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Idx z p → Type}
+    (family : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       OracleFamily (Idx z p) (Realization z p))
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (OracleOutput initial Stmt family z p))
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (OracleOutput initial Stmt family z p))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
     Prod.fst <$> randomizedObservedGameWithAdversaryLog
       (fun z path => Option (ClosedClaim (Stmt z path.toBranchPath)
@@ -465,8 +499,8 @@ private theorem randomOracleLoggedRun_output_map [DecidableEq Input] [DecidableE
 /-- Erasing only the instrumentation from the joint observed run produces exactly the native
 cached output marginal; the first inequality can therefore be stated on the native game. -/
 theorem randomizedObservedGame_actual_marginal [DecidableEq Input] [DecidableEq Salt]
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
-    (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path)
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
     (fun result => result.1.1.1) <$>
       randomOracleLoggedRun
@@ -479,10 +513,10 @@ theorem randomizedObservedGame_actual_marginal [DecidableEq Input] [DecidableEq 
 /-- Every event on the native observed output has the same probability in the instrumented
 joint run; the latter additionally retains the ordered hash log and final cache. -/
 theorem randomizedObservedGame_actual_event [DecidableEq Input] [DecidableEq Salt]
-    (Out : (z : Input) → (protocol rounds).tree.ExecutionPath → Type)
-    (observe : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → Out z path)
+    (Out : (z : Input) → (protocol (rounds z)).tree.ExecutionPath → Type)
+    (observe : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → Out z path)
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (event : Option ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+    (event : Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
       Out z path × W) → Prop) :
     Pr{let result ← (simulateQ (oracleSpec Input Salt rounds).romImpl
       (Prod.fst <$> randomizedObservedGameWithAdversaryLog Out observe adversary)).run' ∅}[
@@ -496,10 +530,10 @@ theorem randomizedObservedGame_actual_event [DecidableEq Input] [DecidableEq Sal
 /-- The scalar native verifier is the exact output marginal of the instrumented joint run. -/
 theorem randomizedVerificationGame_actual_marginal [DecidableEq Input] [DecidableEq Salt]
     (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Out : Input → (protocol rounds).tree.BranchPath → Type)
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (Out z p))
+    (Out : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (Out z p))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
     (fun result => result.1.1.1) <$>
       randomOracleLoggedRun
@@ -517,14 +551,14 @@ theorem randomizedVerificationGame_actual_marginal [DecidableEq Input] [Decidabl
 theorem randomizedClosedVerificationGame_actual_marginal
     [DecidableEq Input] [DecidableEq Salt]
     (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Stmt : Input → (protocol rounds).tree.BranchPath → Type)
-    {Idx : Input → (protocol rounds).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol rounds).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Stmt : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    {Idx : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type}
+    {Realization : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Idx z p → Type}
+    (family : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       OracleFamily (Idx z p) (Realization z p))
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (OracleOutput initial Stmt family z p))
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (OracleOutput initial Stmt family z p))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
     (fun result => result.1.1.1) <$>
       randomOracleLoggedRun
@@ -545,12 +579,12 @@ instrumented joint game used for the expected-key analysis. -/
 theorem randomizedVerificationGame_actual_event
     [DecidableEq Input] [DecidableEq Salt]
     (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Out : Input → (protocol rounds).tree.BranchPath → Type)
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (Out z p))
+    (Out : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (Out z p))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (event : Option ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+    (event : Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
       Out z path.toBranchPath × W) → Prop) :
     Pr{let result ← (simulateQ (oracleSpec Input Salt rounds).romImpl
       (randomizedVerificationGame initial impl Out terminal adversary)).run' ∅}[
@@ -568,16 +602,16 @@ completed path, while retaining the joint hash log for the bound. -/
 theorem randomizedClosedVerificationGame_actual_event
     [DecidableEq Input] [DecidableEq Salt]
     (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Stmt : Input → (protocol rounds).tree.BranchPath → Type)
-    {Idx : Input → (protocol rounds).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol rounds).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Stmt : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    {Idx : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type}
+    {Realization : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Idx z p → Type}
+    (family : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       OracleFamily (Idx z p) (Realization z p))
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (OracleOutput initial Stmt family z p))
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (OracleOutput initial Stmt family z p))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds)
-    (event : Option ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+    (event : Option ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
       Option (ClosedClaim (Stmt z path.toBranchPath)
         (family z path.toBranchPath)) × W) → Prop) :
     Pr{let result ← (simulateQ (oracleSpec Input Salt rounds).romImpl
@@ -596,22 +630,22 @@ theorem randomizedClosedVerificationGame_actual_event
 The second inequality uses the adversary's actual cached phase, including failed selections. -/
 theorem randomizedVerificationGame_expected_knowledge_soundness
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (errors : (z : Input) → RoundErrors (rounds z))
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol rounds).roles (roundErrorSchedule rounds errors))
+      (protocol (rounds z)).roles (roundErrorSchedule (rounds z) (errors z)))
     (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Out : Input → (protocol rounds).tree.BranchPath → Type)
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (Out z p))
+    (Out : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (Out z p))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Rout : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       Out z p → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W ≃ ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
@@ -631,8 +665,8 @@ theorem randomizedVerificationGame_expected_knowledge_soundness
         (randomizedObservedGameWithAdversaryLog
           (fun z path => Out z path.toBranchPath)
           (terminalObservation initial impl Out terminal) adversary) (keyError errors) ≤
-      Finset.univ.sup errors * expectedAdversaryFreshKeys rounds adversary +
-        ∑ j, errors j := by
+      maxError errors * expectedAdversaryFreshKeys rounds adversary +
+        sumError errors := by
   constructor
   · rw [randomizedVerificationGame_actual_event initial impl Out terminal adversary]
     exact randomizedObserved_badRelation_le_expectedFreshCharge rounds errors adversary
@@ -648,22 +682,22 @@ theorem randomizedVerificationGame_expected_knowledge_soundness
 cached adversary phase's distinct restoration keys. -/
 theorem randomizedVerificationGame_queryBound_knowledge_soundness
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (errors : (z : Input) → RoundErrors (rounds z))
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol rounds).roles (roundErrorSchedule rounds errors))
+      (protocol (rounds z)).roles (roundErrorSchedule (rounds z) (errors z)))
     (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Out : Input → (protocol rounds).tree.BranchPath → Type)
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (Out z p))
+    (Out : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (Out z p))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Rout : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       Out z p → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W ≃ ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
@@ -678,7 +712,7 @@ theorem randomizedVerificationGame_queryBound_knowledge_soundness
         badObservedRelation (fun z path => Out z path.toBranchPath)
           state extractor Rin (fun z path out witness => Rout z path.toBranchPath out witness)
           terminalWitness Z result] ≤
-      Q * Finset.univ.sup errors + ∑ j, errors j := by
+      Q * maxError errors + sumError errors := by
   have h := randomizedVerificationGame_expected_knowledge_soundness
     rounds errors state extractor Z preserving bounded initial impl Out terminal
     Rin Rout terminalWitness inputLaw outputLaw adversary
@@ -692,26 +726,26 @@ failed output is unsuccessful, and a valid closed claim with invalid named extra
 by the actual expected distinct hash queries. -/
 theorem randomizedClosedVerificationGame_expected_knowledge_soundness
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (errors : (z : Input) → RoundErrors (rounds z))
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol rounds).roles (roundErrorSchedule rounds errors))
+      (protocol (rounds z)).roles (roundErrorSchedule (rounds z) (errors z)))
     (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Stmt : Input → (protocol rounds).tree.BranchPath → Type)
-    {Idx : Input → (protocol rounds).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol rounds).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Stmt : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    {Idx : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type}
+    {Realization : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Idx z p → Type}
+    (family : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       OracleFamily (Idx z p) (Realization z p))
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (OracleOutput initial Stmt family z p))
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (OracleOutput initial Stmt family z p))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Rout : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       ClosedClaim (Stmt z p) (family z p) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W ≃ ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
@@ -741,8 +775,8 @@ theorem randomizedClosedVerificationGame_expected_knowledge_soundness
             (family z path.toBranchPath)))
           (closedTerminalObservation initial impl Stmt family terminal) adversary)
         (keyError errors) ≤
-      Finset.univ.sup errors * expectedAdversaryFreshKeys rounds adversary +
-        ∑ j, errors j := by
+      maxError errors * expectedAdversaryFreshKeys rounds adversary +
+        sumError errors := by
   constructor
   · rw [randomizedClosedVerificationGame_actual_event initial impl Stmt family
       terminal adversary]
@@ -763,26 +797,26 @@ theorem randomizedClosedVerificationGame_expected_knowledge_soundness
 actual cached adversary phase makes at most `Q` distinct restoration queries almost surely. -/
 theorem randomizedClosedVerificationGame_queryBound_knowledge_soundness
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : List Round) (errors : RoundErrors rounds)
+    (rounds : Input → List Round) (errors : (z : Input) → RoundErrors (rounds z))
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol rounds).roles (roundErrorSchedule rounds errors))
+      (protocol (rounds z)).roles (roundErrorSchedule (rounds z) (errors z)))
     (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Stmt : Input → (protocol rounds).tree.BranchPath → Type)
-    {Idx : Input → (protocol rounds).tree.BranchPath → Type}
-    {Realization : (z : Input) → (p : (protocol rounds).tree.BranchPath) → Idx z p → Type}
-    (family : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Stmt : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    {Idx : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type}
+    {Realization : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Idx z p → Type}
+    (family : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       OracleFamily (Idx z p) (Realization z p))
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (OracleOutput initial Stmt family z p))
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (OracleOutput initial Stmt family z p))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
+    (Rout : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
       ClosedClaim (Stmt z p) (family z p) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W ≃ ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
@@ -803,7 +837,7 @@ theorem randomizedClosedVerificationGame_queryBound_knowledge_soundness
           (fun z path output witness =>
             ∃ claim, output = some claim ∧ Rout z path.toBranchPath claim witness)
           terminalWitness Z result] ≤
-      Q * Finset.univ.sup errors + ∑ j, errors j := by
+      Q * maxError errors + sumError errors := by
   have h := randomizedClosedVerificationGame_expected_knowledge_soundness
     rounds errors state extractor Z preserving bounded initial impl Stmt family terminal
     Rin Rout terminalWitness inputLaw outputLaw adversary

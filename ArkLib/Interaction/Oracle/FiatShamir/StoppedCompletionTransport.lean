@@ -17,43 +17,43 @@ namespace Interaction.Oracle.FiatShamir
 
 open Security.StateRestoration
 
-/-- Interpret a suffix restoration key in an enclosing full-prefix oracle. -/
-def embeddedQuery {Input : Type} {rounds allRounds : List Round}
-    (embed : Key Input PUnit rounds → Key Input PUnit allRounds)
+/-- Interpret a prefix of `rounds` as a key of an enclosing restoration oracle. -/
+def embeddedQuery {Input : Type} {rounds : List Round} {allRounds : Input → List Round}
+    (embed : Prefix PUnit rounds → Key Input PUnit allRounds)
     (preserve : ∀ key, (embed key).Challenge = key.Challenge) :
-    QueryImpl (oracleSpec Input PUnit rounds)
+    QueryImpl (prefixSpec PUnit rounds)
       (OracleComp (oracleSpec Input PUnit allRounds)) :=
   fun key => (cast (preserve key)) <$>
     liftM ((oracleSpec Input PUnit allRounds).query (embed key))
 
 private theorem embeddedQuery_comp_prepend {Input : Type} {round : Round}
-    {rounds allRounds : List Round} (message : round.Message)
-    (embed : Key Input PUnit (round :: rounds) → Key Input PUnit allRounds)
+    {rounds : List Round} {allRounds : Input → List Round} (message : round.Message)
+    (embed : Prefix PUnit (round :: rounds) → Key Input PUnit allRounds)
     (preserve : ∀ key, (embed key).Challenge = key.Challenge) :
     (embeddedQuery embed preserve) ∘ₛ (prependQuery message PUnit.unit) =
-      embeddedQuery (fun key => embed (Key.later message PUnit.unit key))
-        (fun key => preserve (Key.later message PUnit.unit key)) := by
+      embeddedQuery (fun key => embed (Prefix.later message PUnit.unit key))
+        (fun key => preserve (Prefix.later message PUnit.unit key)) := by
   funext key
   simp only [QueryImpl.apply_compose, prependQuery, simulateQ_query,
     OracleQuery.cont_query, OracleQuery.input_query, id_map, embeddedQuery]
 
 set_option backward.isDefEq.respectTransparency false in
-theorem mappedStoppedComplete_eq_simulate {Input : Type} {allRounds : List Round}
-    (rounds : List Round) (guards : GuardSchedule Input PUnit rounds) (z : Input)
+theorem mappedStoppedComplete_eq_simulate {Input : Type} {allRounds : Input → List Round}
+    (rounds : List Round) (guards : GuardSchedule PUnit rounds)
     (messages : PublicMessages rounds)
-    (embed : Key Input PUnit rounds → Key Input PUnit allRounds)
+    (embed : Prefix PUnit rounds → Key Input PUnit allRounds)
     (preserve : ∀ key, (embed key).Challenge = key.Challenge) :
-    mappedStoppedComplete rounds guards z messages embed preserve =
+    mappedStoppedComplete rounds guards messages embed preserve =
       simulateQ (embeddedQuery embed preserve)
-        (stoppedComplete rounds guards z (withUnitSalts rounds messages)) := by
+        (stoppedCompletePrefix rounds guards (withUnitSalts rounds messages)) := by
   induction rounds with
   | nil =>
-      simp [mappedStoppedComplete, stoppedComplete, simulateQ_pure]
+      simp [mappedStoppedComplete, stoppedCompletePrefix, simulateQ_pure]
   | cons round rounds ih =>
       rcases guards with ⟨guard, next⟩
       rcases messages with ⟨message, messages⟩
-      simp only [mappedStoppedComplete, stoppedComplete, withUnitSalts]
-      cases hguard : guard z message PUnit.unit with
+      simp only [mappedStoppedComplete, stoppedCompletePrefix, withUnitSalts]
+      cases hguard : guard message PUnit.unit with
       | false => simp [simulateQ_pure]
       | true =>
           simp only [Bool.not_true, Bool.false_eq_true, ite_false,
@@ -65,31 +65,32 @@ theorem mappedStoppedComplete_eq_simulate {Input : Type} {allRounds : List Round
           rw [← QueryImpl.simulateQ_compose,
             embeddedQuery_comp_prepend message embed preserve]
           rw [← ih (next message PUnit.unit
-            (cast (preserve (Key.here z message PUnit.unit)) response)) messages
-            (fun key => embed (Key.later message PUnit.unit key))
-            (fun key => preserve (Key.later message PUnit.unit key))]
+            (cast (preserve (Prefix.here message PUnit.unit)) response)) messages
+            (fun key => embed (Prefix.later message PUnit.unit key))
+            (fun key => preserve (Prefix.later message PUnit.unit key))]
 
-private theorem embeddedQuery_id {Input : Type} (rounds : List Round) :
-    embeddedQuery (Input := Input) (rounds := rounds) id (fun _ => rfl) =
-      QueryImpl.id' (oracleSpec Input PUnit rounds) := by
-  funext key
-  change (cast (rfl : key.Challenge = key.Challenge)) <$>
-    liftM ((oracleSpec Input PUnit rounds).query key) =
-      liftM ((oracleSpec Input PUnit rounds).query key)
-  have hcast : (cast (rfl : key.Challenge = key.Challenge)) =
-      (id : key.Challenge → key.Challenge) := by
+private theorem embeddedQuery_mk {Input : Type} (rounds : Input → List Round) (z : Input) :
+    embeddedQuery (Input := Input) (allRounds := rounds) (fun pre => ⟨z, pre⟩) (fun _ => rfl) =
+      inputQuery z := by
+  funext pre
+  change (cast (rfl : pre.Challenge = pre.Challenge)) <$>
+    liftM ((oracleSpec Input PUnit rounds).query ⟨z, pre⟩) =
+      liftM ((oracleSpec Input PUnit rounds).query ⟨z, pre⟩)
+  have hcast : (cast (rfl : pre.Challenge = pre.Challenge)) =
+      (id : pre.Challenge → pre.Challenge) := by
     funext x
     exact cast_eq _ x
   rw [hcast, id_map]
 
 /-- Actual public strategy verification executes the native stopped completion, with the
 same query order and stopping point, for the single-unit salt schedule. -/
-theorem publicStoppedVerify_eq_stoppedComplete {Input : Type} (rounds : List Round)
-    (guards : GuardSchedule Input PUnit rounds) (z : Input)
-    (messages : PublicMessages rounds) :
+theorem publicStoppedVerify_eq_stoppedComplete {Input : Type} (rounds : Input → List Round)
+    (guards : (z : Input) → GuardSchedule PUnit (rounds z)) (z : Input)
+    (messages : PublicMessages (rounds z)) :
     publicStoppedVerify rounds guards z messages =
-      stoppedComplete rounds guards z (withUnitSalts rounds messages) := by
+      stoppedComplete rounds guards z (withUnitSalts (rounds z) messages) := by
   rw [publicStoppedVerify_eq_with, publicStoppedVerifyWith_eq_mapped,
-    mappedStoppedComplete_eq_simulate, embeddedQuery_id, simulateQ_id']
+    mappedStoppedComplete_eq_simulate, embeddedQuery_mk]
+  rfl
 
 end Interaction.Oracle.FiatShamir

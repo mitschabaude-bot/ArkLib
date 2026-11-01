@@ -31,16 +31,16 @@ variable (F : Type) [Field F] [Fintype F] [DecidableEq F] [SampleableType F]
 variable (n deg : ℕ)
 
 /-- The actual Sumcheck sum test, before the challenge for this polynomial is requested. -/
-noncomputable def sumcheckGuards {Input Salt : Type} {m : ℕ} (D : Fin m ↪ F) :
+noncomputable def sumcheckGuards {Salt : Type} {m : ℕ} (D : Fin m ↪ F) :
     (count start : ℕ) → (finish : start + count = n) →
-    (Input → Spec.StatementRound F n ⟨start, by omega⟩) →
-    GuardSchedule Input Salt (rounds F deg count)
+    Spec.StatementRound F n ⟨start, by omega⟩ →
+    GuardSchedule Salt (rounds F deg count)
   | 0, _, _, _ => PUnit.unit
   | count + 1, start, _, stmt =>
-      (fun z q _ => decide
-        (((Finset.univ.map D).toList.map (fun x => q.val.eval x)).sum = (stmt z).target),
+      (fun q _ => decide
+        (((Finset.univ.map D).toList.map (fun x => q.val.eval x)).sum = stmt.target),
        fun q _ r => sumcheckGuards D count (start + 1) (by omega)
-         (fun z => ⟨q.val.eval r, Fin.snoc (stmt z).challenges r⟩))
+         ⟨q.val.eval r, Fin.snoc stmt.challenges r⟩)
 
 variable {Input Salt : Type} [DecidableEq Input] [DecidableEq Salt]
 variable {m : ℕ} (D : Fin m ↪ F)
@@ -53,10 +53,9 @@ variable (impl : Input → QueryImpl (OracleSpec.ofPFunctor A) Id)
 
 /-- A stopped accepted path has a false initial claim and a true actual closed native output. -/
 def stoppedFalseAccepts :
-    Option (Input × (Security.StateRestoration.protocol (rounds F deg n)).tree.ExecutionPath ×
-      Unit) → Prop
+    Option (Outcome Input Unit (fun _ => rounds F deg n)) → Prop
   | none => False
-  | some (z, path, _) =>
+  | some ⟨z, path, _⟩ =>
       ¬ initialClaimTrue F n deg D stmt p z ∧
         ∃ output, nativeObservedOutput F n deg D A stmt originalOracle impl z path =
           some output ∧ Native.outputRelation F n deg output
@@ -66,15 +65,15 @@ The stateless source handler is matched to the original polynomial realization e
 theorem stoppedSumcheck_expected_soundness
     (sourceLaw : ∀ z, (originalOracle z).eval (impl z) =
       (polynomialFamily F n deg).behaviorOfRealizations (fun _ => p z))
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (rounds F deg n)) :
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => rounds F deg n)) :
     Pr{let joint ← (randomOracleLoggedRun
-      (randomizedStoppedRestoredExecutionWithAdversaryLog (rounds F deg n)
-        (sumcheckGuards F n deg D n 0 (by omega) stmt) adversary) ∅)}[
+      (randomizedStoppedRestoredExecutionWithAdversaryLog (fun _ => rounds F deg n)
+        (fun z => sumcheckGuards F n deg D n 0 (by omega) (stmt z)) adversary) ∅)}[
       stoppedFalseAccepts F n deg D A stmt p originalOracle impl joint.1.1.1] ≤
     expectedFreshQueryCharge
-      (randomizedStoppedRestoredExecutionWithAdversaryLog (rounds F deg n)
-        (sumcheckGuards F n deg D n 0 (by omega) stmt) adversary)
-      (keyError (fun _ : Fin (rounds F deg n).length => fieldError F deg)) := by
+      (randomizedStoppedRestoredExecutionWithAdversaryLog (fun _ => rounds F deg n)
+        (fun z => sumcheckGuards F n deg D n 0 (by omega) (stmt z)) adversary)
+      (keyError (fun _ (_ : Fin (rounds F deg n).length) => fieldError F deg)) := by
   let state := fun z => claimState F n deg D ⟨0, by omega⟩ (stmt z) (p z) True
   let extractor := fun z => certificate F n deg D (p z) n 0 (by omega) (stmt z) True
   let Rin := fun z (_ : Unit) => initialClaimTrue F n deg D stmt p z
@@ -84,8 +83,8 @@ theorem stoppedSumcheck_expected_soundness
   let terminalWitness := fun z path =>
     terminalWitnessEquiv F n deg D (p z) n 0 (by omega) (stmt z) True path
   have howner := randomizedStopped_badRelation_le_expectedFreshCharge
-    (rounds F deg n) (sumcheckGuards F n deg D n 0 (by omega) stmt)
-    (fun _ => fieldError F deg) adversary state extractor Set.univ
+    (fun _ => rounds F deg n) (fun z => sumcheckGuards F n deg D n 0 (by omega) (stmt z))
+    (fun _ _ => fieldError F deg) adversary state extractor Set.univ
     (by intro z _; exact certificate_preserving F n deg D (p z) n 0 (by omega) (stmt z) True)
     (by intro z _; exact certificate_bounded_constant F n deg D (p z) (stmt z))
     Rin Rout (fun z path => (terminalWitness z path).toFun)
@@ -95,8 +94,8 @@ theorem stoppedSumcheck_expected_soundness
           sourceLaw z path w).mpr)
   have hevent := prEvent_congr
     (randomOracleLoggedRun
-      (randomizedStoppedRestoredExecutionWithAdversaryLog (rounds F deg n)
-        (sumcheckGuards F n deg D n 0 (by omega) stmt) adversary) ∅)
+      (randomizedStoppedRestoredExecutionWithAdversaryLog (fun _ => rounds F deg n)
+        (fun z => sumcheckGuards F n deg D n 0 (by omega) (stmt z)) adversary) ∅)
     (fun joint => stoppedFalseAccepts F n deg D A stmt p originalOracle impl joint.1.1.1)
     (fun joint => badStoppedRelation state extractor Rin Rout
       (fun z path => (terminalWitness z path).toFun) Set.univ joint.1.1.1)
@@ -115,31 +114,33 @@ Its coarse consequence is the usual field error times the expected adversary cos
 theorem stoppedSumcheck_expected_round_bound
     (sourceLaw : ∀ z, (originalOracle z).eval (impl z) =
       (polynomialFamily F n deg).behaviorOfRealizations (fun _ => p z))
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (rounds F deg n)) :
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => rounds F deg n)) :
     Pr{let joint ← (randomOracleLoggedRun
-      (randomizedStoppedRestoredExecutionWithAdversaryLog (rounds F deg n)
-        (sumcheckGuards F n deg D n 0 (by omega) stmt) adversary) ∅)}[
+      (randomizedStoppedRestoredExecutionWithAdversaryLog (fun _ => rounds F deg n)
+        (fun z => sumcheckGuards F n deg D n 0 (by omega) (stmt z)) adversary) ∅)}[
       stoppedFalseAccepts F n deg D A stmt p originalOracle impl joint.1.1.1] ≤
-      fieldError F deg * expectedAdversaryFreshKeys (rounds F deg n) adversary +
-        expectedStoppedVerifierRoundCost (rounds F deg n)
-          (sumcheckGuards F n deg D n 0 (by omega) stmt) (fun _ => fieldError F deg)
+      fieldError F deg * expectedAdversaryFreshKeys (fun _ => rounds F deg n) adversary +
+        expectedStoppedVerifierRoundCost (fun _ => rounds F deg n)
+          (fun z => sumcheckGuards F n deg D n 0 (by omega) (stmt z)) (fun _ _ => fieldError F deg)
           adversary ∧
-    expectedStoppedVerifierRoundCost (rounds F deg n)
-        (sumcheckGuards F n deg D n 0 (by omega) stmt) (fun _ => fieldError F deg)
+    expectedStoppedVerifierRoundCost (fun _ => rounds F deg n)
+        (fun z => sumcheckGuards F n deg D n 0 (by omega) (stmt z)) (fun _ _ => fieldError F deg)
         adversary ≤ (n : ENNReal) * fieldError F deg := by
-  have hcost := expectedStoppedFreshCharge_le_actualRounds (rounds F deg n)
-    (sumcheckGuards F n deg D n 0 (by omega) stmt) (fun _ => fieldError F deg) adversary
+  have hcost := expectedStoppedFreshCharge_le_actualRounds (fun _ => rounds F deg n)
+    (fun z => sumcheckGuards F n deg D n 0 (by omega) (stmt z)) (fun _ _ => fieldError F deg)
+        adversary
   rw [expectedStoppedJointAdversaryKeys_eq_expectedAdversaryFreshKeys] at hcost
-  have hmax : Finset.univ.sup
-      (fun _ : Fin (rounds F deg n).length => fieldError F deg) ≤ fieldError F deg :=
-    Finset.sup_le fun _ _ => le_rfl
+  have hmax : maxError (rounds := fun _ : Input => rounds F deg n)
+      (fun _ _ => fieldError F deg) ≤ fieldError F deg :=
+    (maxError_const_le _).trans (Finset.sup_le fun _ _ => le_rfl)
   constructor
   · apply ((stoppedSumcheck_expected_soundness F n deg D A stmt p originalOracle impl
       sourceLaw adversary).trans hcost).trans
     gcongr
-  · simpa only [Finset.sum_const, nsmul_eq_mul, Finset.card_univ, Fintype.card_fin,
-      rounds_length] using
-      expectedStoppedVerifierRoundCost_le_sum (rounds F deg n)
-        (sumcheckGuards F n deg D n 0 (by omega) stmt) (fun _ => fieldError F deg) adversary
+  · refine (expectedStoppedVerifierRoundCost_le_sum (fun _ => rounds F deg n)
+      (fun z => sumcheckGuards F n deg D n 0 (by omega) (stmt z)) (fun _ _ => fieldError F deg)
+      adversary).trans ((sumError_const_le _).trans (le_of_eq ?_))
+    simp only [Finset.sum_const, nsmul_eq_mul, Finset.card_univ, Fintype.card_fin,
+      rounds_length]
 
 end Sumcheck.Interaction.Restoration

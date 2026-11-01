@@ -61,17 +61,17 @@ theorem singleSaltSumcheckAccepts_iff (z : Input × Salt)
 
 /-- The compiled native experiment includes both prefix checks and the final source check. -/
 noncomputable def singleSaltSumcheckExecution
-    (adversary : SingleSaltAdversary Input Salt Unit (rounds F deg n)) :=
-  singleSaltAcceptedExecution (rounds F deg n)
-    (sumcheckGuards F n deg D n 0 (by omega) (fun z : Input × Salt => stmt z.1))
+    (adversary : SingleSaltAdversary Input Salt Unit (fun _ => rounds F deg n)) :=
+  singleSaltAcceptedExecution (fun _ => rounds F deg n)
+    (fun z : Input × Salt => sumcheckGuards F n deg D n 0 (by omega) (stmt z.1))
     (singleSaltSumcheckAccepts F n deg D A stmt originalOracle impl) adversary
 
 /-- A returned compiled proof is bad exactly when its original Sumcheck claim is false. -/
 def singleSaltSumcheckFalseClaim :
-    Option ((Input × Salt) ×
-      (Security.StateRestoration.protocol (rounds F deg n)).tree.ExecutionPath × Unit) → Prop
+    Option (Outcome (Input × Salt) Unit (saltedRounds Salt (fun _ : Input => rounds F deg n))) →
+      Prop
   | none => False
-  | some (z, _, _) => ¬ initialClaimTrue F n deg D stmt p z.1
+  | some ⟨z, _, _⟩ => ¬ initialClaimTrue F n deg D stmt p z.1
 
 /-- The actual compiled terminal check validates the explicit Sumcheck terminal seed. -/
 theorem singleSaltSumcheck_terminal_seed_valid
@@ -91,13 +91,13 @@ keys in its joint lazy-oracle run. The retained source oracle is interpreted by 
 theorem singleSaltSumcheck_soundness [DecidableEq Input] [DecidableEq Salt]
     (sourceLaw : ∀ z, (originalOracle z).eval (impl z) =
       (polynomialFamily F n deg).behaviorOfRealizations (fun _ => p z))
-    (adversary : SingleSaltAdversary Input Salt Unit (rounds F deg n)) :
+    (adversary : SingleSaltAdversary Input Salt Unit (fun _ => rounds F deg n)) :
     Pr{let joint ← (randomOracleLoggedRun
       (singleSaltSumcheckExecution F n deg D A stmt originalOracle impl adversary) ∅)}[
       singleSaltSumcheckFalseClaim F n deg D stmt p joint.1.1.1] ≤
     expectedFreshQueryCharge
       (singleSaltSumcheckExecution F n deg D A stmt originalOracle impl adversary)
-      (keyError (fun _ : Fin (rounds F deg n).length => fieldError F deg)) := by
+      (keyError (fun _ (_ : Fin (rounds F deg n).length) => fieldError F deg)) := by
   let state := fun z : Input × Salt =>
     claimState F n deg D ⟨0, by omega⟩ (stmt z.1) (p z.1) True
   let extractor := fun z : Input × Salt =>
@@ -109,9 +109,9 @@ theorem singleSaltSumcheck_soundness [DecidableEq Input] [DecidableEq Salt]
   let seed := fun (z : Input × Salt) path (w : Unit) =>
     terminalWitnessEquiv F n deg D (p z.1) n 0 (by omega) (stmt z.1) True path w
   have security := singleSalt_knowledge_soundness
-    (sumcheckGuards F n deg D n 0 (by omega) (fun z : Input × Salt => stmt z.1))
+    (fun z : Input × Salt => sumcheckGuards F n deg D n 0 (by omega) (stmt z.1))
     (singleSaltSumcheckAccepts F n deg D A stmt originalOracle impl)
-    (fun _ => fieldError F deg) adversary state extractor Set.univ
+    (fun _ _ => fieldError F deg) adversary state extractor Set.univ
     (by intro z _; exact certificate_preserving F n deg D (p z.1) n 0 (by omega) (stmt z.1) True)
     (by intro z _; exact certificate_bounded_constant F n deg D (p z.1) (stmt z.1))
     Rin Rout seed
@@ -139,22 +139,22 @@ theorem singleSaltSumcheck_soundness [DecidableEq Input] [DecidableEq Salt]
 theorem singleSaltSumcheck_expected_round_bound [DecidableEq Input] [DecidableEq Salt]
     (sourceLaw : ∀ z, (originalOracle z).eval (impl z) =
       (polynomialFamily F n deg).behaviorOfRealizations (fun _ => p z))
-    (adversary : SingleSaltAdversary Input Salt Unit (rounds F deg n)) :
+    (adversary : SingleSaltAdversary Input Salt Unit (fun _ => rounds F deg n)) :
     Pr{let joint ← (randomOracleLoggedRun
       (singleSaltSumcheckExecution F n deg D A stmt originalOracle impl adversary) ∅)}[
       singleSaltSumcheckFalseClaim F n deg D stmt p joint.1.1.1] ≤
       fieldError F deg * expectedSingleSaltAdversaryKeys adversary +
         expectedSingleSaltVerifierCost
-          (sumcheckGuards F n deg D n 0 (by omega) (fun z : Input × Salt => stmt z.1))
+          (fun z : Input × Salt => sumcheckGuards F n deg D n 0 (by omega) (stmt z.1))
           (singleSaltSumcheckAccepts F n deg D A stmt originalOracle impl)
-          (fun _ => fieldError F deg) adversary := by
+          (fun _ _ => fieldError F deg) adversary := by
   have cost := (singleSalt_query_cost
-    (sumcheckGuards F n deg D n 0 (by omega) (fun z : Input × Salt => stmt z.1))
+    (fun z : Input × Salt => sumcheckGuards F n deg D n 0 (by omega) (stmt z.1))
     (singleSaltSumcheckAccepts F n deg D A stmt originalOracle impl)
-    (fun _ => fieldError F deg) adversary).1
-  have maximum : Finset.univ.sup
-      (fun _ : Fin (rounds F deg n).length => fieldError F deg) ≤ fieldError F deg :=
-    Finset.sup_le fun _ _ => le_rfl
+    (fun _ _ => fieldError F deg) adversary).1
+  have maximum : maxError (rounds := saltedRounds Salt (fun _ : Input => rounds F deg n))
+      (fun _ _ => fieldError F deg) ≤ fieldError F deg :=
+    (maxError_const_le _).trans (Finset.sup_le fun _ _ => le_rfl)
   apply ((singleSaltSumcheck_soundness F n deg D A stmt p originalOracle impl
     sourceLaw adversary).trans cost).trans
   gcongr
@@ -164,7 +164,7 @@ The cap counts the adversary's actual distinct hash keys, including failed proof
 theorem singleSaltSumcheck_query_bound [DecidableEq Input] [DecidableEq Salt]
     (sourceLaw : ∀ z, (originalOracle z).eval (impl z) =
       (polynomialFamily F n deg).behaviorOfRealizations (fun _ => p z))
-    (adversary : SingleSaltAdversary Input Salt Unit (rounds F deg n)) (Q : ℕ)
+    (adversary : SingleSaltAdversary Input Salt Unit (fun _ => rounds F deg n)) (Q : ℕ)
     (queryBound : ∀ phase ∈ support (randomOracleLoggedRun adversary.withQueryLog ∅),
       (freshKeysOfLog phase.1.2).card ≤ Q) :
     Pr{let joint ← (randomOracleLoggedRun
@@ -173,9 +173,10 @@ theorem singleSaltSumcheck_query_bound [DecidableEq Input] [DecidableEq Salt]
       (Q + n : ℕ) * fieldError F deg := by
   apply (singleSaltSumcheck_soundness F n deg D A stmt p originalOracle impl
     sourceLaw adversary).trans
-  simpa only [rounds_length, singleSaltSumcheckExecution] using singleSalt_uniform_query_cost
-    (sumcheckGuards F n deg D n 0 (by omega) (fun z : Input × Salt => stmt z.1))
+  unfold singleSaltSumcheckExecution
+  exact singleSalt_uniform_query_cost (rounds := fun _ => rounds F deg n)
+    (fun z : Input × Salt => sumcheckGuards F n deg D n 0 (by omega) (stmt z.1))
     (singleSaltSumcheckAccepts F n deg D A stmt originalOracle impl)
-    (fieldError F deg) adversary Q queryBound
+    (fieldError F deg) adversary Q n queryBound (fun _ => (rounds_length F n deg).le)
 
 end Sumcheck.Interaction.Restoration

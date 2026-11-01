@@ -31,22 +31,22 @@ variable {Input Salt C D W : Type}
 result distribution, including failure and guard rejection. -/
 theorem encodedExternalStopped_evalDist_result_eq_native
     [DecidableEq Input] [DecidableEq Salt] [DecidableEq D] [SampleableType C]
-    (rounds : List Round)
+    (rounds : Input → List Round)
     (common : CommonChallenge Input Salt C rounds)
     (codec : StrictCodec (Key Input Salt rounds) D)
-    (guards : GuardSchedule Input Salt rounds)
+    (guards : (z : Input) → GuardSchedule Salt (rounds z))
     (external : OracleComp (unifSpec + (D →ₒ C))
-      (Option (Input × Messages Salt rounds × W))) :
+      (Option (Selection Input Salt W rounds))) :
     letI : MeasurableSpace
-      (Option (Input × (protocol rounds).tree.ExecutionPath × W)) := ⊤
+      (Option (Outcome Input W rounds)) := ⊤
     𝒟[(fun joint => joint.1.1) <$> randomOracleLoggedRun
       (encodedExternalStoppedExecution rounds common codec guards external) ∅] =
     𝒟[(fun joint => joint.1.1.1) <$> randomOracleLoggedRun
       (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards
         (encodedNativeAdversary common codec external)) ∅] := by
   let : MeasurableSpace
-      (Option (Input × (protocol rounds).tree.ExecutionPath × W)) := ⊤
-  let Result := Option (Input × (protocol rounds).tree.ExecutionPath × W)
+      (Option (Outcome Input W rounds)) := ⊤
+  let Result := Option (Outcome Input W rounds)
   let Routed := ((Result × QueryLog (D →ₒ C)) × (D →ₒ C).QueryCache)
   let : MeasurableSpace
       ((Routed × QueryLog (Key Input Salt rounds →ₒ C)) ×
@@ -106,13 +106,13 @@ theorem encodedExternalStopped_evalDist_result_eq_native
 external encoded oracle experiment and the native certificate experiment. -/
 theorem encodedExternalStopped_prEvent_eq_native
     [DecidableEq Input] [DecidableEq Salt] [DecidableEq D] [SampleableType C]
-    (rounds : List Round)
+    (rounds : Input → List Round)
     (common : CommonChallenge Input Salt C rounds)
     (codec : StrictCodec (Key Input Salt rounds) D)
-    (guards : GuardSchedule Input Salt rounds)
+    (guards : (z : Input) → GuardSchedule Salt (rounds z))
     (external : OracleComp (unifSpec + (D →ₒ C))
-      (Option (Input × Messages Salt rounds × W)))
-    (event : Option (Input × (protocol rounds).tree.ExecutionPath × W) → Prop) :
+      (Option (Selection Input Salt W rounds)))
+    (event : Option (Outcome Input W rounds) → Prop) :
     Pr{let joint ← (randomOracleLoggedRun
       (encodedExternalStoppedExecution rounds common codec guards external) ∅)}[
         event joint.1.1] =
@@ -121,7 +121,7 @@ theorem encodedExternalStopped_prEvent_eq_native
         (encodedNativeAdversary common codec external)) ∅)}[
         event joint.1.1.1] := by
   let : MeasurableSpace
-      (Option (Input × (protocol rounds).tree.ExecutionPath × W)) := ⊤
+      (Option (Outcome Input W rounds)) := ⊤
   have hresult := encodedExternalStopped_evalDist_result_eq_native
     rounds common codec guards external
   have hevent := (evalDistEq_iff_evalDist_eq.mpr hresult).prEvent_eq event
@@ -131,12 +131,12 @@ theorem encodedExternalStopped_prEvent_eq_native
 charge. The equality includes adversary failure, early rejection, and repeated cache hits. -/
 theorem encodedExternalStopped_expectedCharge_eq_native
     [DecidableEq Input] [DecidableEq Salt] [DecidableEq D] [SampleableType C]
-    (rounds : List Round)
+    (rounds : Input → List Round)
     (common : CommonChallenge Input Salt C rounds)
     (codec : StrictCodec (Key Input Salt rounds) D)
-    (guards : GuardSchedule Input Salt rounds)
+    (guards : (z : Input) → GuardSchedule Salt (rounds z))
     (external : OracleComp (unifSpec + (D →ₒ C))
-      (Option (Input × Messages Salt rounds × W)))
+      (Option (Selection Input Salt W rounds)))
     (weight : Key Input Salt rounds → ENNReal) :
     expectedFreshQueryCharge
       (encodedExternalStoppedExecution rounds common codec guards external)
@@ -174,18 +174,18 @@ expected distinct queries and the round-error sum. This resource bound needs no 
 certificate or acceptance hypothesis. -/
 theorem encodedExternalStopped_expectedCharge_le_adversaryCount
     [DecidableEq D] [SampleableType C]
-    (rounds : List Round)
+    (rounds : Input → List Round)
     (common : CommonChallenge Input Salt C rounds)
     (codec : StrictCodec (Key Input Salt rounds) D)
-    (guards : GuardSchedule Input Salt rounds)
-    (errors : RoundErrors rounds)
+    (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (errors : (z : Input) → RoundErrors (rounds z))
     (external : OracleComp (unifSpec + (D →ₒ C))
-      (Option (Input × Messages Salt rounds × W))) :
+      (Option (Selection Input Salt W rounds))) :
     expectedFreshQueryCharge
       (encodedExternalStoppedExecution rounds common codec guards external)
       (codec.encodedWeight (keyError errors)) ≤
-    Finset.univ.sup errors * expectedFreshQueryCharge external (fun _ => 1) +
-      ∑ j, errors j := by
+    maxError errors * expectedFreshQueryCharge external (fun _ => 1) +
+      sumError errors := by
   classical
   rw [encodedExternalStopped_expectedCharge_eq_native]
   let nativeAdversary := encodedNativeAdversary common codec external
@@ -197,11 +197,11 @@ theorem encodedExternalStopped_expectedCharge_le_adversaryCount
     rw [common.expectedFreshQueryCharge_simulateNative]
     exact codec.expectedNativeFreshKeys_le_external external
   calc
-    _ ≤ Finset.univ.sup errors *
+    _ ≤ maxError errors *
         expectedStoppedJointAdversaryKeys rounds guards nativeAdversary +
-          ∑ j, errors j := hcost.1.trans hcost.2
-    _ = Finset.univ.sup errors * expectedAdversaryFreshKeys rounds nativeAdversary +
-          ∑ j, errors j := by
+          sumError errors := hcost.1.trans hcost.2
+    _ = maxError errors * expectedAdversaryFreshKeys rounds nativeAdversary +
+          sumError errors := by
             rw [expectedStoppedJointAdversaryKeys_eq_expectedAdversaryFreshKeys]
     _ ≤ _ := by
       gcongr
@@ -211,22 +211,22 @@ distinct-key charge of its own complete, cached encoded-domain run. Off-image ke
 zero, and every executed verifier or adversary query remains in the observed log. -/
 theorem encodedExternalStopped_knowledge_soundness_sharp
     [DecidableEq D] [SampleableType C]
-    (rounds : List Round)
+    (rounds : Input → List Round)
     (common : CommonChallenge Input Salt C rounds)
     (codec : StrictCodec (Key Input Salt rounds) D)
-    (guards : GuardSchedule Input Salt rounds)
-    (errors : RoundErrors rounds)
+    (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (errors : (z : Input) → RoundErrors (rounds z))
     (external : OracleComp (unifSpec + (D →ₒ C))
-      (Option (Input × Messages Salt rounds × W)))
+      (Option (Selection Input Salt W rounds)))
     (state : Input → KnowledgeState)
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol rounds).roles (roundErrorSchedule rounds errors))
+      (protocol (rounds z)).roles (roundErrorSchedule (rounds z) (errors z)))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (Rout : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → W → Prop)
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
@@ -251,22 +251,22 @@ the expected number of distinct keys queried by the original external adversary,
 off-image keys and failed selections; stopped verifier rounds cost at most the error sum. -/
 theorem encodedExternalStopped_knowledge_soundness_adversaryCount
     [DecidableEq D] [SampleableType C]
-    (rounds : List Round)
+    (rounds : Input → List Round)
     (common : CommonChallenge Input Salt C rounds)
     (codec : StrictCodec (Key Input Salt rounds) D)
-    (guards : GuardSchedule Input Salt rounds)
-    (errors : RoundErrors rounds)
+    (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (errors : (z : Input) → RoundErrors (rounds z))
     (external : OracleComp (unifSpec + (D →ₒ C))
-      (Option (Input × Messages Salt rounds × W)))
+      (Option (Selection Input Salt W rounds)))
     (state : Input → KnowledgeState)
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol rounds).roles (roundErrorSchedule rounds errors))
+      (protocol (rounds z)).roles (roundErrorSchedule (rounds z) (errors z)))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (Rout : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → W → Prop)
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
@@ -275,8 +275,8 @@ theorem encodedExternalStopped_knowledge_soundness_adversaryCount
     Pr{let joint ← (randomOracleLoggedRun
       (encodedExternalStoppedExecution rounds common codec guards external) ∅)}[
       badStoppedRelation state extractor Rin Rout terminalWitness Z joint.1.1] ≤
-    Finset.univ.sup errors * expectedFreshQueryCharge external (fun _ => 1) +
-      ∑ j, errors j := by
+    maxError errors * expectedFreshQueryCharge external (fun _ => 1) +
+      sumError errors := by
   exact (encodedExternalStopped_knowledge_soundness_sharp rounds common codec guards
     errors external state extractor Z preserving bounded Rin Rout terminalWitness
     inputLaw outputLaw).trans

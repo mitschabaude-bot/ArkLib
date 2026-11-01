@@ -22,10 +22,10 @@ open OracleComp OracleSpec MeasureTheory ProbabilityTheory
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-variable {Input Salt C : Type} {rounds : List Round}
+variable {Input Salt C : Type} {rounds : Input → List Round}
 
 /-- The restricted common-challenge fragment of an otherwise dependent restoration schedule. -/
-structure CommonChallenge (Input Salt C : Type) (rounds : List Round) where
+structure CommonChallenge (Input Salt C : Type) (rounds : Input → List Round) where
   challengeEquiv : (key : Key Input Salt rounds) → key.Challenge ≃ C
 
 /-- Encode all entries of one native dependent challenge table into the common carrier. -/

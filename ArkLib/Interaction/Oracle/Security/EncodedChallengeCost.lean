@@ -21,7 +21,7 @@ open OracleComp OracleSpec MeasureTheory
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-variable {Input Salt C A : Type} {rounds : List Round}
+variable {Input Salt C A : Type} {rounds : Input → List Round}
 
 /-- Changing challenge representations preserves every distinct key in the hash log. -/
 theorem CommonChallenge.freshKeys_toCommonLog

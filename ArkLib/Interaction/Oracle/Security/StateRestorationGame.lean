@@ -30,52 +30,52 @@ namespace Interaction.Oracle.Security.StateRestoration
 
 universe w
 
-variable {Input Salt W : Type} {rounds : List Round}
+variable {Input Salt W : Type} {rounds : Input → List Round}
 
 /-- The verifier's actual terminal observation of the closed input and oracle messages. -/
 def terminalObservation (initial : PFunctor)
     (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Out : Input → (protocol rounds).tree.BranchPath → Type)
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (Out z p))
-    (z : Input) (path : (protocol rounds).tree.ExecutionPath) : Out z path.toBranchPath :=
-  evalWithAnswerFn (path.closingImpl (protocol rounds).oracles initial (impl z))
+    (Out : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (Out z p))
+    (z : Input) (path : (protocol (rounds z)).tree.ExecutionPath) : Out z path.toBranchPath :=
+  evalWithAnswerFn (path.closingImpl (protocol (rounds z)).oracles initial (impl z))
     (terminal z path.toBranchPath)
 
 /-- The actual restoration game: complete with the same oracle, then execute the
 prover/verifier on the completed challenges. Replay sees only the completed path, not a table. -/
 def verificationGame (initial : PFunctor)
     (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Out : Input → (protocol rounds).tree.BranchPath → Type)
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (Out z p))
-    (adversary : OracleComp (oracleSpec Input Salt rounds) (Input × Messages Salt rounds × W)) :
+    (Out : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (Out z p))
+    (adversary : OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds)) :
     OracleComp (oracleSpec Input Salt rounds)
-      ((z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+      ((z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
         Out z path.toBranchPath × W) := do
-  let (z, messages, witness) ← adversary
+  let ⟨z, messages, witness⟩ ← adversary
   let path ← complete rounds z messages
-  let result ← executeStrategies (oracleSpec Input Salt rounds) (protocol rounds).tree
-    (protocol rounds).roles (protocol rounds).oracles initial (impl z)
-    (scriptedProver (oracleSpec Input Salt rounds) rounds messages)
-    (challengeVerifier (oracleSpec Input Salt rounds) rounds initial
-      (pathPrograms (oracleSpec Input Salt rounds) rounds path) (Out z) (terminal z))
+  let result ← executeStrategies (oracleSpec Input Salt rounds) (protocol (rounds z)).tree
+    (protocol (rounds z)).roles (protocol (rounds z)).oracles initial (impl z)
+    (scriptedProver (oracleSpec Input Salt rounds) (rounds z) messages)
+    (challengeVerifier (oracleSpec Input Salt rounds) (rounds z) initial
+      (pathPrograms (oracleSpec Input Salt rounds) (rounds z) path) (Out z) (terminal z))
   pure ⟨z, result.1, result.2.2, witness⟩
 
 /-- Actual verification is exactly the observation of the completed path. -/
 theorem verificationGame_eq (initial : PFunctor)
     (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Out : Input → (protocol rounds).tree.BranchPath → Type)
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (Out z p))
-    (adversary : OracleComp (oracleSpec Input Salt rounds) (Input × Messages Salt rounds × W)) :
+    (Out : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (Out z p))
+    (adversary : OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds)) :
     verificationGame initial impl Out terminal adversary =
       (fun result => (⟨result.1, result.2.1,
         terminalObservation initial impl Out terminal result.1 result.2.1, result.2.2⟩ :
-        (z : Input) × (path : (protocol rounds).tree.ExecutionPath) ×
+        (z : Input) × (path : (protocol (rounds z)).tree.ExecutionPath) ×
           Out z path.toBranchPath × W)) <$>
       restoredExecution rounds adversary := by
   simp only [verificationGame, restoredExecution, map_eq_pure_bind, bind_assoc]
@@ -90,10 +90,11 @@ theorem verificationGame_eq (initial : PFunctor)
 /-- The supplied output witness is transported by a named equivalence and extracted backwards
 through the actual completed path. No valid intermediate witness is selected. -/
 def extractInputWitness (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W ≃ ((extractor z).terminalState path).Witness)
-    (z : Input) (path : (protocol rounds).tree.ExecutionPath) (witness : W) : (state z).Witness :=
+    (z : Input) (path : (protocol (rounds z)).tree.ExecutionPath) (witness : W) :
+    (state z).Witness :=
   (extractor z).extractWitness path (terminalWitness z path witness)
 
 /-- Round-by-round knowledge bounds imply state-restoration knowledge soundness for the actual
@@ -102,35 +103,36 @@ the named backwards extractor fails on a valid output with probability at most `
 theorem stateRestoration_knowledge_soundness
     [DecidableEq Input] [DecidableEq Salt]
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol rounds).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
     (Z : Set Input) (error : ENNReal)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol rounds).roles)
-    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol rounds).roles
-      (uniformSchedule error rounds))
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
+    (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol (rounds z)).roles
+      (uniformSchedule error (rounds z)))
     (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
-    (Out : Input → (protocol rounds).tree.BranchPath → Type)
-    (terminal : (z : Input) → (p : (protocol rounds).tree.BranchPath) →
-      OracleComp (ofPFunctor (accessAfter (protocol rounds).tree
-        (protocol rounds).oracles initial p)) (Out z p))
+    (Out : (z : Input) → (protocol (rounds z)).tree.BranchPath → Type)
+    (terminal : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol (rounds z)).tree
+        (protocol (rounds z)).oracles initial p)) (Out z p))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (p : (protocol rounds).tree.BranchPath) → Out z p → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol rounds).tree.ExecutionPath) →
+    (Rout : (z : Input) → (p : (protocol (rounds z)).tree.BranchPath) → Out z p → W → Prop)
+    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
       W ≃ ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
       ((extractor z).terminalState path).holds (terminalWitness z path witness) ↔
         Rout z path.toBranchPath (terminalObservation initial impl Out terminal z path) witness)
-    (adversary : OracleComp (oracleSpec Input Salt rounds) (Input × Messages Salt rounds × W))
-    (Q : ℕ) (queryBound : IsTotalQueryBound adversary Q) :
+    (adversary : OracleComp (oracleSpec Input Salt rounds) (Selection Input Salt W rounds))
+    (Q k : ℕ) (queryBound : IsTotalQueryBound adversary Q)
+    (length_le : ∀ z, (rounds z).length ≤ k) :
     Pr{let result ← (simulateQ randomOracle
         (verificationGame initial impl Out terminal adversary)).run' ∅}[
       result.1 ∈ Z ∧ Rout result.1 result.2.1.toBranchPath result.2.2.1 result.2.2.2 ∧
       ¬ Rin result.1 (extractInputWitness state extractor terminalWitness
-        result.1 result.2.1 result.2.2.2)] ≤ (Q + rounds.length) * error := by
+        result.1 result.2.1 result.2.2.2)] ≤ (Q + k) * error := by
   rw [verificationGame_eq, simulateQ_map]
   simp only [StateT.run'_map', prEvent_map]
   simp only [extractInputWitness, ← inputLaw, ← outputLaw]
   exact restored_extraction_bound state extractor Z error preserving bounded
-    (fun z path => terminalWitness z path) adversary Q queryBound
+    (fun z path => terminalWitness z path) adversary Q k queryBound length_le
 
 end Interaction.Oracle.Security.StateRestoration

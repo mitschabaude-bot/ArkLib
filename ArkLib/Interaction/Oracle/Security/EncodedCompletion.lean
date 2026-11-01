@@ -22,7 +22,7 @@ open Interaction.Oracle.TypeTree
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-variable {Input Salt C D W : Type} {rounds : List Round}
+variable {Input Salt C D W : Type} {rounds : Input → List Round}
 
 /-- The actual external verifier challenge call at an encoded native key. -/
 def encodedCompletionQueries
@@ -180,37 +180,37 @@ def encodedNativeAdversary
     (codec : StrictCodec (Key Input Salt rounds) D)
     [DecidableEq D] [SampleableType C]
     (external : OracleComp (unifSpec + (D →ₒ C))
-      (Option (Input × Messages Salt rounds × W))) :
+      (Option (Selection Input Salt W rounds))) :
     RandomizedRestorationAdversary Input Salt W rounds :=
   (fun result => result.1.1) <$>
     common.simulateNative (codec.routeProgram external ∅)
 
 /-- Complete a native selected transcript, retaining the selected witness but no source log. -/
-def nativeStoppedCompletionAfter (rounds : List Round)
-    (guards : GuardSchedule Input Salt rounds)
-    (selected : Option (Input × Messages Salt rounds × W)) :
+def nativeStoppedCompletionAfter (rounds : Input → List Round)
+    (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (selected : Option (Selection Input Salt W rounds)) :
     OracleComp (unifSpec + oracleSpec Input Salt rounds)
-      (Option (Input × (protocol rounds).tree.ExecutionPath × W)) :=
+      (Option (Outcome Input W rounds)) :=
   match selected with
   | none => pure none
-  | some (z, messages, witness) =>
-      (fun path => path.map (fun p => (z, p, witness))) <$>
+  | some ⟨z, messages, witness⟩ =>
+      (fun path => path.map (fun p => ⟨z, p, witness⟩)) <$>
         simulateQ (restorationQueries Input Salt rounds)
           (stoppedComplete rounds guards z messages)
 
 /-- The same stopped native verifier without the auxiliary adversary source log. -/
-def nativeStoppedExecution (rounds : List Round)
-    (guards : GuardSchedule Input Salt rounds)
+def nativeStoppedExecution (rounds : Input → List Round)
+    (guards : (z : Input) → GuardSchedule Salt (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
     OracleComp (unifSpec + oracleSpec Input Salt rounds)
-      (Option (Input × (protocol rounds).tree.ExecutionPath × W)) :=
+      (Option (Outcome Input W rounds)) :=
   adversary >>= nativeStoppedCompletionAfter rounds guards
 
 /-- Erasing the returned source log from the established stopped joint program recovers the
 unlogged native stopped execution without changing any oracle effect. -/
 theorem randomizedStoppedExecution_eraseSourceLog
-    (rounds : List Round)
-    (guards : GuardSchedule Input Salt rounds)
+    (rounds : Input → List Round)
+    (guards : (z : Input) → GuardSchedule Salt (rounds z))
     (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
     Prod.fst <$>
       randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary =
@@ -235,30 +235,30 @@ theorem randomizedStoppedExecution_eraseSourceLog
     _ = _ := rfl
 
 /-- Complete one selected transcript by querying only the encoded image of native keys. -/
-def encodedExternalCompletionAfter (rounds : List Round)
+def encodedExternalCompletionAfter (rounds : Input → List Round)
     (common : CommonChallenge Input Salt C rounds)
     (codec : StrictCodec (Key Input Salt rounds) D)
-    (guards : GuardSchedule Input Salt rounds)
-    (selected : Option (Input × Messages Salt rounds × W)) :
+    (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (selected : Option (Selection Input Salt W rounds)) :
     OracleComp (unifSpec + (D →ₒ C))
-      (Option (Input × (protocol rounds).tree.ExecutionPath × W)) :=
+      (Option (Outcome Input W rounds)) :=
   match selected with
   | none => pure none
-  | some (z, messages, witness) =>
-      (fun path => path.map (fun p => (z, p, witness))) <$>
+  | some ⟨z, messages, witness⟩ =>
+      (fun path => path.map (fun p => ⟨z, p, witness⟩)) <$>
         simulateQ (encodedCompletionQueries common codec)
           (stoppedComplete rounds guards z messages)
 
 /-- One external encoded-domain run: arbitrary adversary calls, then stopped completion on the
 selected messages. Rejection and adversary failure retain their already executed oracle effects. -/
-def encodedExternalStoppedExecution (rounds : List Round)
+def encodedExternalStoppedExecution (rounds : Input → List Round)
     (common : CommonChallenge Input Salt C rounds)
     (codec : StrictCodec (Key Input Salt rounds) D)
-    (guards : GuardSchedule Input Salt rounds)
+    (guards : (z : Input) → GuardSchedule Salt (rounds z))
     (external : OracleComp (unifSpec + (D →ₒ C))
-      (Option (Input × Messages Salt rounds × W))) :
+      (Option (Selection Input Salt W rounds))) :
     OracleComp (unifSpec + (D →ₒ C))
-      (Option (Input × (protocol rounds).tree.ExecutionPath × W)) :=
+      (Option (Outcome Input W rounds)) :=
   external >>= encodedExternalCompletionAfter rounds common codec guards
 
 
@@ -282,12 +282,12 @@ theorem encodedRoute_nativeValue_bind
 
 /-- The external completion branch has exactly the native stopped result after decoding its
 image hash queries. This is program equality, including rejection and already sampled coins. -/
-theorem encodedExternalCompletion_route_value (rounds : List Round)
+theorem encodedExternalCompletion_route_value (rounds : Input → List Round)
     (common : CommonChallenge Input Salt C rounds)
     (codec : StrictCodec (Key Input Salt rounds) D)
     [DecidableEq D] [SampleableType C]
-    (guards : GuardSchedule Input Salt rounds)
-    (selected : Option (Input × Messages Salt rounds × W))
+    (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (selected : Option (Selection Input Salt W rounds))
     (off : (D →ₒ C).QueryCache) :
     (fun result => result.1.1) <$>
       common.simulateNative
@@ -305,7 +305,7 @@ theorem encodedExternalCompletion_route_value (rounds : List Round)
       simp only [CommonChallenge.simulateNative, simulateQ_map, Functor.map_map]
       simpa only [CommonChallenge.simulateNative, Functor.map_map,
         Function.comp_def] using (congrArg (fun program =>
-        (fun path => path.map (fun p => (z, p, witness))) <$> program)
+        (fun path => path.map (fun p => (⟨z, p, witness⟩ : Outcome Input W rounds))) <$> program)
         (commonCompletion_native_eraseLog common
           (stoppedComplete rounds guards z messages)))
 
@@ -314,13 +314,13 @@ theorem encodedExternalCompletion_route_value (rounds : List Round)
 have the same selected output as the translated native stopped game. This is a source-program
 equality, not a postulated game correspondence. The full external log/cache remain available
 from `StrictCodec.routedLoggedRun_eq_randomOracleLoggedRun`. -/
-theorem encodedExternalStopped_route_nativeValue (rounds : List Round)
+theorem encodedExternalStopped_route_nativeValue (rounds : Input → List Round)
     (common : CommonChallenge Input Salt C rounds)
     (codec : StrictCodec (Key Input Salt rounds) D)
     [DecidableEq D] [SampleableType C]
-    (guards : GuardSchedule Input Salt rounds)
+    (guards : (z : Input) → GuardSchedule Salt (rounds z))
     (external : OracleComp (unifSpec + (D →ₒ C))
-      (Option (Input × Messages Salt rounds × W))) :
+      (Option (Selection Input Salt W rounds))) :
     (fun result => result.1.1) <$>
       common.simulateNative
         (codec.routeProgram
