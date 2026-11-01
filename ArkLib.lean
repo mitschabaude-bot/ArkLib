@@ -921,6 +921,7 @@ public import ArkLib.ProofSystem.Fri.Interaction.QueryKnowledge
 public import ArkLib.ProofSystem.Fri.Interaction.RoundKnowledge
 public import ArkLib.ProofSystem.Fri.Interaction.Schedule
 public import ArkLib.ProofSystem.Fri.Interaction.Soundness
+public import ArkLib.ProofSystem.Fri.Interaction.StateRestoration
 public import ArkLib.ProofSystem.Fri.Projection
 public import ArkLib.ProofSystem.Fri.QuerySoundness
 public import ArkLib.ProofSystem.Fri.RoundConsistency

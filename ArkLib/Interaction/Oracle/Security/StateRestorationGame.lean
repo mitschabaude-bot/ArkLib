@@ -133,7 +133,7 @@ theorem stateRestoration_knowledge_soundness
   rw [verificationGame_eq, simulateQ_map]
   simp only [StateT.run'_map', prEvent_map]
   simp only [extractInputWitness, ← inputLaw, ← outputLaw]
-  exact restored_extraction_bound state extractor Z errors preserving bounded
-    (fun z path => terminalWitness z path) adversary Q queryBound
+  exact (prEvent_mono _ _ _ fun result h => ⟨h.1, _, h.2⟩).trans
+    (restored_extraction_bound state extractor Z errors preserving bounded adversary Q queryBound)
 
 end Interaction.Oracle.Security.StateRestoration

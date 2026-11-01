@@ -201,8 +201,8 @@ theorem badExtractOnPath_completion
     ¬ (state z).holds ((extractor z).extractWitness
       (completedPath coin z messages table)
       (terminalWitness z (completedPath coin z messages table) witness)) at bad
-  exact badKey_of_completedPath state extractor Z preserving terminalWitness z messages witness
-    table bad.1 bad.2.1 bad.2.2
+  exact badKey_of_completedPath state extractor Z preserving z messages table
+    (terminalWitness z (completedPath coin z messages table) witness) bad.1 bad.2.1 bad.2.2
 
 /-- Continue a logged adversary output through completion, preserving the source phase log. -/
 def randomizedCompletionAfterAdversaryLog (coin : (z : Input) → PublicCoin (protocol z))

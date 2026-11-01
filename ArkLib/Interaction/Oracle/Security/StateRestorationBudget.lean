@@ -360,9 +360,10 @@ theorem restoredExecution_cost {Input Salt W : Type} {protocol : Input → Proto
   simpa only [add_zero] using completed
 
 /-- Per-node knowledge errors imply the `Q * max + sum` extraction bound in the actual cached
-restoration experiment. Inputs may be adaptive and keys may be queried out of order or repeatedly.
-The terminal witness is supplied by the adversary; extraction remains the named backward map.
-The sum budget is proved for completion, rather than assumed independent of earlier accesses. -/
+restoration experiment: the completed path has a valid terminal witness whose backward extraction
+fails with probability at most `Q * maxError errors + sumError errors`. Inputs may be adaptive and
+keys may be queried out of order or repeatedly. The sum budget is proved for completion, rather
+than assumed independent of earlier accesses. -/
 theorem restored_extraction_bound {Input Salt W : Type} {protocol : Input → Protocol}
     {coin : (z : Input) → PublicCoin (protocol z)} [DecidableEq Input] [DecidableEq Salt]
     (state : Input → KnowledgeState.{w})
@@ -371,22 +372,17 @@ theorem restored_extraction_bound {Input Salt W : Type} {protocol : Input → Pr
     (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z) (protocol z).roles
       (errorSchedule (coin z) (errors z)))
-    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
-      W → ((extractor z).terminalState path).Witness)
     (adversary : OracleComp (oracleSpec Input Salt coin) (Selection Input Salt W coin))
     (Q : ℕ) (queryBound : IsTotalQueryBound adversary Q) :
     Pr{let result ← (simulateQ randomOracle (restoredExecution coin adversary)).run' ∅}[
-      result.1 ∈ Z ∧
-      ((extractor result.1).terminalState result.2.1).holds
-        (terminalWitness result.1 result.2.1 result.2.2) ∧
-      ¬ (state result.1).holds ((extractor result.1).extractWitness result.2.1
-        (terminalWitness result.1 result.2.1 result.2.2))] ≤
+      result.1 ∈ Z ∧ ∃ witness, ((extractor result.1).terminalState result.2.1).holds witness ∧
+        ¬ (state result.1).holds ((extractor result.1).extractWitness result.2.1 witness)] ≤
       Q * maxError errors + sumError errors := by
   apply prEvent_randomOracle_le_of_bad_queries_weighted _ (keyError errors) _
     (restoredExecution_cost coin errors adversary Q queryBound) _
     (badKey state extractor Z)
   · exact badKey_resample_bound state extractor Z errors bounded
-  · exact restored_bad_trace state extractor Z preserving terminalWitness adversary
+  · exact restored_bad_trace state extractor Z preserving adversary
 
 /-! ### Errors of a knowledge certificate -/
 

@@ -68,7 +68,10 @@ home_page/            site assets and assembled website root
   inputs: `Protocol.lean` defines the tree, the query-reading verifier and the honest prover,
   `Completeness.lean` proves probability-one completeness, `RoundKnowledge.lean` and
   `QueryKnowledge.lean` the per-round knowledge certificates, and `Soundness.lean` composes them and
-  bounds acceptance of far inputs (`acceptance_le`, `acceptance_le_plonky3`).
+  bounds acceptance of far inputs (`acceptance_le`, `acceptance_le_plonky3`). `StateRestoration.lean`
+  gives the verifier's checks as a terminal program of the branch and bounds the state-restoration
+  game of FRI's public-coin presentation (`stateRestoration_le`) by `Q * maxError + sumError` of
+  the node errors.
 - `ArkLib/OracleReduction/` remains the conceptual center of the legacy reduction and security
   layer while protocol clients migrate. `FiatShamir/Basic.lean` owns the transform;
   `FiatShamir/Completeness.lean` adds fixed-table perfect completeness and shared lazy

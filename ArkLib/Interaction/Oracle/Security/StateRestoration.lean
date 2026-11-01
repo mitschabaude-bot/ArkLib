@@ -515,22 +515,18 @@ theorem badKey_update_iff {Input Salt : Type} {protocol : Input → Protocol}
 
 /-- A valid terminal witness whose backward extraction fails on the completed path of input `z`
 identifies a bad key among that completion's keys. -/
-theorem badKey_of_completedPath {Input Salt W : Type} {protocol : Input → Protocol}
+theorem badKey_of_completedPath {Input Salt : Type} {protocol : Input → Protocol}
     {coin : (z : Input) → PublicCoin (protocol z)}
     (state : Input → KnowledgeState.{w})
     (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Z : Set Input)
     (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
-    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
-      W → ((extractor z).terminalState path).Witness)
-    (z : Input) (messages : Messages Salt (coin z)) (witness : W)
-    (table : Table Input Salt coin)
+    (z : Input) (messages : Messages Salt (coin z)) (table : Table Input Salt coin)
+    (witness : ((extractor z).terminalState (completedPath coin z messages table)).Witness)
     (hz : z ∈ Z)
-    (holds : ((extractor z).terminalState (completedPath coin z messages table)).holds
-      (terminalWitness z (completedPath coin z messages table) witness))
+    (holds : ((extractor z).terminalState (completedPath coin z messages table)).holds witness)
     (fails : ¬ (state z).holds ((extractor z).extractWitness
-      (completedPath coin z messages table)
-      (terminalWitness z (completedPath coin z messages table) witness))) :
+      (completedPath coin z messages table) witness)) :
     ∃ key ∈ completionKeys coin z messages, badKey state extractor Z key table := by
   have hbad := RoundExtractor.extraction_failure_implies_bad_challenge (extractor z)
     (protocol z).roles (preserving z hz) _ _ holds fails
@@ -538,24 +534,20 @@ theorem badKey_of_completedPath {Input Salt W : Type} {protocol : Input → Prot
     badChallengeOnPath_prefixPath (coin z) (extractor z) messages (Table.fibre table z) _ hbad
   exact ⟨⟨z, pre⟩, List.mem_map.mpr ⟨pre, hpre, rfl⟩, hz, hb⟩
 
-/-- Failed backward extraction from terminal knowledge identifies an actually accessed bad key. -/
+/-- A valid terminal witness of the completed path whose backward extraction fails identifies an
+actually accessed bad key. The witness is any witness of the completed path. -/
 theorem restored_bad_trace {Input Salt W : Type} {protocol : Input → Protocol}
     {coin : (z : Input) → PublicCoin (protocol z)}
     (state : Input → KnowledgeState.{w})
     (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Z : Set Input)
     (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
-    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
-      W → ((extractor z).terminalState path).Witness)
     (adversary : OracleComp (oracleSpec Input Salt coin) (Selection Input Salt W coin))
     (table : Table Input Salt coin)
     (bad : let result :=
         evalWithAnswerFn (QueryImpl.ofFn table) (restoredExecution coin adversary)
-      result.1 ∈ Z ∧
-      ((extractor result.1).terminalState result.2.1).holds
-        (terminalWitness result.1 result.2.1 result.2.2) ∧
-      ¬ (state result.1).holds ((extractor result.1).extractWitness result.2.1
-        (terminalWitness result.1 result.2.1 result.2.2))) :
+      result.1 ∈ Z ∧ ∃ witness, ((extractor result.1).terminalState result.2.1).holds witness ∧
+        ¬ (state result.1).holds ((extractor result.1).extractWitness result.2.1 witness)) :
     ∃ q ∈ tableQueryLog (restoredExecution coin adversary) table,
       badKey state extractor Z q.1 table := by
   let result := evalWithAnswerFn (QueryImpl.ofFn table) adversary
@@ -569,8 +561,9 @@ theorem restored_bad_trace {Input Salt W : Type} {protocol : Input → Protocol}
     rw [hresult, complete_eval]
   dsimp only at bad
   rw [heval] at bad
-  obtain ⟨key, hkey, hb⟩ := badKey_of_completedPath state extractor Z preserving
-    terminalWitness z messages witness table bad.1 bad.2.1 bad.2.2
+  obtain ⟨hz, terminal, holds, fails⟩ := bad
+  obtain ⟨key, hkey, hb⟩ := badKey_of_completedPath state extractor Z preserving z messages
+    table terminal hz holds fails
   have hmem : key ∈ (tableQueryLog (complete coin z messages) table).map Sigma.fst := by
     rwa [complete_log_keys]
   obtain ⟨q, hq, heq⟩ := List.mem_map.mp hmem

@@ -147,8 +147,42 @@ theorem stateRestoration_oracle_knowledge_soundness
   rw [closedVerificationGame_eq, simulateQ_map]
   simp only [StateT.run'_map', prEvent_map]
   simp only [extractInputWitness, ← inputLaw, ← outputLaw]
-  exact restored_extraction_bound state extractor Z errors preserving bounded
-    (fun z path => terminalWitness z path) adversary Q queryBound
+  exact (prEvent_mono _ _ _ fun result h => ⟨h.1, _, h.2⟩).trans
+    (restored_extraction_bound state extractor Z errors preserving bounded adversary Q queryBound)
+
+/-- **State-restoration extraction from knowledge certificates.** If every input's certificate
+samples its challenges uniformly, the restoration game, with any terminal program, completes a
+path that has a valid terminal witness whose backward extraction fails with probability at most
+`Q * maxError + sumError` of the certificates' node errors (`supErrors`), for an adversary making
+at most `Q` queries. The terminal witness is any witness of the completed path. -/
+theorem KnowledgeCertificate.stateRestoration_extraction_le
+    [DecidableEq Input] [DecidableEq Salt] (coin : (z : Input) → PublicCoin (protocol z))
+    (state : Input → KnowledgeState.{w})
+    (certificate : (z : Input) → KnowledgeCertificate (protocol z).tree (protocol z).roles
+      (state z))
+    (uniform : ∀ z, UniformChallenges (coin z) (certificate z).challenges)
+    (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
+    (Out : (z : Input) → (protocol z).tree.BranchPath → Type)
+    (terminal : (z : Input) → (p : (protocol z).tree.BranchPath) →
+      OracleComp (ofPFunctor (accessAfter (protocol z).tree
+        (protocol z).oracles initial p)) (Out z p))
+    (adversary : OracleComp (oracleSpec Input Salt coin) (Selection Input Salt W coin))
+    (Q : ℕ) (queryBound : IsTotalQueryBound adversary Q) :
+    Pr{let result ← (simulateQ randomOracle
+        (verificationGame coin initial impl Out terminal adversary)).run' ∅}[
+      ∃ witness, ((certificate result.1).extractor.terminalState result.2.1).holds witness ∧
+        ¬ (state result.1).holds
+          ((certificate result.1).extractor.extractWitness result.2.1 witness)] ≤
+      Q * maxError (fun z => supErrors (coin z) (certificate z).challenges) +
+        sumError (fun z => supErrors (coin z) (certificate z).challenges) := by
+  rw [verificationGame_eq, simulateQ_map]
+  simp only [StateT.run'_map', prEvent_map]
+  exact (prEvent_mono _ _ _ fun result h => ⟨Set.mem_univ _, h⟩).trans
+    (restored_extraction_bound state (fun z => (certificate z).extractor) Set.univ
+      (fun z => supErrors (coin z) (certificate z).challenges)
+      (fun z _ => (certificate z).prover_preserving)
+      (fun z _ => isLocallyBounded_errorSchedule (coin z) _ _ (uniform z)
+        (certificate z).local_bound _ fun _ => le_rfl) adversary Q queryBound)
 
 /-- **State-restoration knowledge soundness of a public-coin protocol from its knowledge
 certificates.** If every input's certificate samples its challenges uniformly, the closed oracle
