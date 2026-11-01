@@ -17,8 +17,8 @@ results:
   for the actual interpreted executor;
 - witness-indexed round-by-round knowledge certificates, backward extraction along execution paths,
   and their sequential composition at closed intermediate claims;
-- state-restoration knowledge soundness for fixed-round public-coin protocols, including oracle
-  outputs, pre-sampled private coins and per-round errors;
+- state-restoration knowledge soundness for public-coin protocols whose rounds are a function of
+  the input, including oracle outputs, pre-sampled private coins and per-round errors;
 - measured extraction stages: operation-count budgets for the named backward witness maps;
 - Sumcheck with soundness, completeness, round-by-round soundness, and a computable verifier
   and honest prover;
@@ -408,21 +408,24 @@ local bound to the actual interpreted receiver action when the verifier satisfie
 invalid input witness with probability at most the largest sum of local errors along a path of
 the challenge schedule.
 
-**State restoration.** The protocol is a fixed-round public-coin protocol on an interaction tree. Each
-restoration key holds the input, round, prover-message prefix and salt prefix, and challenges come
-from one cached random oracle. The adversary chooses the input, all messages and salts, and an
-output witness after adaptive queries, with at most `Q` queries in total. For `k` rounds,
-`stateRestoration_knowledge_soundness` bounds by `(Q + k) * error` the probability that the output
-relation holds while the named backward extraction fails. The actual verifier runs on the
-completed challenges, and its execution equation is proved from the paired runner.
-`stateRestoration_oracle_knowledge_soundness` gives the same bound when the verifier returns an
-open oracle claim and the relation observes its closed behavior under that path's handler;
-rejection is unsuccessful. With per-round errors `error_j`,
+**State restoration.** The protocol is a public-coin protocol on an interaction tree whose rounds
+are a function of the input: input `z` runs `protocol (rounds z)`. Each restoration key is an input
+together with a salted prefix of its rounds (round, prover-message prefix and salt prefix), and
+challenges come from one cached random oracle. The adversary chooses the input, all messages and
+salts, and an output witness after adaptive queries, with at most `Q` queries in total. When every
+input has at most `k` rounds, `stateRestoration_knowledge_soundness` bounds by `(Q + k) * error` the
+probability that the output relation holds while the named backward extraction fails. The actual
+verifier runs on the completed challenges, and its execution equation is proved from the paired
+runner. `stateRestoration_oracle_knowledge_soundness` gives the same bound when the verifier returns
+an open oracle claim and the relation observes its closed behavior under that path's handler;
+rejection is unsuccessful. With per-round errors `error z j`, which may depend on the input,
 `stateRestoration_oracle_knowledge_soundness_nonuniform` gives
-`Q * max_j error_j + Σ_j error_j`. The `privateCoins` forms keep the `(Q + k) * error` bound when
-the adversary's possibly failing private coins are sampled before the fresh cached game; they do
-not cover arbitrary interleaving of coin and oracle effects. Inputs and salts may have infinite
-types; each round's challenges use a finite nonempty uniform sampler.
+`Q * (⨆ z, max_j error z j) + ⨆ z, Σ_j error z j`; with rounds and errors independent of the input,
+`stateRestoration_oracle_knowledge_soundness_nonuniform_fixed` gives `Q * max_j error_j + Σ_j error_j`.
+The `privateCoins` forms keep the `(Q + k) * error` bound when the adversary's possibly failing
+private coins are sampled before the fresh cached game; they do not cover arbitrary interleaving of
+coin and oracle effects. Inputs and salts may have infinite types; each round's challenges use a
+finite nonempty uniform sampler.
 
 **Measured extraction.** `RoundExtractor.stageMap` combines the backward maps at a node into one
 stage. `RoundExtractor.MeasuredStages` names, for the stage at every authored node, a budgeted

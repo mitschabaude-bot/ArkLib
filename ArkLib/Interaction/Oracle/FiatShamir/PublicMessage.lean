@@ -8,7 +8,7 @@ module
 public import ArkLib.Interaction.Oracle.Security.StateRestoration
 
 /-!
-# Public-message presentation of the fixed-round restoration fragment
+# Public-message presentation of the restoration fragment
 
 The restoration certificate is phrased over oracle-message nodes. A Fiat–Shamir proof instead
 contains public prover messages. These are distinct native protocol nodes: a public message is

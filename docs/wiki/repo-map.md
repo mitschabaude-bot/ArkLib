@@ -53,8 +53,9 @@ home_page/            site assets and assembled website root
   sum of the local challenge errors (`count * error` in the uniform case). `Knowledge.lean` defines
   witness-indexed knowledge certificates (`RoundExtractor`, `KnowledgeCertificate`);
   `KnowledgeAppend.lean` and `KnowledgeComposition.lean` compose them along dependent append.
-  The `StateRestoration*.lean` modules prove state-restoration knowledge soundness for fixed-round
-  public-coin protocols with bound `(Q + rounds.length) * error`, with variants for oracle outputs
+  The `StateRestoration*.lean` modules prove state-restoration knowledge soundness for public-coin
+  protocols whose rounds are a function of the input, with bound `(Q + k) * error` when every input
+  has at most `k` rounds, with variants for oracle outputs
   (`StateRestorationOracle`), pre-sampled private coins (`StateRestorationCoins`) and per-round
   errors (`StateRestorationBudget`). The measured forms are described under measured extraction
   below. `ProofSystem/Sumcheck/Interaction/RoundByRound.lean` is the interaction-layer Sumcheck client.

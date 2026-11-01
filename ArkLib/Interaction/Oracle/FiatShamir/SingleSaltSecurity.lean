@@ -12,9 +12,13 @@ public import ArkLib.Interaction.Oracle.Security.StateRestorationStoppedBudget
 /-!
 # Knowledge security of native single-salt Fiat–Shamir
 
-The adversary selects a statement, one global salt, a full message proof and a terminal seed.
-Verification runs the public-message native strategy executor. Both phases share the same lazy
-challenge oracle; verification stops before querying a challenge whose prefix guard fails.
+The rounds are a function of the statement. The adversary selects a statement, one global salt, a
+full message proof for that statement's rounds and a terminal seed. Verification runs the
+public-message native strategy executor. Both phases share the same lazy challenge oracle, keyed by
+`(statement, salt)` and a prefix of the statement's rounds; verification stops before querying a
+challenge whose prefix guard fails. Errors may depend on the statement: the bounds charge the
+largest error over all statements and rounds per distinct adversary key, and the largest total
+error of one statement's rounds for verification.
 -/
 
 @[expose] public section

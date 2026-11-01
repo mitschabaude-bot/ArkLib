@@ -313,21 +313,23 @@ black-box access. Bridges from round-by-round security, special soundness, and t
 state their entropy, salt, replay, budget, and loss assumptions.
 
 Implemented in `ArkLib/Interaction/Oracle/Security/`: the bridge from interaction-layer round-by-round
-knowledge to state-restoration knowledge soundness, for fixed-round public-coin protocols with
-uniform challenge samplers. Restoration keys contain the input, round, prover-message prefix and
-salt prefix, and the adversary makes at most `Q` cached oracle queries.
+knowledge to state-restoration knowledge soundness, for public-coin protocols whose rounds are a
+function of the input, with uniform challenge samplers. Restoration keys are an input together with
+a round, prover-message prefix and salt prefix of that input's rounds, and the adversary makes at
+most `Q` cached oracle queries.
 
 - `Interaction.Oracle.Security.StateRestoration.stateRestoration_knowledge_soundness`: if every
-  round extractor is prover-preserving and locally bounded by `error`, the named backward extractor
-  fails on a valid output with probability at most `(Q + rounds.length) * error`. This is the
-  `(B+r)` loss of the original design.
+  round extractor is prover-preserving and locally bounded by `error`, and every input has at most
+  `k` rounds, the named backward extractor fails on a valid output with probability at most
+  `(Q + k) * error`. This is the `(B+r)` loss of the original design.
 - `stateRestoration_oracle_knowledge_soundness`: the same bound when the verifier returns an open
   oracle claim and the output relation observes its closed behavior.
 - `stateRestoration_knowledge_soundness_privateCoins` and
   `stateRestoration_oracle_knowledge_soundness_privateCoins`: the same bound when the adversary's
   private coins are sampled before the cached game.
 - `stateRestoration_oracle_knowledge_soundness_nonuniform` (`StateRestorationBudget.lean`): with
-  per-round errors, the bound is `Q * Finset.univ.sup errors + ∑ j, errors j`.
+  per-round errors that may depend on the input, the bound is `Q * maxError errors + sumError
+  errors`, the largest error over all inputs and rounds and the largest total of one input's rounds.
 
 Still open: rewinding knowledge soundness
 ([#1410](https://github.com/Verified-zkEVM/ArkLib/issues/1410)) and the bridges to Fiat–Shamir and

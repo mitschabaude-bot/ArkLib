@@ -35,7 +35,7 @@ open Interaction.Oracle.TypeTree
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-/-- One fixed round: a prover oracle message, its permitted interface, and a uniform challenge. -/
+/-- One round: a prover oracle message, its permitted interface, and a uniform challenge. -/
 structure Round where
   Message : Type
   Challenge : Type

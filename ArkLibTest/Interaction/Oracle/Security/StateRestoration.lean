@@ -297,4 +297,18 @@ example : Pr{let _result ← ((failure : OptionT ProbComp Bool) >>= fun coin => 
         (coinAdversary coin))).run' ∅))}[True] = 0 := by
   simp [failure_bind]
 
+/-! Rounds that depend on the input: input `n` runs `n` rounds. -/
+
+def lengthRounds (n : Nat) : List Round := List.replicate n round
+
+/-- Completion of input `2` reads one key per round, each carrying the input. -/
+example : completionKeys (Salt := Unit) lengthRounds 2
+      ⟨(1 : Fin 8), (), (2 : Fin 8), (), PUnit.unit⟩ =
+    [⟨2, Prefix.here (1 : Fin 8) ()⟩,
+      ⟨2, Prefix.later (1 : Fin 8) () (Prefix.here (2 : Fin 8) ())⟩] := rfl
+
+example (n : Nat) (messages : Messages Unit (lengthRounds n)) :
+    IsTotalQueryBound (complete (Input := Nat) lengthRounds n messages) n := by
+  simpa [lengthRounds] using complete_queryBound lengthRounds n messages
+
 end Interaction.Oracle.Security.StateRestorationTest

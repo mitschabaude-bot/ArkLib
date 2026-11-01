@@ -16,9 +16,10 @@ verifier then runs on those completed challenges and queries its actual accumula
 Its execution equation is proved from the runner, without a table available to the game.
 
 The principal theorem converts all-authored-prefix round-by-round knowledge certificates into the
-relation-level `(Q + k) * error` bound. A named terminal witness equivalence and endpoint iff laws
-identify the supplied output witness and the extracted input witness. Extraction cost and private
-random coins are separate statements; the adversary here is a total oracle program.
+relation-level `(Q + k) * error` bound, for inputs of at most `k` rounds. A named terminal witness
+equivalence and endpoint iff laws identify the supplied output witness and the extracted input
+witness. Extraction cost and private random coins are separate statements; the adversary here is
+a total oracle program.
 -/
 
 @[expose] public section
