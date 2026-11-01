@@ -63,7 +63,12 @@ home_page/            site assets and assembled website root
   largest path error. `HashChain.lean` reduces a hash chain (a sponge or duplex oracle whose
   answers carry the next query's state) to a random oracle keyed by the input prefix, up to a
   state collision or prediction, `Q (Q + 1) / 2 / |S|` for `Q` chain queries, and gives the
-  prefix encoding of chain keys off that event.
+  prefix encoding of chain keys off that event. `DecodedChallenges.lean` presents a public-coin protocol with
+  every challenge decoded from common coins (`PublicCoin.decoded`) and pulls knowledge certificates
+  back along the decoders, their errors scaled by the decoders' ratio to uniform.
+  `HashChainEncoded.lean` is Fiat–Shamir on a hash chain: the verifier absorbs each key's encoding
+  (`ChainCodec`) through the chain, and the knowledge error is `chainError S q` plus the encoded
+  random oracle's bound (`chainStopped_knowledge_soundness`, and its certificate form).
 - `ProofSystem/Fri/Interaction/` is FRI on the interaction layer, with Plonky3's folds and injected
   inputs: `Protocol.lean` defines the tree, the query-reading verifier and the honest prover,
   `Completeness.lean` proves probability-one completeness, `RoundKnowledge.lean` and
