@@ -11,8 +11,10 @@ public import ArkLib.Interaction.Oracle.Security.StateRestoration
 # Public-message presentation of the restoration fragment
 
 The restoration certificate is phrased over oracle-message nodes. A Fiat–Shamir proof instead
-contains public prover messages. These are distinct native protocol nodes: a public message is
-retained in the branch history, whereas an oracle message contributes only a unit branch and its
+contains every prover message in the clear: `publicProtocol` sends each oracle message as a
+public prover message. A proof is a `Messages PUnit coin`: the prover's moves and messages, with
+the trivial per-challenge salt, since the single global salt is part of the statement. These are
+distinct native protocol nodes: a public message is retained in the branch history, whereas an oracle message contributes only a unit branch and its
 payload is available through its declared oracle interface. This file gives the public protocol
 and transports its *concrete execution path* to the certificate protocol's execution path.
 
@@ -30,94 +32,58 @@ namespace Interaction.Oracle.FiatShamir
 
 open Security.StateRestoration
 
-/-- Alternating public prover messages and public verifier challenges. -/
-def publicProtocol : List Round → Protocol
-  | [] => .done
-  | round :: rounds => .public .sender round.Message (fun _ =>
-      .public .receiver round.Challenge (fun _ => publicProtocol rounds))
+/-- The protocol with every oracle message sent as a public prover message. -/
+def publicProtocol : {protocol : Protocol} → PublicCoin protocol → Protocol
+  | _, .done => .done
+  | _, @PublicCoin.sender Moves _ _ next =>
+      .public .sender Moves fun move => publicProtocol (next move)
+  | _, @PublicCoin.oracle Messages _ _ _ next =>
+      .public .sender Messages fun _ => publicProtocol next
+  | _, @PublicCoin.challenge Challenge _ _ _ _ next =>
+      .public .receiver Challenge fun _ => publicProtocol next
 
-/-- Full public prover-message proof, without restoration's per-round salt fields. -/
-def PublicMessages : List Round → Type
-  | [] => PUnit
-  | round :: rounds => round.Message × PublicMessages rounds
-
-/-- Insert the trivial per-round restoration salt. A single global salt is part of the input. -/
-def withUnitSalts : (rounds : List Round) → PublicMessages rounds → Messages PUnit rounds
-  | [], _ => PUnit.unit
-  | _ :: rounds, (message, messages) =>
-      ⟨message, PUnit.unit, withUnitSalts rounds messages⟩
-
-/-- Discard the trivial per-round restoration salts. -/
-def withoutUnitSalts : (rounds : List Round) → Messages PUnit rounds → PublicMessages rounds
-  | [], _ => PUnit.unit
-  | _ :: rounds, (message, _, messages) =>
-      ⟨message, withoutUnitSalts rounds messages⟩
-
-@[simp]
-theorem withoutUnitSalts_withUnitSalts (rounds : List Round)
-    (messages : PublicMessages rounds) :
-    withoutUnitSalts rounds (withUnitSalts rounds messages) = messages := by
-  induction rounds with
-  | nil => cases messages; rfl
-  | cons round rounds ih =>
-      rcases messages with ⟨message, messages⟩
-      simp only [withUnitSalts, withoutUnitSalts, ih]
-      rfl
-
-@[simp]
-theorem withUnitSalts_withoutUnitSalts (rounds : List Round)
-    (messages : Messages PUnit rounds) :
-    withUnitSalts rounds (withoutUnitSalts rounds messages) = messages := by
-  induction rounds with
-  | nil => cases messages; rfl
-  | cons round rounds ih =>
-      rcases messages with ⟨message, salt, messages⟩
-      cases salt
-      simp only [withUnitSalts, withoutUnitSalts, ih]
-      rfl
-
-/-- The concrete path forgets whether the message node was public or oracle-authored. -/
-def toRestorationPath : (rounds : List Round) →
-    (publicProtocol rounds).tree.ExecutionPath → (protocol rounds).tree.ExecutionPath
-  | [], _ => PUnit.unit
-  | _ :: rounds, path =>
-      ⟨path.1, ⟨path.2.1, toRestorationPath rounds path.2.2⟩⟩
+/-- The concrete path forgets whether a message node was public or oracle-authored. -/
+def toRestorationPath : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    (publicProtocol coin).tree.ExecutionPath → protocol.tree.ExecutionPath
+  | _, .done, _ => PUnit.unit
+  | _, @PublicCoin.sender _ _ _ next, path => ⟨path.1, toRestorationPath (next path.1) path.2⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, path => ⟨path.1, toRestorationPath next path.2⟩
+  | _, @PublicCoin.challenge _ _ _ _ _ next, path => ⟨path.1, toRestorationPath next path.2⟩
 
 /-- Recover the same concrete public transcript from a restoration execution path. -/
-def toPublicPath : (rounds : List Round) →
-    (protocol rounds).tree.ExecutionPath → (publicProtocol rounds).tree.ExecutionPath
-  | [], _ => PUnit.unit
-  | _ :: rounds, path =>
-      ⟨path.1, ⟨path.2.1, toPublicPath rounds path.2.2⟩⟩
+def toPublicPath : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    protocol.tree.ExecutionPath → (publicProtocol coin).tree.ExecutionPath
+  | _, .done, _ => PUnit.unit
+  | _, @PublicCoin.sender _ _ _ next, path => ⟨path.1, toPublicPath (next path.1) path.2⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, path => ⟨path.1, toPublicPath next path.2⟩
+  | _, @PublicCoin.challenge _ _ _ _ _ next, path => ⟨path.1, toPublicPath next path.2⟩
 
 @[simp]
-theorem toPublicPath_toRestorationPath (rounds : List Round)
-    (path : (publicProtocol rounds).tree.ExecutionPath) :
-    toPublicPath rounds (toRestorationPath rounds path) = path := by
-  induction rounds with
-  | nil => cases path; rfl
-  | cons round rounds ih =>
-      rcases path with ⟨message, challenge, tail⟩
-      simp only [toRestorationPath, toPublicPath, ih]
-      rfl
+theorem toPublicPath_toRestorationPath {protocol : Protocol} (coin : PublicCoin protocol)
+    (path : (publicProtocol coin).tree.ExecutionPath) :
+    toPublicPath coin (toRestorationPath coin path) = path := by
+  induction coin with
+  | done => rfl
+  | sender next ih => exact Sigma.ext rfl (heq_of_eq (ih path.1 path.2))
+  | oracle next ih => exact Sigma.ext rfl (heq_of_eq (ih path.2))
+  | challenge next ih => exact Sigma.ext rfl (heq_of_eq (ih path.2))
 
 @[simp]
-theorem toRestorationPath_toPublicPath (rounds : List Round)
-    (path : (protocol rounds).tree.ExecutionPath) :
-    toRestorationPath rounds (toPublicPath rounds path) = path := by
-  induction rounds with
-  | nil => cases path; rfl
-  | cons round rounds ih =>
-      rcases path with ⟨message, challenge, tail⟩
-      simp only [toPublicPath, toRestorationPath, ih]
-      rfl
+theorem toRestorationPath_toPublicPath {protocol : Protocol} (coin : PublicCoin protocol)
+    (path : protocol.tree.ExecutionPath) :
+    toRestorationPath coin (toPublicPath coin path) = path := by
+  induction coin with
+  | done => rfl
+  | sender next ih => exact Sigma.ext rfl (heq_of_eq (ih path.1 path.2))
+  | oracle next ih => exact Sigma.ext rfl (heq_of_eq (ih path.2))
+  | challenge next ih => exact Sigma.ext rfl (heq_of_eq (ih path.2))
 
 /-- A concrete transcript equivalence. Its branch-history projections remain distinct. -/
-def pathEquiv (rounds : List Round) :
-    (publicProtocol rounds).tree.ExecutionPath ≃ (protocol rounds).tree.ExecutionPath where
-  toFun := toRestorationPath rounds
-  invFun := toPublicPath rounds
-  left_inv := toPublicPath_toRestorationPath rounds
-  right_inv := toRestorationPath_toPublicPath rounds
+def pathEquiv {protocol : Protocol} (coin : PublicCoin protocol) :
+    (publicProtocol coin).tree.ExecutionPath ≃ protocol.tree.ExecutionPath where
+  toFun := toRestorationPath coin
+  invFun := toPublicPath coin
+  left_inv := toPublicPath_toRestorationPath coin
+  right_inv := toRestorationPath_toPublicPath coin
 
 end Interaction.Oracle.FiatShamir

@@ -12,13 +12,13 @@ public import ArkLib.Interaction.Oracle.Security.StateRestorationStoppedBudget
 /-!
 # Knowledge security of native single-salt Fiat–Shamir
 
-The rounds are a function of the statement. The adversary selects a statement, one global salt, a
-full message proof for that statement's rounds and a terminal seed. Verification runs the
+The coin are a function of the statement. The adversary selects a statement, one global salt, a
+full message proof for that statement's coin and a terminal seed. Verification runs the
 public-message native strategy executor. Both phases share the same lazy challenge oracle, keyed by
-`(statement, salt)` and a prefix of the statement's rounds; verification stops before querying a
+`(statement, salt)` and a prefix of the statement's coin; verification stops before querying a
 challenge whose prefix guard fails. Errors may depend on the statement: the bounds charge the
-largest error over all statements and rounds per distinct adversary key, and the largest total
-error of one statement's rounds for verification.
+largest error over all statements and coin per distinct adversary key, and the largest total
+error of one statement's coin for verification.
 -/
 
 @[expose] public section
@@ -31,29 +31,30 @@ open Security Security.StateRestoration
 
 universe w
 
-variable {Statement GlobalSalt Witness : Type} {rounds : Statement → List Round}
+variable {Statement GlobalSalt Witness : Type} {protocol : Statement → Protocol}
+    {coin : (statement : Statement) → PublicCoin (protocol statement)}
 
 /-- A malicious single-salt prover may interleave private coins and typed challenge queries. -/
-abbrev SingleSaltAdversary (Statement GlobalSalt Witness : Type)
-    (rounds : Statement → List Round) :=
-  OracleComp (unifSpec + saltedSpec Statement GlobalSalt rounds)
-    (Option (SaltedSelection Statement GlobalSalt Witness rounds))
+abbrev SingleSaltAdversary (Statement GlobalSalt Witness : Type) {protocol : Statement → Protocol}
+    (coin : (statement : Statement) → PublicCoin (protocol statement)) :=
+  OracleComp (unifSpec + saltedSpec Statement GlobalSalt coin)
+    (Option (SaltedSelection Statement GlobalSalt Witness coin))
 
 /-- Execute native verification after the selected proof, retaining the adversary phase log.
 Failure retains all spent queries. No verifier round is executed after a failed guard. -/
-def singleSaltExecution (rounds : Statement → List Round)
-    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (rounds z.1))
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds) :
-    OracleComp (unifSpec + saltedSpec Statement GlobalSalt rounds)
-      (Option (Outcome (Statement × GlobalSalt) Witness (saltedRounds GlobalSalt rounds)) ×
-        QueryLog (unifSpec + saltedSpec Statement GlobalSalt rounds)) := do
+def singleSaltExecution (coin : (statement : Statement) → PublicCoin (protocol statement))
+    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin) :
+    OracleComp (unifSpec + saltedSpec Statement GlobalSalt coin)
+      (Option (Outcome (Statement × GlobalSalt) Witness (saltedProtocol GlobalSalt protocol)) ×
+        QueryLog (unifSpec + saltedSpec Statement GlobalSalt coin)) := do
   let (selected, log) ← adversary.withQueryLog
   match selected with
   | none => pure (none, log)
   | some ⟨statement, (salt, messages), witness⟩ =>
       let path ← simulateQ (restorationQueries (Statement × GlobalSalt) PUnit
-          (saltedRounds GlobalSalt rounds))
-        (publicStoppedVerify (saltedRounds GlobalSalt rounds) guards (statement, salt) messages)
+          (saltedCoin GlobalSalt coin))
+        (publicStoppedVerify (saltedCoin GlobalSalt coin) guards (statement, salt) messages)
       pure (path.map (fun p => ⟨(statement, salt), p, witness⟩), log)
 
 private theorem withQueryLog_map_output {ι : Type} {spec : OracleSpec ι} {α β : Type}
@@ -65,10 +66,10 @@ private theorem withQueryLog_map_output {ι : Type} {spec : OracleSpec ι} {α �
 
 /-- The native joint experiment is exactly the induced stopped-restoration program. -/
 theorem singleSaltExecution_eq_stopped
-    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (rounds z.1))
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds) :
-    singleSaltExecution rounds guards adversary =
-      randomizedStoppedRestoredExecutionWithAdversaryLog (saltedRounds GlobalSalt rounds) guards
+    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin) :
+    singleSaltExecution coin guards adversary =
+      randomizedStoppedRestoredExecutionWithAdversaryLog (saltedCoin GlobalSalt coin) guards
         (inducedAdversary adversary) := by
   unfold singleSaltExecution randomizedStoppedRestoredExecutionWithAdversaryLog inducedAdversary
   rw [withQueryLog_map_output]
@@ -84,88 +85,88 @@ theorem singleSaltExecution_eq_stopped
         publicStoppedVerify_eq_stoppedComplete]
 
 /-- The adversary phase includes its selected proof, ordered logs and final challenge cache. -/
-abbrev SingleSaltAdversaryResult (Statement GlobalSalt Witness : Type)
-    (rounds : Statement → List Round) :=
-  (((Option (SaltedSelection Statement GlobalSalt Witness rounds) ×
-      QueryLog (unifSpec + saltedSpec Statement GlobalSalt rounds)) ×
-        QueryLog (saltedSpec Statement GlobalSalt rounds)) ×
-          (saltedSpec Statement GlobalSalt rounds).QueryCache)
+abbrev SingleSaltAdversaryResult (Statement GlobalSalt Witness : Type) {protocol : Statement → Protocol}
+    (coin : (statement : Statement) → PublicCoin (protocol statement)) :=
+  (((Option (SaltedSelection Statement GlobalSalt Witness coin) ×
+      QueryLog (unifSpec + saltedSpec Statement GlobalSalt coin)) ×
+        QueryLog (saltedSpec Statement GlobalSalt coin)) ×
+          (saltedSpec Statement GlobalSalt coin).QueryCache)
 
 /-- Expected distinct challenge keys queried by the malicious prover, including failed outputs. -/
 noncomputable def expectedSingleSaltAdversaryKeys
     [DecidableEq Statement] [DecidableEq GlobalSalt]
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds) : ENNReal :=
-  letI : MeasurableSpace (SingleSaltAdversaryResult Statement GlobalSalt Witness rounds) := ⊤
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin) : ENNReal :=
+  letI : MeasurableSpace (SingleSaltAdversaryResult Statement GlobalSalt Witness coin) := ⊤
   ∫⁻ phase, ((freshKeysOfLog phase.1.2).card : ENNReal)
     ∂𝒟[randomOracleLoggedRun adversary.withQueryLog ∅]
 
 /-- Repackaging a single-salt proof preserves the actual expected distinct adversary cost. -/
 theorem expectedSingleSaltAdversaryKeys_eq_induced
     [DecidableEq Statement] [DecidableEq GlobalSalt]
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds) :
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin) :
     expectedSingleSaltAdversaryKeys adversary =
-      expectedAdversaryFreshKeys (saltedRounds GlobalSalt rounds) (inducedAdversary adversary) := by
-  let : MeasurableSpace (SingleSaltAdversaryResult Statement GlobalSalt Witness rounds) := ⊤
+      expectedAdversaryFreshKeys (saltedCoin GlobalSalt coin) (inducedAdversary adversary) := by
+  let : MeasurableSpace (SingleSaltAdversaryResult Statement GlobalSalt Witness coin) := ⊤
   let : MeasurableSpace
       (((Option (Selection (Statement × GlobalSalt) PUnit Witness
-          (saltedRounds GlobalSalt rounds)) ×
-          QueryLog (unifSpec + saltedSpec Statement GlobalSalt rounds)) ×
-            QueryLog (saltedSpec Statement GlobalSalt rounds)) ×
-              (saltedSpec Statement GlobalSalt rounds).QueryCache) := ⊤
+          (saltedCoin GlobalSalt coin)) ×
+          QueryLog (unifSpec + saltedSpec Statement GlobalSalt coin)) ×
+            QueryLog (saltedSpec Statement GlobalSalt coin)) ×
+              (saltedSpec Statement GlobalSalt coin).QueryCache) := ⊤
   unfold expectedSingleSaltAdversaryKeys expectedAdversaryFreshKeys inducedAdversary
   rw [withQueryLog_map_output, randomOracleLoggedRun_map,
     lintegral_evalDist_map_of_discrete]
 
 /-- Native verification performs the prefix checks, then the explicit terminal acceptance check.
 The terminal check is pure; source observations use a matched stateless handler. -/
-def singleSaltVerify (rounds : Statement → List Round)
-    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (rounds z.1))
-    (accepts : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath → Bool)
-    (z : Statement × GlobalSalt) (messages : PublicMessages (rounds z.1)) :
-    OracleComp (saltedSpec Statement GlobalSalt rounds)
-      (Option (protocol (rounds z.1)).tree.ExecutionPath) :=
+def singleSaltVerify (coin : (statement : Statement) → PublicCoin (protocol statement))
+    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
+    (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
+    (z : Statement × GlobalSalt) (messages : Messages PUnit (coin z.1)) :
+    OracleComp (saltedSpec Statement GlobalSalt coin)
+      (Option (protocol z.1).tree.ExecutionPath) :=
   (fun path => path.filter (accepts z)) <$>
-    publicStoppedVerify (saltedRounds GlobalSalt rounds) guards z messages
+    publicStoppedVerify (saltedCoin GlobalSalt coin) guards z messages
 
 /-- Filter the returned transcript using the terminal check, leaving all phase logs intact. -/
 def acceptSingleSaltResult
-    (accepts : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath → Bool)
-    (result : Option (Outcome (Statement × GlobalSalt) Witness (saltedRounds GlobalSalt rounds)) ×
-        QueryLog (unifSpec + saltedSpec Statement GlobalSalt rounds)) :=
+    (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
+    (result : Option (Outcome (Statement × GlobalSalt) Witness (saltedProtocol GlobalSalt protocol)) ×
+        QueryLog (unifSpec + saltedSpec Statement GlobalSalt coin)) :=
   (result.1.filter (fun selected => accepts selected.1 selected.2.1), result.2)
 
 /-- The joint experiment whose returned value records actual prefix and terminal acceptance. -/
-def singleSaltAcceptedExecution (rounds : Statement → List Round)
-    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (rounds z.1))
-    (accepts : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath → Bool)
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds) :=
-  acceptSingleSaltResult accepts <$> singleSaltExecution rounds guards adversary
+def singleSaltAcceptedExecution (coin : (statement : Statement) → PublicCoin (protocol statement))
+    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
+    (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin) :=
+  acceptSingleSaltResult accepts <$> singleSaltExecution coin guards adversary
 
 /-- Terminal filtering preserves the exact ordered challenge log and final lazy cache. -/
 theorem singleSaltAcceptedExecution_loggedRun
     [DecidableEq Statement] [DecidableEq GlobalSalt]
-    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (rounds z.1))
-    (accepts : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath → Bool)
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds)
-    (cache : (saltedSpec Statement GlobalSalt rounds).QueryCache) :
-    randomOracleLoggedRun (singleSaltAcceptedExecution rounds guards accepts adversary) cache =
+    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
+    (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin)
+    (cache : (saltedSpec Statement GlobalSalt coin).QueryCache) :
+    randomOracleLoggedRun (singleSaltAcceptedExecution coin guards accepts adversary) cache =
       (fun result => ((acceptSingleSaltResult accepts result.1.1, result.1.2), result.2)) <$>
-        randomOracleLoggedRun (singleSaltExecution rounds guards adversary) cache := by
+        randomOracleLoggedRun (singleSaltExecution coin guards adversary) cache := by
   exact randomOracleLoggedRun_map _ _ _
 
 /-- The accepted experiment executes the concrete native verifier after the adversary phase. -/
 theorem singleSaltAcceptedExecution_eq_verify
-    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (rounds z.1))
-    (accepts : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath → Bool)
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds) :
-    singleSaltAcceptedExecution rounds guards accepts adversary = (do
+    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
+    (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin) :
+    singleSaltAcceptedExecution coin guards accepts adversary = (do
       let (selected, log) ← adversary.withQueryLog
       match selected with
       | none => pure (none, log)
       | some ⟨statement, (salt, messages), witness⟩ =>
           let path ← simulateQ (restorationQueries (Statement × GlobalSalt) PUnit
-              (saltedRounds GlobalSalt rounds))
-            (singleSaltVerify rounds guards accepts (statement, salt) messages)
+              (saltedCoin GlobalSalt coin))
+            (singleSaltVerify coin guards accepts (statement, salt) messages)
           pure (path.map (fun p => ⟨(statement, salt), p, witness⟩), log)) := by
   unfold singleSaltAcceptedExecution singleSaltExecution
   simp only [map_eq_pure_bind, bind_assoc]
@@ -189,32 +190,32 @@ theorem singleSaltAcceptedExecution_eq_verify
 /-- Pure terminal rejection changes acceptance, but not the joint run's distinct-query charge. -/
 theorem singleSaltAcceptedExecution_expectedCharge
     [DecidableEq Statement] [DecidableEq GlobalSalt]
-    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (rounds z.1))
-    (accepts : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath → Bool)
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds)
-    (errors : (z : Statement × GlobalSalt) → RoundErrors (rounds z.1)) :
-    expectedFreshQueryCharge (singleSaltAcceptedExecution rounds guards accepts adversary)
+    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
+    (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin)
+    (errors : (z : Statement × GlobalSalt) → Errors (coin z.1)) :
+    expectedFreshQueryCharge (singleSaltAcceptedExecution coin guards accepts adversary)
         (keyError errors) =
-      expectedFreshQueryCharge (singleSaltExecution rounds guards adversary) (keyError errors) := by
+      expectedFreshQueryCharge (singleSaltExecution coin guards adversary) (keyError errors) := by
   let : MeasurableSpace (StoppedJointResult (Statement × GlobalSalt) PUnit Witness
-      (saltedRounds GlobalSalt rounds)) := ⊤
+      (saltedCoin GlobalSalt coin)) := ⊤
   unfold expectedFreshQueryCharge
   rw [singleSaltAcceptedExecution_loggedRun, lintegral_evalDist_map_of_discrete]
 
 /-- The filtered failure event requires both the actual terminal check and the output relation. -/
 theorem badRelation_acceptSingleSaltResult
     (state : (Statement × GlobalSalt) → KnowledgeState.{w})
-    (extractor : (z : Statement × GlobalSalt) → RoundExtractor (protocol (rounds z.1)).tree
+    (extractor : (z : Statement × GlobalSalt) → RoundExtractor (protocol z.1).tree
       (state z))
     (Rin : (z : Statement × GlobalSalt) → (state z).Witness → Prop)
-    (Rout : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath →
+    (Rout : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath →
       Witness → Prop)
-    (seed : (z : Statement × GlobalSalt) → (path : (protocol (rounds z.1)).tree.ExecutionPath) →
+    (seed : (z : Statement × GlobalSalt) → (path : (protocol z.1).tree.ExecutionPath) →
       Witness → ((extractor z).terminalState path).Witness)
     (Z : Set (Statement × GlobalSalt))
-    (accepts : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath → Bool)
-    (result : Option (Outcome (Statement × GlobalSalt) Witness (saltedRounds GlobalSalt rounds)) ×
-        QueryLog (unifSpec + saltedSpec Statement GlobalSalt rounds)) :
+    (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
+    (result : Option (Outcome (Statement × GlobalSalt) Witness (saltedProtocol GlobalSalt protocol)) ×
+        QueryLog (unifSpec + saltedSpec Statement GlobalSalt coin)) :
     badStoppedRelation state extractor Rin Rout seed Z (acceptSingleSaltResult accepts result).1 ↔
       badStoppedRelation state extractor Rin
         (fun z path witness => accepts z path = true ∧ Rout z path witness) seed Z result.1 := by
@@ -230,32 +231,32 @@ theorem badRelation_acceptSingleSaltResult
 both the prefix guards and terminal check; extraction uses the supplied terminal seed verbatim. -/
 theorem singleSalt_knowledge_soundness
     [DecidableEq Statement] [DecidableEq GlobalSalt]
-    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (rounds z.1))
-    (accepts : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath → Bool)
-    (errors : (z : Statement × GlobalSalt) → RoundErrors (rounds z.1))
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds)
+    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
+    (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
+    (errors : (z : Statement × GlobalSalt) → Errors (coin z.1))
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin)
     (state : (Statement × GlobalSalt) → KnowledgeState.{w})
-    (extractor : (z : Statement × GlobalSalt) → RoundExtractor (protocol (rounds z.1)).tree
+    (extractor : (z : Statement × GlobalSalt) → RoundExtractor (protocol z.1).tree
       (state z))
     (Z : Set (Statement × GlobalSalt))
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z.1)).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z.1).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol (rounds z.1)).roles (roundErrorSchedule (rounds z.1) (errors z)))
+      (protocol z.1).roles (errorSchedule (coin z.1) (errors z)))
     (Rin : (z : Statement × GlobalSalt) → (state z).Witness → Prop)
-    (Rout : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath →
+    (Rout : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath →
       Witness → Prop)
-    (seed : (z : Statement × GlobalSalt) → (path : (protocol (rounds z.1)).tree.ExecutionPath) →
+    (seed : (z : Statement × GlobalSalt) → (path : (protocol z.1).tree.ExecutionPath) →
       Witness → ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness, accepts z path = true → Rout z path witness →
       ((extractor z).terminalState path).holds (seed z path witness)) :
     Pr{let joint ← (randomOracleLoggedRun
-      (singleSaltAcceptedExecution rounds guards accepts adversary) ∅)}[
+      (singleSaltAcceptedExecution coin guards accepts adversary) ∅)}[
       badStoppedRelation state extractor Rin Rout seed Z joint.1.1.1] ≤
-    expectedFreshQueryCharge (singleSaltAcceptedExecution rounds guards accepts adversary)
+    expectedFreshQueryCharge (singleSaltAcceptedExecution coin guards accepts adversary)
       (keyError errors) := by
   have bound := randomizedStopped_badRelation_le_expectedFreshCharge
-    (saltedRounds GlobalSalt rounds) guards errors
+    (saltedCoin GlobalSalt coin) guards errors
     (inducedAdversary adversary) state extractor Z preserving bounded Rin
     (fun z path witness => accepts z path = true ∧ Rout z path witness) seed inputLaw
     (fun z path witness accepted => outputLaw z path witness accepted.1 accepted.2)
@@ -265,34 +266,34 @@ theorem singleSalt_knowledge_soundness
   rw [singleSaltAcceptedExecution_loggedRun, prEvent_map]
   exact (prEvent_congr _ _ _
     (fun result : StoppedJointResult (Statement × GlobalSalt) PUnit Witness
-        (saltedRounds GlobalSalt rounds) =>
+        (saltedCoin GlobalSalt coin) =>
       badRelation_acceptSingleSaltResult state extractor Rin Rout seed Z accepts result.1.1)).le
 
 /-- Expected cost of verifier challenge calls actually executed in the accepted-output experiment.
 Terminal rejection does not erase the calls that preceded it. Cached hits are counted as calls. -/
 noncomputable def expectedSingleSaltVerifierCost
     [DecidableEq Statement] [DecidableEq GlobalSalt]
-    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (rounds z.1))
-    (accepts : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath → Bool)
-    (errors : (z : Statement × GlobalSalt) → RoundErrors (rounds z.1))
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds) : ENNReal :=
+    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
+    (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
+    (errors : (z : Statement × GlobalSalt) → Errors (coin z.1))
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin) : ENNReal :=
   letI : MeasurableSpace (StoppedJointResult (Statement × GlobalSalt) PUnit Witness
-      (saltedRounds GlobalSalt rounds)) := ⊤
+      (saltedCoin GlobalSalt coin)) := ⊤
   ∫⁻ result, stoppedVerifierRoundCost errors result.1.1.2 result.1.2
-    ∂𝒟[randomOracleLoggedRun (singleSaltAcceptedExecution rounds guards accepts adversary) ∅]
+    ∂𝒟[randomOracleLoggedRun (singleSaltAcceptedExecution coin guards accepts adversary) ∅]
 
-/-- Native execution preserves the exact expected cost of reached verifier rounds. -/
+/-- Native execution preserves the exact expected cost of reached verifier coin. -/
 theorem expectedSingleSaltVerifierCost_eq_stopped
     [DecidableEq Statement] [DecidableEq GlobalSalt]
-    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (rounds z.1))
-    (accepts : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath → Bool)
-    (errors : (z : Statement × GlobalSalt) → RoundErrors (rounds z.1))
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds) :
+    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
+    (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
+    (errors : (z : Statement × GlobalSalt) → Errors (coin z.1))
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin) :
     expectedSingleSaltVerifierCost guards accepts errors adversary =
-      expectedStoppedVerifierRoundCost (saltedRounds GlobalSalt rounds) guards errors
+      expectedStoppedVerifierRoundCost (saltedCoin GlobalSalt coin) guards errors
           (inducedAdversary adversary) := by
   let : MeasurableSpace (StoppedJointResult (Statement × GlobalSalt) PUnit Witness
-      (saltedRounds GlobalSalt rounds)) := ⊤
+      (saltedCoin GlobalSalt coin)) := ⊤
   unfold expectedSingleSaltVerifierCost expectedStoppedVerifierRoundCost
   rw [singleSaltAcceptedExecution_loggedRun, lintegral_evalDist_map_of_discrete,
     singleSaltExecution_eq_stopped guards adversary]
@@ -301,11 +302,11 @@ theorem expectedSingleSaltVerifierCost_eq_stopped
 /-- Actual native query costs separate adversary distinct keys from reached verifier calls. -/
 theorem singleSalt_query_cost
     [DecidableEq Statement] [DecidableEq GlobalSalt]
-    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (rounds z.1))
-    (accepts : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath → Bool)
-    (errors : (z : Statement × GlobalSalt) → RoundErrors (rounds z.1))
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds) :
-    expectedFreshQueryCharge (singleSaltAcceptedExecution rounds guards accepts adversary)
+    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
+    (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
+    (errors : (z : Statement × GlobalSalt) → Errors (coin z.1))
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin) :
+    expectedFreshQueryCharge (singleSaltAcceptedExecution coin guards accepts adversary)
         (keyError errors) ≤
       maxError errors * expectedSingleSaltAdversaryKeys adversary +
         expectedSingleSaltVerifierCost guards accepts errors adversary ∧
@@ -316,20 +317,20 @@ theorem singleSalt_query_cost
     expectedSingleSaltAdversaryKeys_eq_induced]
   constructor
   · simpa only [expectedStoppedJointAdversaryKeys_eq_expectedAdversaryFreshKeys] using
-      expectedStoppedFreshCharge_le_actualRounds (saltedRounds GlobalSalt rounds) guards errors
+      expectedStoppedFreshCharge_le_actualRounds (saltedCoin GlobalSalt coin) guards errors
           (inducedAdversary adversary)
-  · exact expectedStoppedVerifierRoundCost_le_sum (saltedRounds GlobalSalt rounds) guards errors
+  · exact expectedStoppedVerifierRoundCost_le_sum (saltedCoin GlobalSalt coin) guards errors
       (inducedAdversary adversary)
 
 /-- An actual supported-run cap on the malicious prover bounds its expected distinct-key cost. -/
 theorem expectedSingleSaltAdversaryKeys_le_queryBound
     [DecidableEq Statement] [DecidableEq GlobalSalt]
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds) (Q : ℕ)
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin) (Q : ℕ)
     (queryBound : ∀ phase ∈ support (randomOracleLoggedRun adversary.withQueryLog ∅),
       (freshKeysOfLog phase.1.2).card ≤ Q) :
     expectedSingleSaltAdversaryKeys adversary ≤ Q := by
   rw [expectedSingleSaltAdversaryKeys_eq_induced]
-  apply expectedAdversaryFreshKeys_le_queryBound (saltedRounds GlobalSalt rounds)
+  apply expectedAdversaryFreshKeys_le_queryBound (saltedCoin GlobalSalt coin)
     (inducedAdversary adversary) Q
   intro phase supported
   unfold inducedAdversary at supported
@@ -341,21 +342,21 @@ theorem expectedSingleSaltAdversaryKeys_le_queryBound
 bound. The named extractor and seed are fixed independently of the query budget. -/
 theorem singleSalt_knowledge_soundness_queryBound
     [DecidableEq Statement] [DecidableEq GlobalSalt]
-    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (rounds z.1))
-    (accepts : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath → Bool)
-    (errors : (z : Statement × GlobalSalt) → RoundErrors (rounds z.1))
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds)
+    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
+    (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
+    (errors : (z : Statement × GlobalSalt) → Errors (coin z.1))
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin)
     (state : (Statement × GlobalSalt) → KnowledgeState.{w})
-    (extractor : (z : Statement × GlobalSalt) → RoundExtractor (protocol (rounds z.1)).tree
+    (extractor : (z : Statement × GlobalSalt) → RoundExtractor (protocol z.1).tree
       (state z))
     (Z : Set (Statement × GlobalSalt))
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z.1)).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z.1).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol (rounds z.1)).roles (roundErrorSchedule (rounds z.1) (errors z)))
+      (protocol z.1).roles (errorSchedule (coin z.1) (errors z)))
     (Rin : (z : Statement × GlobalSalt) → (state z).Witness → Prop)
-    (Rout : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath →
+    (Rout : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath →
       Witness → Prop)
-    (seed : (z : Statement × GlobalSalt) → (path : (protocol (rounds z.1)).tree.ExecutionPath) →
+    (seed : (z : Statement × GlobalSalt) → (path : (protocol z.1).tree.ExecutionPath) →
       Witness → ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness, accepts z path = true → Rout z path witness →
@@ -364,14 +365,14 @@ theorem singleSalt_knowledge_soundness_queryBound
     (queryBound : ∀ phase ∈ support (randomOracleLoggedRun adversary.withQueryLog ∅),
       (freshKeysOfLog phase.1.2).card ≤ Q) :
     Pr{let joint ← (randomOracleLoggedRun
-      (singleSaltAcceptedExecution rounds guards accepts adversary) ∅)}[
+      (singleSaltAcceptedExecution coin guards accepts adversary) ∅)}[
       badStoppedRelation state extractor Rin Rout seed Z joint.1.1.1] ≤
     Q * maxError errors + sumError errors := by
   have security := singleSalt_knowledge_soundness guards accepts errors adversary
     state extractor Z preserving bounded Rin Rout seed inputLaw outputLaw
   have cost := singleSalt_query_cost guards accepts errors adversary
   calc
-    _ ≤ expectedFreshQueryCharge (singleSaltAcceptedExecution rounds guards accepts adversary)
+    _ ≤ expectedFreshQueryCharge (singleSaltAcceptedExecution coin guards accepts adversary)
           (keyError errors) := security
     _ ≤ maxError errors * expectedSingleSaltAdversaryKeys adversary +
           expectedSingleSaltVerifierCost guards accepts errors adversary := cost.1
@@ -381,30 +382,27 @@ theorem singleSalt_knowledge_soundness_queryBound
     _ = _ := by rw [mul_comm]
 
 /-- Uniform local errors and an actual adversary cap give the standard `(Q + k) * error`
-query charge, where every statement has at most `k` rounds. Early rejection can make the sharper
-expected-cost bound strictly smaller. -/
+query charge, where every path of every statement's protocol pays at most `k * error`. Early
+rejection can make the sharper expected-cost bound strictly smaller. -/
 theorem singleSalt_uniform_query_cost
     [DecidableEq Statement] [DecidableEq GlobalSalt]
-    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (rounds z.1))
-    (accepts : (z : Statement × GlobalSalt) → (protocol (rounds z.1)).tree.ExecutionPath → Bool)
+    (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
+    (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
     (error : ENNReal)
-    (adversary : SingleSaltAdversary Statement GlobalSalt Witness rounds) (Q k : ℕ)
+    (adversary : SingleSaltAdversary Statement GlobalSalt Witness coin) (Q k : ℕ)
     (queryBound : ∀ phase ∈ support (randomOracleLoggedRun adversary.withQueryLog ∅),
       (freshKeysOfLog phase.1.2).card ≤ Q)
-    (length_le : ∀ statement, (rounds statement).length ≤ k) :
-    expectedFreshQueryCharge (singleSaltAcceptedExecution rounds guards accepts adversary)
+    (path_le : ∀ statement, pathError (coin statement) (fun _ => error) ≤ k * error) :
+    expectedFreshQueryCharge (singleSaltAcceptedExecution coin guards accepts adversary)
       (keyError (fun _ _ => error)) ≤ (Q + k : ℕ) * error := by
   have cost := singleSalt_query_cost guards accepts (fun _ _ => error) adversary
-  have maximum : maxError (rounds := saltedRounds GlobalSalt rounds) (fun _ _ => error) ≤ error :=
-    iSup_le fun _ => Finset.sup_le fun _ _ => le_rfl
-  have total : sumError (rounds := saltedRounds GlobalSalt rounds) (fun _ _ => error) ≤
-      (k : ENNReal) * error := by
-    refine iSup_le fun z => ?_
-    simp only [Finset.sum_const, Finset.card_univ, Fintype.card_fin, nsmul_eq_mul]
-    gcongr
-    exact_mod_cast length_le z.1
+  have maximum : maxError (coin := saltedCoin GlobalSalt coin) (fun _ _ => error) ≤ error :=
+    iSup_le fun _ => iSup_le fun _ => le_rfl
+  have total : sumError (coin := saltedCoin GlobalSalt coin) (fun _ _ => error) ≤
+      (k : ENNReal) * error :=
+    iSup_le fun z => path_le z.1
   calc
-    _ ≤ maxError (rounds := saltedRounds GlobalSalt rounds) (fun _ _ => error) *
+    _ ≤ maxError (coin := saltedCoin GlobalSalt coin) (fun _ _ => error) *
           expectedSingleSaltAdversaryKeys adversary +
           expectedSingleSaltVerifierCost guards accepts (fun _ _ => error) adversary := cost.1
     _ ≤ error * Q + (k : ENNReal) * error :=

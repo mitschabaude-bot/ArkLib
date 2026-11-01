@@ -134,6 +134,16 @@ theorem pathError_roundErrors_le (rounds : List Round) (errors : RoundErrors rou
       exact iSup_le fun _ => (add_le_add (le_refl (errors 0)) (ih (fun j => errors j.succ))).trans
         (Fin.sum_univ_succ (n := rounds.length) errors).ge
 
+/-- With one error at every challenge, the largest path sum of alternating rounds is at most the
+number of rounds times that error. -/
+theorem pathError_const_le (rounds : List Round) (error : ENNReal) :
+    pathError (Round.coin rounds) (fun _ => error) ≤ rounds.length * error := by
+  induction rounds with
+  | nil => simp [pathError, Round.coin]
+  | cons round rounds ih =>
+      simp only [Round.coin, pathError, List.length_cons, Nat.cast_add, Nat.cast_one]
+      exact iSup_le fun _ => (add_le_add (le_refl error) ih).trans (le_of_eq (by ring))
+
 /-- With the same alternating rounds and errors for every input, the largest node error is at
 most the largest round error. -/
 theorem maxError_roundErrors_le {Input : Type} (rounds : List Round)
