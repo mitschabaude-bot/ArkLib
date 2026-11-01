@@ -747,8 +747,10 @@ public import ArkLib.Interaction.Oracle.Security.EncodedReduction
 public import ArkLib.Interaction.Oracle.Security.EncodedSecurity
 public import ArkLib.Interaction.Oracle.Security.EncodedSecurityEvent
 public import ArkLib.Interaction.Oracle.Security.EncodedWeighted
+public import ArkLib.Interaction.Oracle.Security.GroupedOracle
 public import ArkLib.Interaction.Oracle.Security.HashChain
 public import ArkLib.Interaction.Oracle.Security.HashChainEncoded
+public import ArkLib.Interaction.Oracle.Security.HashChainSqueeze
 public import ArkLib.Interaction.Oracle.Security.Knowledge
 public import ArkLib.Interaction.Oracle.Security.KnowledgeAppend
 public import ArkLib.Interaction.Oracle.Security.KnowledgeComposition

@@ -70,7 +70,15 @@ home_page/            site assets and assembled website root
   grinding draw's ratio carrying its proof-of-work pass probability (`powFraction`).
   `HashChainEncoded.lean` is Fiat–Shamir on a hash chain: the verifier absorbs each key's encoding
   (`ChainCodec`) through the chain, and the knowledge error is `chainError S q` plus the encoded
-  random oracle's bound (`chainStopped_knowledge_soundness`, and its certificate form).
+  random oracle's bound (`chainStopped_knowledge_soundness`). `GroupedOracle.lean` reads a random
+  oracle in groups of `m` points, each answered by one answer of a grouped oracle, with the same
+  output distribution. `HashChainSqueeze.lean` is Fiat–Shamir on a duplex challenger whose
+  challenges may take several squeezes: a challenge's coins are the answers of its node's squeezes,
+  the later ones chain queries with the empty input, drawn as in `DecodedChallenges.lean`; the
+  knowledge error of a certificate's decoded presentation is `chainError S q` plus
+  `maxError * q + sumError` of the node errors times the draws' ratios
+  (`KnowledgeCertificate.chainSqueeze_knowledge_soundness`), a challenge of several squeezes
+  costing one query for its whole draw.
 - `ProofSystem/Fri/Interaction/` is FRI on the interaction layer, with Plonky3's folds and injected
   inputs: `Protocol.lean` defines the tree, the query-reading verifier and the honest prover,
   `Completeness.lean` proves probability-one completeness, `RoundKnowledge.lean` and
