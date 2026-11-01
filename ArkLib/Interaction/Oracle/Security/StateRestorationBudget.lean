@@ -47,7 +47,7 @@ def errorSchedule : {protocol : Protocol} → (coin : PublicCoin protocol) → E
       ⟨PUnit.unit, fun move => errorSchedule (next move) fun q => errors ⟨move, q⟩⟩
   | _, @PublicCoin.oracle _ _ _ _ next, errors =>
       fun message => errorSchedule next fun q => errors ⟨message, q⟩
-  | _, @PublicCoin.challenge Challenge _ _ _ _ next, errors =>
+  | _, @PublicCoin.challenge Challenge _ _ next, errors =>
       ⟨⟨$ᵗ Challenge, errors (.inl PUnit.unit)⟩,
         fun _ => errorSchedule next fun q => errors (.inr ⟨PUnit.unit, q⟩)⟩
 
@@ -57,7 +57,7 @@ noncomputable def pathError : {protocol : Protocol} → (coin : PublicCoin proto
   | _, .done, _ => 0
   | _, @PublicCoin.sender _ _ _ next, errors => ⨆ move, pathError (next move) fun q => errors ⟨move, q⟩
   | _, @PublicCoin.oracle _ _ _ _ next, errors => ⨆ message, pathError next fun q => errors ⟨message, q⟩
-  | _, @PublicCoin.challenge _ _ _ _ _ next, errors =>
+  | _, @PublicCoin.challenge _ _ _ next, errors =>
       errors (.inl PUnit.unit) + pathError next fun q => errors (.inr ⟨PUnit.unit, q⟩)
 
 /-- The charge of a salted prefix is the error of its node. -/
@@ -388,7 +388,7 @@ def UniformChallenges : {protocol : Protocol} → (coin : PublicCoin protocol) �
   | _, .done, _ => True
   | _, @PublicCoin.sender _ _ _ next, schedule => ∀ move, UniformChallenges (next move) (schedule.2 move)
   | _, @PublicCoin.oracle _ _ _ _ next, schedule => ∀ message, UniformChallenges next (schedule message)
-  | _, @PublicCoin.challenge Challenge _ _ _ _ next, schedule =>
+  | _, @PublicCoin.challenge Challenge _ _ next, schedule =>
       schedule.1.1 = $ᵗ Challenge ∧ ∀ challenge, UniformChallenges next (schedule.2 challenge)
 
 /-- The error of a schedule at each node: its largest error over the erased earlier
@@ -398,8 +398,8 @@ noncomputable def supErrors : {protocol : Protocol} → (coin : PublicCoin proto
   | _, .done, _, node => nomatch node
   | _, @PublicCoin.sender _ _ _ next, schedule, ⟨move, node⟩ => supErrors (next move) (schedule.2 move) node
   | _, @PublicCoin.oracle _ _ _ _ next, schedule, ⟨message, node⟩ => supErrors next (schedule message) node
-  | _, @PublicCoin.challenge _ _ _ _ _ _, schedule, .inl _ => schedule.1.2
-  | _, @PublicCoin.challenge _ _ _ _ _ next, schedule, .inr ⟨_, node⟩ =>
+  | _, @PublicCoin.challenge _ _ _ _, schedule, .inl _ => schedule.1.2
+  | _, @PublicCoin.challenge _ _ _ next, schedule, .inr ⟨_, node⟩ =>
       ⨆ challenge, supErrors next (schedule.2 challenge) node
 
 /-- A local bound for a uniform schedule holds for any node errors above its own. -/

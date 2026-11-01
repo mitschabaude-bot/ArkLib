@@ -39,7 +39,7 @@ verifier authoring data; execution uses the existing interpreter. -/
   PublicCoin.rec (motive := fun _ _ => Type) PUnit
     (fun {Moves} _ _ _ programs => (move : Moves) → programs move)
     (fun _ programs => programs)
-    (@fun Challenge _ _ _ _ _ programs => OracleComp ambient Challenge × (Challenge → programs))
+    (@fun Challenge _ _ _ programs => OracleComp ambient Challenge × (Challenge → programs))
     coin
 
 /-- Forward ambient challenge queries into the ambient side of the restricted signature. -/
@@ -70,7 +70,7 @@ def challengeVerifier {ι : Type} (ambient : OracleSpec ι) : {protocol : Protoc
   | _, @PublicCoin.oracle _ _ interface _ next, initial, programs, Out, terminal =>
       pure (challengeVerifier ambient next (Access.extend initial interface) programs
         (fun p => Out ⟨PUnit.unit, p⟩) fun p => terminal ⟨PUnit.unit, p⟩)
-  | _, @PublicCoin.challenge _ _ _ _ _ next, initial, programs, Out, terminal => do
+  | _, @PublicCoin.challenge _ _ _ next, initial, programs, Out, terminal => do
       let challenge ← simulateQ (ambientQueries ambient initial) programs.1
       pure ⟨challenge, challengeVerifier ambient next initial (programs.2 challenge)
         (fun p => Out ⟨challenge, p⟩) fun p => terminal ⟨challenge, p⟩⟩
@@ -83,7 +83,7 @@ def pathProver {ι : Type} (ambient : OracleSpec ι) : {protocol : Protocol} →
   | _, @PublicCoin.sender _ _ _ next, path =>
       pure ⟨path.1, pathProver ambient (next path.1) path.2⟩
   | _, @PublicCoin.oracle _ _ _ _ next, path => pure ⟨path.1, pathProver ambient next path.2⟩
-  | _, @PublicCoin.challenge _ _ _ _ _ next, path =>
+  | _, @PublicCoin.challenge _ _ _ next, path =>
       fun _ => pure (pathProver ambient next path.2)
 
 /-- Programs returning arbitrary challenges, for the moves a replayed path does not take. -/
@@ -92,7 +92,7 @@ noncomputable def arbitraryPrograms {ι : Type} (ambient : OracleSpec ι) :
   | _, .done => PUnit.unit
   | _, @PublicCoin.sender _ _ _ next => fun move => arbitraryPrograms ambient (next move)
   | _, @PublicCoin.oracle _ _ _ _ next => arbitraryPrograms ambient next
-  | _, @PublicCoin.challenge _ _ _ _ _ next =>
+  | _, @PublicCoin.challenge _ _ _ next =>
       ⟨pure (Classical.arbitrary _), fun _ => arbitraryPrograms ambient next⟩
 
 /-- Replay programs read the challenges of the path already obtained by completion. -/
@@ -105,7 +105,7 @@ noncomputable def pathPrograms {ι : Type} (ambient : OracleSpec ι) :
         (fun h => h ▸ pathPrograms ambient (next path.1) path.2)
         (fun _ => arbitraryPrograms ambient (next move))
   | _, @PublicCoin.oracle _ _ _ _ next, path => pathPrograms ambient next path.2
-  | _, @PublicCoin.challenge _ _ _ _ _ next, path =>
+  | _, @PublicCoin.challenge _ _ _ next, path =>
       ⟨pure path.1, fun _ => pathPrograms ambient next path.2⟩
 
 /-- Ordinary fresh uniform challenge programs. -/
@@ -114,7 +114,7 @@ def uniformPrograms : {protocol : Protocol} → (coin : PublicCoin protocol) →
   | _, .done => PUnit.unit
   | _, @PublicCoin.sender _ _ _ next => fun move => uniformPrograms (next move)
   | _, @PublicCoin.oracle _ _ _ _ next => uniformPrograms next
-  | _, @PublicCoin.challenge Challenge _ _ _ _ next =>
+  | _, @PublicCoin.challenge Challenge _ _ next =>
       ⟨$ᵗ Challenge, fun _ => uniformPrograms next⟩
 
 theorem simulate_ambientQueries {ι : Type} (ambient : OracleSpec ι) (access : PFunctor)
@@ -180,7 +180,7 @@ theorem execute_pathReplay {ι : Type} (ambient : OracleSpec ι) {protocol : Pro
         (fun p => terminal ⟨PUnit.unit, p⟩)
       erw [pure_bind, simulateQ_pure, pure_bind, h, pure_bind]
       rfl
-  | @challenge Challenge _ _ _ rest next ih =>
+  | @challenge Challenge _ rest next ih =>
       refine (executeStrategies_public_receiver ambient (rest := fun _ => rest.tree)
         (fun _ => rest.roles) _ initial impl _ _).trans ?_
       simp only [pathProver, challengeVerifier, pathPrograms]

@@ -8,6 +8,7 @@ module
 public import ArkLib.ProofSystem.Fri.Interaction.QueryKnowledge
 public import ArkLib.Interaction.Oracle.Security.KnowledgeSoundness
 public import ArkLib.ProofSystem.Fri.Interaction.Plonky3
+public import ArkLib.Interaction.Oracle.Security.StateRestorationBudget
 
 /-!
 # Knowledge soundness of FRI on the interaction layer
@@ -75,6 +76,18 @@ theorem maxError_certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
     refine add_le_add le_rfl (iSup_le fun β => iSup_le fun next => ?_)
     refine (maxError_certificate hd hloss _ _ rest (j + 1) next _).trans (le_of_eq ?_)
     rw [show j + 1 + rest.numFolds = j + (rest.numFolds + 1) by omega]
+
+/-- FRI's certificate samples every challenge uniformly, so state restoration and Fiat–Shamir
+apply to it through FRI's public-coin presentation `publicCoin`. -/
+theorem uniformChallenges_certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
+    ∀ {n : ℕ} (hn : n ≤ top) (ω : SmoothCosetFftDomain n K) (s : Schedule n) (j : ℕ)
+      (f : Word K n) (C : Finset (Fin (2 ^ top))),
+      StateRestoration.UniformChallenges (publicCoin (K := K) top d t s)
+        (certificate top d t inputs δ loss hd hloss hn ω s j f C).challenges
+  | _, _, _, .final, _, _, _ => fun _ => ⟨rfl, fun _ => trivial⟩
+  | n, hn, ω, .fold k hk inject rest, j, f, C => ⟨rfl, fun β next =>
+      uniformChallenges_certificate hd hloss ((Nat.sub_le n k).trans hn) (ω.subdomain k) rest
+        (j + 1) next (foldConsistent top hk ω f β (injected inputs (n - k) inject) next C)⟩
 
 omit [Fintype K] [DecidableEq K] [SampleableType K] in
 /-- At the first layer, the state holds only if the inputs are close to their codes. -/

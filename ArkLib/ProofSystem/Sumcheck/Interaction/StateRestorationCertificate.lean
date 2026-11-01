@@ -34,12 +34,6 @@ variable (F : Type) [Field F] [Fintype F] [DecidableEq F] [SampleableType F] (n 
   Challenge := F
   interface := polynomialInterface F deg
   decEqMessage := Classical.decEq _
-  finiteMessage := by
-    change Finite (Polynomial.degreeLE F deg)
-    rw [← Polynomial.degreeLT_succ_eq_degreeLE]
-    exact Finite.of_equiv (Fin (deg + 1) → F) (Polynomial.degreeLTEquiv F (deg + 1)).toEquiv.symm
-  finiteChallenge := inferInstance
-  nonemptyChallenge := inferInstance
   sampleChallenge := inferInstance
 /-- The fixed padded round list; early rejection is recorded in the certificate state. -/
 @[expose] noncomputable def rounds : ℕ → List Round
@@ -104,8 +98,8 @@ theorem certificate_locallyBounded {m : ℕ} (D : Fin m ↪ F)
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (checksPassed : Prop) :
     (certificate F n deg D p count start finish stmt checksPassed).IsLocallyBounded
       (Security.StateRestoration.protocol (rounds F deg count)).roles
-      (Security.StateRestoration.uniformSchedule
-        ((deg : ENNReal) / Fintype.card F) (rounds F deg count)) := by
+      (Security.StateRestoration.errorSchedule (Round.coin (rounds F deg count))
+        fun _ => (deg : ENNReal) / Fintype.card F) := by
   induction count generalizing start checksPassed with
   | zero => trivial
   | succ count ih =>

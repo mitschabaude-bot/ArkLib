@@ -41,7 +41,7 @@ def guardedPublicProtocol : {protocol : Protocol} → (coin : PublicCoin protoco
       .public .sender Moves fun move => guardedPublicProtocol (next move) (guards move)
   | _, @PublicCoin.oracle Messages _ _ _ next, guards =>
       .public .sender Messages fun message => guardedPublicProtocol next (guards message)
-  | _, @PublicCoin.challenge Challenge _ _ _ _ next, guards =>
+  | _, @PublicCoin.challenge Challenge _ _ next, guards =>
       guardedChallenge Challenge (fun challenge =>
         guardedPublicProtocol next (guards.2 PUnit.unit challenge)) (guards.1 PUnit.unit)
 
@@ -56,7 +56,7 @@ def scriptedPublicProver {ι : Type} (ambient : OracleSpec ι) :
       pure ⟨move, scriptedPublicProver ambient (next move) (guards move) messages⟩
   | _, @PublicCoin.oracle _ _ _ _ next, guards, ⟨message, messages⟩ =>
       pure ⟨message, scriptedPublicProver ambient next (guards message) messages⟩
-  | _, @PublicCoin.challenge Challenge _ _ _ _ next, guards, ⟨_, messages⟩ =>
+  | _, @PublicCoin.challenge Challenge _ _ next, guards, ⟨_, messages⟩ =>
       let after : (pass : Bool) → Prover.Strategy ambient
           (guardedChallenge Challenge (fun challenge =>
             guardedPublicProtocol next (guards.2 PUnit.unit challenge)) pass).tree
@@ -86,7 +86,7 @@ def guardedPublicVerifier {Input : Type} {allProtocol : Input → Protocol}
   | _, @PublicCoin.oracle _ _ _ _ next, guards, embed, preserve => fun message =>
       pure (guardedPublicVerifier next (guards message) (fun key => embed ⟨message, key⟩)
         fun key => preserve ⟨message, key⟩)
-  | _, @PublicCoin.challenge Challenge _ _ _ _ next, guards, embed, preserve =>
+  | _, @PublicCoin.challenge Challenge _ _ next, guards, embed, preserve =>
       let after : (pass : Bool) → Verifier.Strategy (oracleSpec Input PUnit allCoin)
           (guardedChallenge Challenge (fun challenge =>
             guardedPublicProtocol next (guards.2 PUnit.unit challenge)) pass).tree
@@ -138,7 +138,7 @@ def acceptedPath : {protocol : Protocol} → (coin : PublicCoin protocol) →
       (acceptedPath (next path.1) (guards path.1) path.2).map fun tail => ⟨path.1, tail⟩
   | _, @PublicCoin.oracle _ _ _ _ next, guards, path =>
       (acceptedPath next (guards path.1) path.2).map fun tail => ⟨path.1, tail⟩
-  | _, @PublicCoin.challenge _ _ _ _ _ next, guards, path =>
+  | _, @PublicCoin.challenge _ _ _ next, guards, path =>
       decodeAfterGuard (fun challenge suffix =>
         acceptedPath next (guards.2 PUnit.unit challenge) suffix) (guards.1 PUnit.unit) path
 
@@ -169,7 +169,7 @@ def mappedStoppedComplete {Input : Type} {allProtocol : Input → Protocol}
       let suffix ← mappedStoppedComplete next (guards message) messages
         (fun key => embed ⟨message, key⟩) fun key => preserve ⟨message, key⟩
       return suffix.map fun tail => ⟨message, tail⟩
-  | _, @PublicCoin.challenge Challenge _ _ _ _ next, guards, ⟨_, messages⟩, embed, preserve => do
+  | _, @PublicCoin.challenge Challenge _ _ next, guards, ⟨_, messages⟩, embed, preserve => do
       if !guards.1 PUnit.unit then
         return none
       let response ← liftM ((oracleSpec Input PUnit allCoin).query (embed (.inl PUnit.unit)))

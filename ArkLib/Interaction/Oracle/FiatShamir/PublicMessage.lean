@@ -39,7 +39,7 @@ def publicProtocol : {protocol : Protocol} → PublicCoin protocol → Protocol
       .public .sender Moves fun move => publicProtocol (next move)
   | _, @PublicCoin.oracle Messages _ _ _ next =>
       .public .sender Messages fun _ => publicProtocol next
-  | _, @PublicCoin.challenge Challenge _ _ _ _ next =>
+  | _, @PublicCoin.challenge Challenge _ _ next =>
       .public .receiver Challenge fun _ => publicProtocol next
 
 /-- The concrete path forgets whether a message node was public or oracle-authored. -/
@@ -48,7 +48,7 @@ def toRestorationPath : {protocol : Protocol} → (coin : PublicCoin protocol) �
   | _, .done, _ => PUnit.unit
   | _, @PublicCoin.sender _ _ _ next, path => ⟨path.1, toRestorationPath (next path.1) path.2⟩
   | _, @PublicCoin.oracle _ _ _ _ next, path => ⟨path.1, toRestorationPath next path.2⟩
-  | _, @PublicCoin.challenge _ _ _ _ _ next, path => ⟨path.1, toRestorationPath next path.2⟩
+  | _, @PublicCoin.challenge _ _ _ next, path => ⟨path.1, toRestorationPath next path.2⟩
 
 /-- Recover the same concrete public transcript from a restoration execution path. -/
 def toPublicPath : {protocol : Protocol} → (coin : PublicCoin protocol) →
@@ -56,7 +56,7 @@ def toPublicPath : {protocol : Protocol} → (coin : PublicCoin protocol) →
   | _, .done, _ => PUnit.unit
   | _, @PublicCoin.sender _ _ _ next, path => ⟨path.1, toPublicPath (next path.1) path.2⟩
   | _, @PublicCoin.oracle _ _ _ _ next, path => ⟨path.1, toPublicPath next path.2⟩
-  | _, @PublicCoin.challenge _ _ _ _ _ next, path => ⟨path.1, toPublicPath next path.2⟩
+  | _, @PublicCoin.challenge _ _ _ next, path => ⟨path.1, toPublicPath next path.2⟩
 
 @[simp]
 theorem toPublicPath_toRestorationPath {protocol : Protocol} (coin : PublicCoin protocol)

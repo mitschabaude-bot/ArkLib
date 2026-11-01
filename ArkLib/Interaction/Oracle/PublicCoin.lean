@@ -32,7 +32,7 @@ namespace Interaction.Oracle
 
 /-- A public-coin protocol whose continuation after each verifier challenge is one protocol for
 every challenge. Prover moves and oracle messages have decidable equality, as they are part of
-the challenge keys; challenges have finite, nonempty uniform samplers. -/
+the challenge keys; challenges have uniform samplers (so they are finite and nonempty). -/
 inductive PublicCoin : Protocol.{0} → Type 1
   /-- The terminal protocol. -/
   | done : PublicCoin .done
@@ -45,8 +45,8 @@ inductive PublicCoin : Protocol.{0} → Type 1
       {rest : Protocol.{0}} (next : PublicCoin rest) :
       PublicCoin (.oracleWith Messages interface rest)
   /-- A uniform verifier challenge, with one continuation for every challenge. -/
-  | challenge {Challenge : Type} [Finite Challenge] [Nonempty Challenge]
-      [SampleableType Challenge] {rest : Protocol.{0}} (next : PublicCoin rest) :
+  | challenge {Challenge : Type} [SampleableType Challenge] {rest : Protocol.{0}}
+      (next : PublicCoin rest) :
       PublicCoin (.public .receiver Challenge fun _ => rest)
 
 namespace PublicCoin
@@ -64,7 +64,7 @@ def eraseBranch : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
   | _, .done, _ => PUnit.unit
   | _, @sender _ _ _ next, path => ⟨path.1, eraseBranch (next path.1) path.2⟩
   | _, @oracle _ _ _ _ next, path => eraseBranch next path.2
-  | _, @challenge _ _ _ _ _ next, path => eraseBranch next path.2
+  | _, @challenge _ _ _ next, path => eraseBranch next path.2
 
 /-- The protocol followed by a suffix selected by the prover's public moves alone. -/
 abbrev appendProtocol {protocol : Protocol.{0}} (coin : PublicCoin protocol)
@@ -86,7 +86,7 @@ def append : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
   | _, @sender _ _ _ next, _, second =>
       .sender fun move => append (next move) fun branch => second ⟨move, branch⟩
   | _, @oracle _ _ _ _ next, _, second => .oracle (append next second)
-  | _, @challenge _ _ _ _ _ next, _, second => .challenge (append next second)
+  | _, @challenge _ _ _ next, _, second => .challenge (append next second)
 
 end PublicCoin
 

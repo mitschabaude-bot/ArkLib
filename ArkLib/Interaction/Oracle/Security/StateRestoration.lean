@@ -25,7 +25,7 @@ For an arbitrary adaptive adversary, completion reads the selected transcript's 
 the same cached oracle (`complete`), and a valid terminal knowledge witness whose backward
 extraction fails identifies a bad key among the keys it read (`restored_bad_trace`). The
 probability bounds that follow are in `StateRestorationBudget`. Inputs, salts and prover moves may
-have infinite types; challenges have finite nonempty uniform samplers.
+have infinite types; challenges have uniform samplers.
 
 `Round` and `protocol` give the fixed-shape fragment of alternating oracle messages and
 challenges, presented by `Round.coin`.
@@ -44,12 +44,9 @@ structure Round where
   Challenge : Type
   interface : OracleInterface Message
   decEqMessage : DecidableEq Message
-  finiteChallenge : Finite Challenge
-  nonemptyChallenge : Nonempty Challenge
   sampleChallenge : SampleableType Challenge
 
-attribute [instance] Round.decEqMessage Round.finiteChallenge Round.nonemptyChallenge
-  Round.sampleChallenge
+attribute [instance] Round.decEqMessage Round.sampleChallenge
 
 /-- The fixed presentation uses oracle-message and public-receiver nodes. -/
 def protocol : List Round → Protocol
@@ -85,7 +82,7 @@ instance instDecidableEq [DecidableEq Salt] :
   | _, @PublicCoin.oracle Messages _ _ _ next =>
       letI := instDecidableEq next
       inferInstanceAs (DecidableEq (Messages × Prefix Salt next))
-  | _, @PublicCoin.challenge _ _ _ _ _ next =>
+  | _, @PublicCoin.challenge _ _ _ next =>
       letI := instDecidableEq next
       inferInstanceAs (DecidableEq (Salt ⊕ (Salt × Prefix Salt next)))
 
@@ -94,7 +91,7 @@ instance instDecidableEq [DecidableEq Salt] :
     Prefix Salt coin → Type :=
   PublicCoin.rec (motive := fun _ coin => Prefix Salt coin → Type) (fun pre => nomatch pre)
     (fun _ challenge pre => challenge pre.1 pre.2) (fun _ challenge pre => challenge pre.2)
-    (@fun Challenge _ _ _ _ _ challenge pre => Sum.casesOn pre (fun _ => Challenge)
+    (@fun Challenge _ _ _ challenge pre => Sum.casesOn pre (fun _ => Challenge)
       fun pre => challenge pre.2) coin
 
 /-- The protocol following the challenge a prefix ends at. -/
@@ -102,7 +99,7 @@ instance instDecidableEq [DecidableEq Salt] :
     Prefix Salt coin → Protocol :=
   PublicCoin.rec (motive := fun _ coin => Prefix Salt coin → Protocol) (fun pre => nomatch pre)
     (fun _ rest pre => rest pre.1 pre.2) (fun _ rest pre => rest pre.2)
-    (@fun _ _ _ _ restProtocol _ rest pre => Sum.casesOn pre (fun _ => restProtocol)
+    (@fun _ _ restProtocol _ rest pre => Sum.casesOn pre (fun _ => restProtocol)
       fun pre => rest pre.2) coin
 
 /-- The challenge node a prefix ends at, with its salts forgotten. -/
@@ -114,29 +111,13 @@ instance instDecidableEq [DecidableEq Salt] :
     (fun _ node pre => Sum.casesOn (motive := fun _ => PUnit ⊕ (PUnit × _)) pre
       (fun _ => .inl PUnit.unit) fun pre => .inr ⟨PUnit.unit, node pre.2⟩) coin
 
-instance instFinite : {protocol : Protocol} → {coin : PublicCoin protocol} →
-    (pre : Prefix Salt coin) → Finite pre.Challenge
-  | _, .done, pre => nomatch pre
-  | _, @PublicCoin.sender _ _ _ _, ⟨_, pre⟩ => instFinite pre
-  | _, @PublicCoin.oracle _ _ _ _ _, ⟨_, pre⟩ => instFinite pre
-  | _, @PublicCoin.challenge _ _ _ _ _ _, .inl _ => inferInstance
-  | _, @PublicCoin.challenge _ _ _ _ _ _, .inr ⟨_, pre⟩ => instFinite pre
-
-instance instNonempty : {protocol : Protocol} → {coin : PublicCoin protocol} →
-    (pre : Prefix Salt coin) → Nonempty pre.Challenge
-  | _, .done, pre => nomatch pre
-  | _, @PublicCoin.sender _ _ _ _, ⟨_, pre⟩ => instNonempty pre
-  | _, @PublicCoin.oracle _ _ _ _ _, ⟨_, pre⟩ => instNonempty pre
-  | _, @PublicCoin.challenge _ _ _ _ _ _, .inl _ => inferInstance
-  | _, @PublicCoin.challenge _ _ _ _ _ _, .inr ⟨_, pre⟩ => instNonempty pre
-
 instance instSampleableType : {protocol : Protocol} → {coin : PublicCoin protocol} →
     (pre : Prefix Salt coin) → SampleableType pre.Challenge
   | _, .done, pre => nomatch pre
   | _, @PublicCoin.sender _ _ _ _, ⟨_, pre⟩ => instSampleableType pre
   | _, @PublicCoin.oracle _ _ _ _ _, ⟨_, pre⟩ => instSampleableType pre
-  | _, @PublicCoin.challenge _ _ _ _ _ _, .inl _ => inferInstance
-  | _, @PublicCoin.challenge _ _ _ _ _ _, .inr ⟨_, pre⟩ => instSampleableType pre
+  | _, @PublicCoin.challenge _ _ _ _, .inl _ => inferInstance
+  | _, @PublicCoin.challenge _ _ _ _, .inr ⟨_, pre⟩ => instSampleableType pre
 
 end Prefix
 
@@ -153,14 +134,6 @@ abbrev Key (Input Salt : Type) {protocol : Input → Protocol}
 @[reducible] def Key.Challenge {Salt : Type} {coin : (z : Input) → PublicCoin (protocol z)}
     (key : Key Input Salt coin) : Type :=
   key.2.Challenge
-
-instance {Salt : Type} {coin : (z : Input) → PublicCoin (protocol z)}
-    (key : Key Input Salt coin) : Finite key.Challenge :=
-  inferInstanceAs (Finite key.2.Challenge)
-
-instance {Salt : Type} {coin : (z : Input) → PublicCoin (protocol z)}
-    (key : Key Input Salt coin) : Nonempty key.Challenge :=
-  inferInstanceAs (Nonempty key.2.Challenge)
 
 instance {Salt : Type} {coin : (z : Input) → PublicCoin (protocol z)}
     (key : Key Input Salt coin) : SampleableType key.Challenge :=
@@ -247,8 +220,8 @@ def prefixExtractor {Salt : Type} : {protocol : Protocol} → (coin : PublicCoin
       prefixExtractor (next move) (extractor move).2.2 pre fun q => table ⟨move, q⟩
   | _, @PublicCoin.oracle _ _ _ _ next, _, extractor, ⟨message, pre⟩, table =>
       prefixExtractor next (extractor message).2.2 pre fun q => table ⟨message, q⟩
-  | _, @PublicCoin.challenge _ _ _ _ _ _, state, extractor, .inl _, _ => ⟨state, extractor⟩
-  | _, @PublicCoin.challenge _ _ _ _ _ next, _, extractor, .inr ⟨salt, pre⟩, table =>
+  | _, @PublicCoin.challenge _ _ _ _, state, extractor, .inl _, _ => ⟨state, extractor⟩
+  | _, @PublicCoin.challenge _ _ _ next, _, extractor, .inr ⟨salt, pre⟩, table =>
       prefixExtractor next (extractor (table (.inl salt))).2.2 pre
         fun q => table (.inr ⟨salt, q⟩)
 
@@ -350,11 +323,11 @@ def completePrefix {Salt : Type} : {protocol : Protocol} → (coin : PublicCoin 
         (Prod.mk message))
         (completePrefix next messages)
       pure ⟨message, path⟩
-  | _, @PublicCoin.challenge Challenge _ _ _ _ next, ⟨salt, messages⟩ => do
-      let challenge ← liftM ((prefixSpec Salt (@PublicCoin.challenge Challenge _ _ _ _ next)).query
+  | _, @PublicCoin.challenge Challenge _ _ next, ⟨salt, messages⟩ => do
+      let challenge ← liftM ((prefixSpec Salt (@PublicCoin.challenge Challenge _ _ next)).query
         (Sum.inl salt))
       let path ← simulateQ (reindexQuery
-        (R := Prefix.Challenge (coin := @PublicCoin.challenge Challenge _ _ _ _ next))
+        (R := Prefix.Challenge (coin := @PublicCoin.challenge Challenge _ _ next))
         (fun q : Prefix Salt next => Sum.inr ⟨salt, q⟩)) (completePrefix next messages)
       pure ⟨challenge, path⟩
 
@@ -374,7 +347,7 @@ def prefixPath {Salt : Type} : {protocol : Protocol} → (coin : PublicCoin prot
       ⟨move, prefixPath (next move) messages fun q => table ⟨move, q⟩⟩
   | _, @PublicCoin.oracle _ _ _ _ next, ⟨message, messages⟩, table =>
       ⟨message, prefixPath next messages fun q => table ⟨message, q⟩⟩
-  | _, @PublicCoin.challenge _ _ _ _ _ next, ⟨salt, messages⟩, table =>
+  | _, @PublicCoin.challenge _ _ _ next, ⟨salt, messages⟩, table =>
       ⟨table (.inl salt), prefixPath next messages fun q => table (.inr ⟨salt, q⟩)⟩
 
 /-- The existing execution path reconstructed from a deterministic challenge table. -/
@@ -392,7 +365,7 @@ def prefixKeys {Salt : Type} : {protocol : Protocol} → (coin : PublicCoin prot
       (prefixKeys (next move) messages).map (Sigma.mk move)
   | _, @PublicCoin.oracle _ _ _ _ next, ⟨message, messages⟩ =>
       (prefixKeys next messages).map (Prod.mk message)
-  | _, @PublicCoin.challenge _ _ _ _ _ next, ⟨salt, messages⟩ =>
+  | _, @PublicCoin.challenge _ _ _ next, ⟨salt, messages⟩ =>
       .inl salt :: (prefixKeys next messages).map (fun q => .inr ⟨salt, q⟩)
 
 /-- The actual challenge keys read when completing this selected message sequence. -/

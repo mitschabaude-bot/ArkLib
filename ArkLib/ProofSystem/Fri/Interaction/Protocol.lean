@@ -8,6 +8,7 @@ module
 public import ArkLib.ProofSystem.Fri.Interaction.Schedule
 public import ArkLib.ProofSystem.Fri.RoundConsistency
 public import ArkLib.Interaction.Oracle.Execution
+public import ArkLib.Interaction.Oracle.PublicCoin
 
 /-!
 # FRI on the interaction layer
@@ -57,6 +58,13 @@ def protocol (top d t : ℕ) : {n : ℕ} → Schedule n → Protocol
   | _, .final => .public .sender (Fin d → K) fun _ => queryPhase top t
   | n, .fold k _ _ rest =>
       .public .receiver K fun _ => .oracle (Word K (n - k)) (protocol top d t rest)
+
+/-- FRI is public-coin: after each folding challenge comes the next word, and after the final
+polynomial the query positions, whatever the challenge. -/
+def publicCoin [Fintype K] [DecidableEq K] [SampleableType K] (top d t : ℕ) :
+    {n : ℕ} → (s : Schedule n) → PublicCoin (protocol K top d t s)
+  | _, .final => .sender fun _ => .challenge .done
+  | _, .fold _ _ _ rest => .challenge (.oracle (publicCoin top d t rest))
 
 variable {K}
 

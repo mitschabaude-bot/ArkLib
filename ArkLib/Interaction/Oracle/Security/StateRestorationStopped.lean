@@ -36,7 +36,7 @@ challenges; it cannot read its own or a later challenge. -/
   PublicCoin.rec (motive := fun _ _ => Type) PUnit
     (fun {Moves} _ _ _ guards => (move : Moves) → guards move)
     (fun {Messages} _ _ _ _ guards => Messages → guards)
-    (@fun Challenge _ _ _ _ _ guards => (Salt → Bool) × (Salt → Challenge → guards)) coin
+    (@fun Challenge _ _ _ guards => (Salt → Bool) × (Salt → Challenge → guards)) coin
 
 /-- Complete an authored message sequence against the prefix oracle only while its guards pass.
 Every guard runs before the corresponding hash access. Returned failure retains all preceding
@@ -53,13 +53,13 @@ def stoppedCompletePrefix {Salt : Type} : {protocol : Protocol} → (coin : Publ
       let suffix ← simulateQ (reindexQuery (R := Prefix.Challenge (coin := .oracle next))
         (Prod.mk message)) (stoppedCompletePrefix next (guards message) messages)
       return suffix.map fun path => ⟨message, path⟩
-  | _, @PublicCoin.challenge Challenge _ _ _ _ next, guards, ⟨salt, messages⟩ => do
+  | _, @PublicCoin.challenge Challenge _ _ next, guards, ⟨salt, messages⟩ => do
       if !guards.1 salt then
         return none
-      let challenge ← liftM ((prefixSpec Salt (@PublicCoin.challenge Challenge _ _ _ _ next)).query
+      let challenge ← liftM ((prefixSpec Salt (@PublicCoin.challenge Challenge _ _ next)).query
         (Sum.inl salt))
       let suffix ← simulateQ (reindexQuery
-        (R := Prefix.Challenge (coin := @PublicCoin.challenge Challenge _ _ _ _ next))
+        (R := Prefix.Challenge (coin := @PublicCoin.challenge Challenge _ _ next))
         (fun q : Prefix Salt next => Sum.inr ⟨salt, q⟩))
         (stoppedCompletePrefix next (guards.2 salt challenge) messages)
       return suffix.map fun path => ⟨challenge, path⟩
@@ -85,7 +85,7 @@ def prefixStoppedPath {Salt : Type} : {protocol : Protocol} → (coin : PublicCo
   | _, @PublicCoin.oracle _ _ _ _ next, guards, ⟨message, messages⟩, table =>
       (prefixStoppedPath next (guards message) messages fun q => table ⟨message, q⟩).map
         fun path => ⟨message, path⟩
-  | _, @PublicCoin.challenge _ _ _ _ _ next, guards, ⟨salt, messages⟩, table =>
+  | _, @PublicCoin.challenge _ _ _ next, guards, ⟨salt, messages⟩, table =>
       if guards.1 salt then
         (prefixStoppedPath next (guards.2 salt (table (.inl salt))) messages
           fun q => table (.inr ⟨salt, q⟩)).map fun path => ⟨table (.inl salt), path⟩
@@ -103,7 +103,7 @@ def prefixStoppedKeys {Salt : Type} : {protocol : Protocol} → (coin : PublicCo
   | _, @PublicCoin.oracle _ _ _ _ next, guards, ⟨message, messages⟩, table =>
       (prefixStoppedKeys next (guards message) messages fun q => table ⟨message, q⟩).map
         (Prod.mk message)
-  | _, @PublicCoin.challenge _ _ _ _ _ next, guards, ⟨salt, messages⟩, table =>
+  | _, @PublicCoin.challenge _ _ _ next, guards, ⟨salt, messages⟩, table =>
       if guards.1 salt then
         .inl salt :: (prefixStoppedKeys next (guards.2 salt (table (.inl salt))) messages
           fun q => table (.inr ⟨salt, q⟩)).map fun q => .inr ⟨salt, q⟩
@@ -117,7 +117,7 @@ def prefixGuardsPass {Salt : Type} : {protocol : Protocol} → (coin : PublicCoi
       prefixGuardsPass (next move) (guards move) messages fun q => table ⟨move, q⟩
   | _, @PublicCoin.oracle _ _ _ _ next, guards, ⟨message, messages⟩, table =>
       prefixGuardsPass next (guards message) messages fun q => table ⟨message, q⟩
-  | _, @PublicCoin.challenge _ _ _ _ _ next, guards, ⟨salt, messages⟩, table =>
+  | _, @PublicCoin.challenge _ _ _ next, guards, ⟨salt, messages⟩, table =>
       guards.1 salt && prefixGuardsPass next (guards.2 salt (table (.inl salt))) messages
         fun q => table (.inr ⟨salt, q⟩)
 

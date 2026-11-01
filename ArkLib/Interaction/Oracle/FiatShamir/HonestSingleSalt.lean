@@ -34,7 +34,7 @@ def pathMessages : {protocol : Protocol} → (coin : PublicCoin protocol) →
   | _, .done, _ => PUnit.unit
   | _, @PublicCoin.sender _ _ _ next, path => ⟨path.1, pathMessages (next path.1) path.2⟩
   | _, @PublicCoin.oracle _ _ _ _ next, path => ⟨path.1, pathMessages next path.2⟩
-  | _, @PublicCoin.challenge _ _ _ _ _ next, path => ⟨PUnit.unit, pathMessages next path.2⟩
+  | _, @PublicCoin.challenge _ _ _ next, path => ⟨PUnit.unit, pathMessages next path.2⟩
 
 /-- The interactive uniform-challenge run of an adaptive honest strategy. A failed prefix guard
 stops before sampling the current challenge. The result is the complete accepted path. -/
@@ -49,7 +49,7 @@ def honestInteractiveRun : {protocol : Protocol} → (coin : PublicCoin protocol
       let chosen ← prover
       let suffix ← honestInteractiveRun next (guards chosen.1) chosen.2
       return suffix.map fun path => ⟨chosen.1, path⟩
-  | _, @PublicCoin.challenge Challenge _ _ _ _ next, guards, prover => do
+  | _, @PublicCoin.challenge Challenge _ _ next, guards, prover => do
       if !guards.1 PUnit.unit then
         return none
       let challenge ← $ᵗ Challenge
@@ -72,7 +72,7 @@ def guardedHonestProver : {protocol : Protocol} → (coin : PublicCoin protocol)
       do
         let chosen ← prover
         pure ⟨chosen.1, guardedHonestProver next (guards chosen.1) chosen.2⟩
-  | _, @PublicCoin.challenge Challenge _ _ _ _ next, guards, prover =>
+  | _, @PublicCoin.challenge Challenge _ _ next, guards, prover =>
       let after : (pass : Bool) → Prover.Strategy unifSpec
           (guardedChallenge Challenge (fun challenge =>
             guardedPublicProtocol next (guards.2 PUnit.unit challenge)) pass).tree
@@ -95,7 +95,7 @@ def honestUniformVerifier : {protocol : Protocol} → (coin : PublicCoin protoco
       pure (honestUniformVerifier (next move) (guards move))
   | _, @PublicCoin.oracle _ _ _ _ next, guards => fun message =>
       pure (honestUniformVerifier next (guards message))
-  | _, @PublicCoin.challenge Challenge _ _ _ _ next, guards =>
+  | _, @PublicCoin.challenge Challenge _ _ next, guards =>
       let after : (pass : Bool) → Verifier.Strategy unifSpec
           (guardedChallenge Challenge (fun challenge =>
             guardedPublicProtocol next (guards.2 PUnit.unit challenge)) pass).tree
@@ -166,7 +166,7 @@ theorem honestNativeInteractiveRun_eq {protocol : Protocol} (coin : PublicCoin p
       intro chosen
       rw [← ih]
       simp only [honestNativeInteractiveRun, Functor.map_map]
-  | @challenge Challenge _ _ _ rest next ih =>
+  | @challenge Challenge _ rest next ih =>
       unfold honestNativeInteractiveRun
       simp only [guardedPublicProtocol, guardedHonestProver, honestUniformVerifier, acceptedPath,
         honestInteractiveRun]
@@ -209,7 +209,7 @@ def honestCompiledRun {Input : Type} {allProtocol : Input → Protocol}
       let suffix ← honestCompiledRun next (guards chosen.1) chosen.2
         (fun key => embed ⟨chosen.1, key⟩) fun key => preserve ⟨chosen.1, key⟩
       return suffix.map fun path => ⟨chosen.1, path⟩
-  | _, @PublicCoin.challenge Challenge _ _ _ _ next, guards, prover, embed, preserve => do
+  | _, @PublicCoin.challenge Challenge _ _ next, guards, prover, embed, preserve => do
       if !guards.1 PUnit.unit then
         return none
       let response ← liftM ((unifSpec + oracleSpec Input PUnit allCoin).query
@@ -574,7 +574,7 @@ def HonestCachedPath {Input : Type} {allProtocol : Input → Protocol}
   | _, @PublicCoin.oracle _ _ _ _ next, guards, embed, preserve, path, cache =>
       HonestCachedPath next (guards path.1) (fun key => embed ⟨path.1, key⟩)
         (fun key => preserve ⟨path.1, key⟩) path.2 cache
-  | _, @PublicCoin.challenge _ _ _ _ _ next, guards, embed, preserve, path, cache =>
+  | _, @PublicCoin.challenge _ _ _ next, guards, embed, preserve, path, cache =>
       guards.1 PUnit.unit = true ∧
         cache (embed (.inl PUnit.unit)) = some (cast (preserve (.inl PUnit.unit)).symm path.1) ∧
         HonestCachedPath next (guards.2 PUnit.unit path.1)
