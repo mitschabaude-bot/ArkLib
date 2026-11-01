@@ -20,7 +20,8 @@ open OracleComp OracleSpec MeasureTheory ProbabilityTheory
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-variable {Input Salt C : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
+variable {Input Salt C : Type} {protocol : Input → Protocol}
+  {coin : (z : Input) → PublicCoin (protocol z)}
 
 @[simp] theorem CommonChallenge.toCommonCache_apply
     (common : CommonChallenge Input Salt C coin)
@@ -71,7 +72,8 @@ end Interaction.Oracle.Security.StateRestoration
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-variable {Input Salt C : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
+variable {Input Salt C : Type} {protocol : Input → Protocol}
+  {coin : (z : Input) → PublicCoin (protocol z)}
 
 /-- Encode the entire observed native result, including ordered responses and final cache. -/
 def CommonChallenge.encodeJoint

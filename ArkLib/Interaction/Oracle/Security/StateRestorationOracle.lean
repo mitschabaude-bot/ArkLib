@@ -158,7 +158,8 @@ node's error is the certificate's largest error there over the erased earlier ch
 theorem KnowledgeCertificate.stateRestoration_oracle_knowledge_soundness
     [DecidableEq Input] [DecidableEq Salt] (coin : (z : Input) → PublicCoin (protocol z))
     (state : Input → KnowledgeState.{w})
-    (certificate : (z : Input) → KnowledgeCertificate (protocol z).tree (protocol z).roles (state z))
+    (certificate : (z : Input) → KnowledgeCertificate (protocol z).tree (protocol z).roles (state
+        z))
     (uniform : ∀ z, UniformChallenges (coin z) (certificate z).challenges)
     (initial : PFunctor) (impl : Input → QueryImpl (ofPFunctor initial) Id)
     (Stmt : (z : Input) → (protocol z).tree.BranchPath → Type)

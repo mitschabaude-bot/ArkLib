@@ -147,8 +147,8 @@ entry says so, the specification is not claimed to be executable.
   oracle ([`OracleReduction/FiatShamir/`](ArkLib/OracleReduction/FiatShamir/)).
 - **Interaction layer** ([`ArkLib/Interaction/`](ArkLib/Interaction/)): execution,
   soundness, round-by-round soundness, generic knowledge certificates and their composition, and
-  state-restoration knowledge soundness for fixed-round public-coin protocols with error
-  `(Q + k) * error`. No concrete protocol consumes the knowledge certificates yet, and randomized
+  state-restoration knowledge soundness and single-salt Fiat–Shamir for public-coin protocols,
+  with error `Q * max + sum` over the local errors. No concrete protocol consumes the knowledge certificates yet, and randomized
   state restoration is in progress (below). The
   [interaction-layer status page](docs/design/00-current-status.md) has the details.
 - **Measured extraction**: measured programs and operation-count budgets

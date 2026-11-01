@@ -28,7 +28,8 @@ namespace Interaction.Oracle.Security.StateRestoration
 
 universe w
 
-variable {Input Salt W : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
+variable {Input Salt W : Type} {protocol : Input → Protocol}
+  {coin : (z : Input) → PublicCoin (protocol z)}
 
 /-- The adversary's interleaved private sampling and restoration-oracle effects. Repeated uniform
 sampling queries are forwarded to `ProbComp`, so each operation draws a new private sample. -/
@@ -97,20 +98,21 @@ theorem sum_toFinset_le_list_sum {A : Type} [DecidableEq A]
         simpa only [add_comm] using add_le_add_left ih (f a)
 
 /-- Distinct challenge-key charge on an ordered hash-query log. -/
-noncomputable def roundFreshCharge [DecidableEq Input] [DecidableEq Salt]
+noncomputable def distinctKeyCharge [DecidableEq Input] [DecidableEq Salt]
     (errors : (z : Input) → Errors (coin z)) (log : QueryLog (oracleSpec Input Salt
         coin)) : ENNReal :=
   ∑ key ∈ (log.map Sigma.fst).toFinset, keyError errors key
 
 /-- The joint fresh charge is bounded pointwise by the distinct adversarial challenge keys plus
-one completion key per round. No probability estimate or query bound enters this step. -/
-theorem roundFreshCharge_append_le [DecidableEq Input] [DecidableEq Salt]
+the completion keys of the selected path. No probability estimate or query bound enters this
+step. -/
+theorem distinctKeyCharge_append_le [DecidableEq Input] [DecidableEq Salt]
     (errors : (z : Input) → Errors (coin z))
     (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt coin))
     (completionLog : QueryLog (oracleSpec Input Salt coin))
     (z : Input) (messages : Messages Salt (coin z))
     (hkeys : completionLog.map Sigma.fst = completionKeys coin z messages) :
-    roundFreshCharge errors (adversaryLog.snd ++ completionLog) ≤
+    distinctKeyCharge errors (adversaryLog.snd ++ completionLog) ≤
       (adversaryHashKeys adversaryLog).card * maxError errors + sumError errors := by
   let A : Finset (Key Input Salt coin) := (adversaryLog.snd.map Sigma.fst).toFinset
   let C : Finset (Key Input Salt coin) := (completionLog.map Sigma.fst).toFinset
@@ -146,19 +148,19 @@ theorem roundFreshCharge_append_le [DecidableEq Input] [DecidableEq Salt]
 
 /-- A pathwise cap on the actual distinct adversary keys recovers the familiar worst-case
 `Q * max + sum` charge without counting repeated cached calls. -/
-theorem roundFreshCharge_append_le_queryBound [DecidableEq Input] [DecidableEq Salt]
+theorem distinctKeyCharge_append_le_queryBound [DecidableEq Input] [DecidableEq Salt]
     (errors : (z : Input) → Errors (coin z))
     (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt coin))
     (completionLog : QueryLog (oracleSpec Input Salt coin))
     (z : Input) (messages : Messages Salt (coin z))
     (hkeys : completionLog.map Sigma.fst = completionKeys coin z messages)
     (Q : ℕ) (hQ : (adversaryHashKeys adversaryLog).card ≤ Q) :
-    roundFreshCharge errors (adversaryLog.snd ++ completionLog) ≤
+    distinctKeyCharge errors (adversaryLog.snd ++ completionLog) ≤
       Q * maxError errors + sumError errors := by
   calc
-    roundFreshCharge errors (adversaryLog.snd ++ completionLog) ≤
+    distinctKeyCharge errors (adversaryLog.snd ++ completionLog) ≤
         (adversaryHashKeys adversaryLog).card * maxError errors + sumError errors :=
-      roundFreshCharge_append_le errors adversaryLog completionLog z messages hkeys
+      distinctKeyCharge_append_le errors adversaryLog completionLog z messages hkeys
     _ ≤ Q * maxError errors + sumError errors := by
       gcongr
 
@@ -237,7 +239,8 @@ def randomizedRestoredExecution (coin : (z : Input) → PublicCoin (protocol z))
       pure (some ⟨z, path, witness⟩)
 
 /-- Erasing the phase log recovers the ordinary joint adversary and completion program exactly. -/
-theorem randomizedRestoredExecutionWithAdversaryLog_erase (coin : (z : Input) → PublicCoin (protocol z))
+theorem randomizedRestoredExecutionWithAdversaryLog_erase (coin : (z : Input) → PublicCoin
+    (protocol z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin) :
     Prod.fst <$> randomizedRestoredExecutionWithAdversaryLog coin adversary =
       randomizedRestoredExecution coin adversary := by
@@ -591,7 +594,8 @@ theorem fixedTable_completion_path_keys [DecidableEq Input] [DecidableEq Salt]
 is returned verbatim, while the suffix hash log contains exactly the completion keys. -/
 theorem fixedTable_completionAfterAdversaryLog_selected
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (z : Input) (messages : Messages Salt (coin z)) (witness : W)
+    (coin : (z : Input) → PublicCoin (protocol z)) (z : Input) (messages : Messages Salt (coin z))
+        (witness : W)
     (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt coin))
     (table : Table Input Salt coin)
     (cache : (oracleSpec Input Salt coin).QueryCache)
@@ -752,12 +756,12 @@ theorem fixedTable_badExtract_has_bad_query [DecidableEq Input] [DecidableEq Sal
   · simpa only [hquerykey] using hbadkey
 
 /-- A failed adversary selection still pays for every distinct restoration key it queried. -/
-theorem roundFreshCharge_adversary_le [DecidableEq Input] [DecidableEq Salt]
+theorem distinctKeyCharge_adversary_le [DecidableEq Input] [DecidableEq Salt]
     (errors : (z : Input) → Errors (coin z))
     (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt coin)) :
-    roundFreshCharge errors adversaryLog.snd ≤
+    distinctKeyCharge errors adversaryLog.snd ≤
       (adversaryHashKeys adversaryLog).card * maxError errors := by
-  unfold roundFreshCharge adversaryHashKeys
+  unfold distinctKeyCharge adversaryHashKeys
   calc
     (∑ key ∈ (adversaryLog.snd.map Sigma.fst).toFinset, keyError errors key) ≤
         ∑ _key ∈ (adversaryLog.snd.map Sigma.fst).toFinset,
@@ -767,7 +771,7 @@ theorem roundFreshCharge_adversary_le [DecidableEq Input] [DecidableEq Salt]
         maxError errors := by simp only [Finset.sum_const, nsmul_eq_mul]
 
 /-- The actual distinct-key charge of every joint fixed-table trace is bounded by the
-adversary's observed distinct-key count and one local error per completion round. -/
+adversary's observed distinct-key count and the local errors of the completion keys. -/
 theorem fixedTable_joint_freshCharge_le [DecidableEq Input] [DecidableEq Salt]
     (coin : (z : Input) → PublicCoin (protocol z)) (errors : (z : Input) → Errors (coin z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin)
@@ -781,14 +785,14 @@ theorem fixedTable_joint_freshCharge_le [DecidableEq Input] [DecidableEq Salt]
     freshQueryCharge (keyError errors) result.1.2 ≤
       (adversaryHashKeys result.1.1.2).card * maxError errors +
         sumError errors := by
-  change roundFreshCharge errors result.1.2 ≤ _
+  change distinctKeyCharge errors result.1.2 ≤ _
   rcases fixedTable_restored_trace coin adversary table result supported with
     ⟨_, hlog⟩ | ⟨z, messages, witness, suffixLog, _, hlog, hkeys⟩
   · rw [hlog]
-    exact (roundFreshCharge_adversary_le errors result.1.1.2).trans
+    exact (distinctKeyCharge_adversary_le errors result.1.1.2).trans
       (le_add_right le_rfl)
   · rw [hlog]
-    exact roundFreshCharge_append_le errors result.1.1.2 suffixLog z messages hkeys
+    exact distinctKeyCharge_append_le errors result.1.1.2 suffixLog z messages hkeys
 
 /-- The pointwise bound holds on the actual cached random-oracle support, over arbitrary input
 and salt types. The support bridge keeps the entire output, log and cache tuple unchanged. -/

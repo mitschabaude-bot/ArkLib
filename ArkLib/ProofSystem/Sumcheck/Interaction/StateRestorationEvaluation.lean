@@ -52,6 +52,7 @@ noncomputable def terminalWitnessEquiv {m : ℕ} (D : Fin m ↪ F)
           ((Finset.univ.map D).toList.map (fun x => path.1.val.eval x)).sum = stmt.target)
         path.2.2
 
+omit [Fintype F] in
 /-- Terminal certificate truth is successful evaluation and truth of the retained claim. -/
 theorem terminal_holds_iff {m : ℕ} (D : Fin m ↪ F)
     (p : Spec.OracleStatement F n deg ())
@@ -105,6 +106,7 @@ def challengeReplay : QueryImpl (Unit →ₒ F) (StateT (List F) Id) :=
   fun _ => fun coins => (coins.headD 0, coins.tail)
 
 set_option backward.isDefEq.respectTransparency false in
+omit [Fintype F] in
 /-- Native aborting execution and fixed-round evaluation have identical closed outputs
 under the same completed challenge path, including the original oracle behavior. -/
 theorem replay_execute_eq {m : ℕ} (D : Fin m ↪ F)
@@ -155,6 +157,7 @@ noncomputable def nativeReplayOutput {m : ℕ} (D : Fin m ↪ F)
     A originalOracle stmt impl (replayProver F deg count path))).run'
     (replayChallenges F deg count path)
 
+omit [Fintype F] in
 /-- The certificate is true exactly when native replay succeeds with a true closed claim.
 The source law identifies the retained original oracle with the polynomial in the certificate. -/
 theorem terminal_holds_iff_native {m : ℕ} (D : Fin m ↪ F)

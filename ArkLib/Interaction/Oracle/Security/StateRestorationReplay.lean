@@ -172,7 +172,8 @@ theorem execute_pathReplay {ι : Type} (ambient : OracleSpec ι) {protocol : Pro
       erw [simulateQ_pure, pure_bind, h, pure_bind]
       rfl
   | @oracle Messages _ interface rest next ih =>
-      refine (executeStrategies_oracle ambient (rest := fun _ => rest.tree) _ _ initial impl _ _).trans
+      refine (executeStrategies_oracle ambient (rest := fun _ => rest.tree) _ _ initial impl _
+          _).trans
         ?_
       simp only [pathProver, challengeVerifier, pathPrograms]
       have h := ih (Access.extend initial interface)

@@ -313,23 +313,24 @@ black-box access. Bridges from round-by-round security, special soundness, and t
 state their entropy, salt, replay, budget, and loss assumptions.
 
 Implemented in `ArkLib/Interaction/Oracle/Security/`: the bridge from interaction-layer round-by-round
-knowledge to state-restoration knowledge soundness, for public-coin protocols whose rounds are a
-function of the input, with uniform challenge samplers. Restoration keys are an input together with
-a round, prover-message prefix and salt prefix of that input's rounds, and the adversary makes at
-most `Q` cached oracle queries.
+knowledge to state-restoration knowledge soundness, for public-coin protocols (`PublicCoin`) that may
+depend on the input and on the prover's public moves, with uniform challenge samplers. Restoration
+keys are an input together with the prover's moves, oracle payloads and salts up to a challenge,
+with earlier challenges erased, and the adversary makes at most `Q` cached oracle queries.
 
 - `Interaction.Oracle.Security.StateRestoration.stateRestoration_knowledge_soundness`: if every
-  round extractor is prover-preserving and locally bounded by `error`, and every input has at most
-  `k` rounds, the named backward extractor fails on a valid output with probability at most
-  `(Q + k) * error`. This is the `(B+r)` loss of the original design.
+  round extractor is prover-preserving and locally bounded by the per-node errors `errors`, the
+  named backward extractor fails on a valid output with probability at most
+  `Q * maxError errors + sumError errors`, the largest node error and the largest path sum of
+  errors over all inputs. With error `error` at each of at most `k` challenges per path this is the
+  `(B+r)` loss `(Q + k) * error` of the original design.
 - `stateRestoration_oracle_knowledge_soundness`: the same bound when the verifier returns an open
-  oracle claim and the output relation observes its closed behavior.
+  oracle claim and the output relation observes its closed behavior;
+  `KnowledgeCertificate.stateRestoration_oracle_knowledge_soundness` takes the errors from
+  certificates with uniform challenges.
 - `stateRestoration_knowledge_soundness_privateCoins` and
   `stateRestoration_oracle_knowledge_soundness_privateCoins`: the same bound when the adversary's
   private coins are sampled before the cached game.
-- `stateRestoration_oracle_knowledge_soundness_nonuniform` (`StateRestorationBudget.lean`): with
-  per-round errors that may depend on the input, the bound is `Q * maxError errors + sumError
-  errors`, the largest error over all inputs and rounds and the largest total of one input's rounds.
 
 Still open: rewinding knowledge soundness
 ([#1410](https://github.com/Verified-zkEVM/ArkLib/issues/1410)) and the bridges to Fiat–Shamir and

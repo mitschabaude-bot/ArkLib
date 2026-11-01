@@ -23,7 +23,7 @@ that realizes the stage map and a budget for its declared instruction charges
 value. `MeasuredKnowledgeCertificate` adds the stages to a `KnowledgeCertificate` for the same
 extractor; forgetting them recovers the certificate, whose fields the round-by-round and
 state-restoration theorems take. The theorem
-`MeasuredKnowledgeCertificate.stateRestoration_oracle_knowledge_soundness_nonuniform` in
+`MeasuredKnowledgeCertificate.stateRestoration_oracle_knowledge_soundness` in
 `StateRestorationResources` packages the closed-oracle security bound with a stage budget for that
 same named extractor.
 

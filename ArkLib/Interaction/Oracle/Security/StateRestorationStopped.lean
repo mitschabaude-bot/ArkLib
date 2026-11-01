@@ -10,7 +10,7 @@ public import ArkLib.Interaction.Oracle.Security.StateRestorationRandomizedKnowl
 /-!
 # Stopped state restoration
 
-A pure guard checks each authored message prefix before that round's challenge is queried.
+A pure guard checks each authored message prefix before that challenge is queried.
 The adversary still supplies complete messages, so rejection needs no invented message. A guard
 may depend on the input and all earlier messages, salts, and challenges through its continuation,
 but it cannot inspect its own or a later challenge. The stopped completion reads the same cached
@@ -26,7 +26,8 @@ namespace Interaction.Oracle.Security.StateRestoration
 
 universe w
 
-variable {Input Salt W : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
+variable {Input Salt W : Type} {protocol : Input → Protocol}
+  {coin : (z : Input) → PublicCoin (protocol z)}
 
 /-- A tree of pure, prefix-dependent guards, one before each challenge. A guard reads the salt of
 its challenge and, through its continuation, the earlier prover moves, oracle payloads, salts and
@@ -352,7 +353,8 @@ def randomizedStoppedCompletionAfterAdversaryLog (coin : (z : Input) → PublicC
       pure (path.map (fun p => ⟨z, p, witness⟩), selectedAndLog.2)
 
 /-- The actual joint stopped game shares one lazy random-oracle cache across both phases. -/
-def randomizedStoppedRestoredExecutionWithAdversaryLog (coin : (z : Input) → PublicCoin (protocol z))
+def randomizedStoppedRestoredExecutionWithAdversaryLog (coin : (z : Input) → PublicCoin (protocol
+    z))
     (guards : (z : Input) → GuardSchedule Salt (coin z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin) :
     OracleComp (unifSpec + oracleSpec Input Salt coin)
@@ -365,7 +367,8 @@ def randomizedStoppedRestoredExecutionWithAdversaryLog (coin : (z : Input) → P
 This law includes failed adversary selections and rejected guard paths. -/
 theorem randomizedStoppedRestoredExecutionWithAdversaryLog_handoff
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (cache : (oracleSpec Input Salt coin).QueryCache) :
     randomOracleLoggedRun
@@ -382,7 +385,8 @@ theorem randomizedStoppedRestoredExecutionWithAdversaryLog_handoff
 the all-prefix certificate on each supported private-randomness branch. -/
 theorem randomizedStoppedRestoredExecutionWithAdversaryLog_fixedTable_handoff
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (table : Table Input Salt coin)
     (cache : (oracleSpec Input Salt coin).QueryCache) :
@@ -400,7 +404,8 @@ theorem randomizedStoppedRestoredExecutionWithAdversaryLog_fixedTable_handoff
 /-- Accepted fixed-table stopped completion is the existing full native execution path, with
 exactly its full challenge-key log. Rejected paths retain their shorter ordered log. -/
 theorem fixedTable_stoppedCompletion_result_keys [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (z : Input) (messages : Messages Salt (coin z))
     (table : Table Input Salt coin)
     (cache : (oracleSpec Input Salt coin).QueryCache)
@@ -450,7 +455,8 @@ theorem badExtractOnStoppedPath_has_bad_key
 The suffix log is exactly the list of keys visited before acceptance or rejection. -/
 theorem fixedTable_stoppedCompletionAfterAdversaryLog_selected
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (z : Input) (messages : Messages Salt (coin z)) (witness : W)
     (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt coin))
     (table : Table Input Salt coin)
@@ -482,7 +488,8 @@ theorem fixedTable_stoppedCompletionAfterAdversaryLog_selected
 /-- Fixed-table trace decomposition of the actual stopped game. The suffix log is retained even
 when a guard rejects; a failed source selection has no suffix queries. -/
 theorem fixedTable_stopped_trace [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (table : Table Input Salt coin)
     (result : (((Option (Outcome Input W protocol) ×
@@ -529,7 +536,8 @@ theorem fixedTable_stopped_trace [DecidableEq Input] [DecidableEq Salt]
 /-- A failed extraction on a supported stopped run is witnessed by a bad key in that same
 run's ordered hash log. This implication comes from preservation and the full accepted path. -/
 theorem fixedTable_stopped_badExtract_has_bad_query [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (state : Input → KnowledgeState.{w})
     (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
@@ -621,7 +629,8 @@ challenge key in the same stopped cached run. Inputs and salts need only decidab
 adversarial private samples may be interleaved with repeated and out-of-order hash queries. -/
 theorem randomizedStopped_badRelation_le_expectedFreshCharge
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (errors : (z : Input) → Errors (coin z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (state : Input → KnowledgeState.{w})
@@ -698,11 +707,11 @@ theorem stoppedKeys_error_sum_le (coin : (z : Input) → PublicCoin (protocol z)
 
 /-- A joint stopped log charges the adversary's distinct keys and only verifier calls that
 actually executed. Repeated or previously cached verifier keys can make the bound strict. -/
-theorem roundFreshCharge_append_le_stopped [DecidableEq Input] [DecidableEq Salt]
+theorem distinctKeyCharge_append_le_stopped [DecidableEq Input] [DecidableEq Salt]
     (errors : (z : Input) → Errors (coin z))
     (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt coin))
     (suffixLog : QueryLog (oracleSpec Input Salt coin)) :
-    roundFreshCharge errors (adversaryLog.snd ++ suffixLog) ≤
+    distinctKeyCharge errors (adversaryLog.snd ++ suffixLog) ≤
       (adversaryHashKeys adversaryLog).card * maxError errors +
         ((suffixLog.map Sigma.fst).map (keyError errors)).sum := by
   let A : Finset (Key Input Salt coin) := (adversaryLog.snd.map Sigma.fst).toFinset
@@ -733,7 +742,7 @@ theorem roundFreshCharge_append_le_stopped [DecidableEq Input] [DecidableEq Salt
   exact hUnion.trans (add_le_add hA hC)
 
 /-- Actual executed verifier-round cost: remove the adversary phase's ordered hash prefix
-from the joint log and sum the round error of each remaining call. -/
+from the joint log and sum the node error of each remaining call. -/
 noncomputable def stoppedVerifierRoundCost [DecidableEq Input] [DecidableEq Salt]
     (errors : (z : Input) → Errors (coin z))
     (adversaryLog : QueryLog (unifSpec + oracleSpec Input Salt coin))
@@ -744,7 +753,8 @@ noncomputable def stoppedVerifierRoundCost [DecidableEq Input] [DecidableEq Salt
 the sum for its actually executed verifier coin. Failed selections still pay source costs. -/
 theorem fixedTable_stopped_freshCharge_le_actualRounds
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (errors : (z : Input) → Errors (coin z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (table : Table Input Salt coin)
@@ -758,21 +768,22 @@ theorem fixedTable_stopped_freshCharge_le_actualRounds
     freshQueryCharge (keyError errors) result.1.2 ≤
       (adversaryHashKeys result.1.1.2).card * maxError errors +
         stoppedVerifierRoundCost errors result.1.1.2 result.1.2 := by
-  change roundFreshCharge errors result.1.2 ≤ _
+  change distinctKeyCharge errors result.1.2 ≤ _
   rcases fixedTable_stopped_trace coin guards adversary table result supported with
     ⟨_, hlog⟩ | ⟨z, messages, witness, suffixLog, _, hlog, hkeys⟩
   · rw [hlog]
     simpa [stoppedVerifierRoundCost] using
-      roundFreshCharge_adversary_le errors result.1.1.2
+      distinctKeyCharge_adversary_le errors result.1.1.2
   · rw [hlog]
     simpa [stoppedVerifierRoundCost] using
-      roundFreshCharge_append_le_stopped errors result.1.1.2 suffixLog
+      distinctKeyCharge_append_le_stopped errors result.1.1.2 suffixLog
 
-/-- The same actual verifier cost is bounded by the full round-error sum on every supported
+/-- The same actual verifier cost is bounded by the full path error sum on every supported
 run. This is a separate estimate; the refined bound above retains the early-stop savings. -/
 theorem fixedTable_stopped_verifierCost_le_sum
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (errors : (z : Input) → Errors (coin z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (table : Table Input Salt coin)

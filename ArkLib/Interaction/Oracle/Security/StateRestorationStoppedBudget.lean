@@ -11,7 +11,7 @@ public import ArkLib.Interaction.Oracle.Security.StateRestorationStopped
 # Expected cost of actual stopped verification
 
 The joint cached run charges each distinct restoration key once. Its adversary phase keeps all
-queries, even if the adversary returns failure. Its verifier phase pays only the round-error sum
+queries, even if the adversary returns failure. Its verifier phase pays only the path error sum
 for challenge calls that actually execute before the first rejecting guard. The expectation-level
 bound uses this same stopped run, without completing a padded suffix.
 -/
@@ -25,7 +25,8 @@ namespace Interaction.Oracle.Security.StateRestoration
 
 universe w
 
-variable {Input Salt W : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
+variable {Input Salt W : Type} {protocol : Input → Protocol}
+  {coin : (z : Input) → PublicCoin (protocol z)}
 
 /-- The full result of a stopped logged random-oracle run, including the source phase log and
 the final hash log and cache. -/
@@ -40,7 +41,8 @@ abbrev StoppedJointResult (Input Salt W : Type) {protocol : Input → Protocol}
 phase of the stopped joint run. Failure branches remain in this expectation. -/
 noncomputable def expectedStoppedJointAdversaryKeys
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin) : ENNReal :=
   letI : MeasurableSpace (StoppedJointResult Input Salt W coin) := ⊤
   ∫⁻ result, ((adversaryHashKeys result.1.1.2).card : ENNReal)
@@ -51,7 +53,8 @@ noncomputable def expectedStoppedJointAdversaryKeys
 counts executed calls even when they hit an adversarially populated cache. -/
 noncomputable def expectedStoppedVerifierRoundCost
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (errors : (z : Input) → Errors (coin z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin) : ENNReal :=
   letI : MeasurableSpace (StoppedJointResult Input Salt W coin) := ⊤
@@ -62,7 +65,8 @@ noncomputable def expectedStoppedVerifierRoundCost
 /-- The actual random-oracle support inherits the fixed-table bound on distinct charge. -/
 theorem randomOracle_stopped_freshCharge_le_actualRounds
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (errors : (z : Input) → Errors (coin z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (result : StoppedJointResult Input Salt W coin)
@@ -77,11 +81,12 @@ theorem randomOracle_stopped_freshCharge_le_actualRounds
   exact fixedTable_stopped_freshCharge_le_actualRounds coin guards errors
     adversary table result htable
 
-/-- The actual random-oracle support pays no more than the full schedule's round-error sum
+/-- The actual random-oracle support pays no more than the full schedule's path error sum
 in the verifier phase, including rejected runs. -/
 theorem randomOracle_stopped_verifierCost_le_sum
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (errors : (z : Input) → Errors (coin z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (result : StoppedJointResult Input Salt W coin)
@@ -98,7 +103,8 @@ theorem randomOracle_stopped_verifierCost_le_sum
 is bounded by adversary distinct keys plus exactly the cost of executed verifier coin. -/
 theorem expectedStoppedFreshCharge_le_actualRounds
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (errors : (z : Input) → Errors (coin z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin) :
     expectedFreshQueryCharge
@@ -136,11 +142,12 @@ theorem expectedStoppedFreshCharge_le_actualRounds
         lintegral_const_mul _ Measurable.of_discrete]
       rfl
 
-/-- The second resource inequality: stopping queries no more than one challenge per round,
+/-- The second resource inequality: stopping queries no more than the challenges of one path,
 so expected executed-round cost is at most the total local-error sum. -/
 theorem expectedStoppedVerifierRoundCost_le_sum
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (errors : (z : Input) → Errors (coin z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin) :
     expectedStoppedVerifierRoundCost coin guards errors adversary ≤
@@ -167,7 +174,8 @@ theorem expectedStoppedVerifierRoundCost_le_sum
 coarser full-schedule consequence. The adversary count belongs to this same joint run. -/
 theorem expectedStoppedFreshCharge_le_actualAdversary_and_sum
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (errors : (z : Input) → Errors (coin z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin) :
     expectedFreshQueryCharge
@@ -192,7 +200,8 @@ The first bound uses the actual stopped verifier's executed coin, and the second
 coin by the full finite schedule. No finite input or salt domain is required. -/
 theorem randomizedStopped_knowledge_soundness_actualRounds
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (errors : (z : Input) → Errors (coin z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (state : Input → KnowledgeState.{w})
@@ -232,7 +241,8 @@ theorem randomizedStopped_knowledge_soundness_actualRounds
 and rejection. This identifies the joint count with the actual cached source phase. -/
 theorem randomOracle_stoppedCompletion_sourceLog
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (selectedAndLog : Option (Selection Input Salt W coin) ×
       QueryLog (unifSpec + oracleSpec Input Salt coin))
     (cache : (oracleSpec Input Salt coin).QueryCache)
@@ -262,7 +272,8 @@ theorem randomOracle_stoppedCompletion_sourceLog
 
 private theorem stoppedCompletion_expected_adversaryKeys
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (selectedAndLog : Option (Selection Input Salt W coin) ×
       QueryLog (unifSpec + oracleSpec Input Salt coin))
     (cache : (oracleSpec Input Salt coin).QueryCache) :
@@ -299,7 +310,8 @@ private theorem stoppedCompletion_expected_adversaryKeys
 actual cached adversary phase. The stopping decision cannot change its earlier key set. -/
 theorem expectedStoppedJointAdversaryKeys_eq_expectedAdversaryFreshKeys
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin) :
     expectedStoppedJointAdversaryKeys coin guards adversary =
       expectedAdversaryFreshKeys coin adversary := by
@@ -348,7 +360,8 @@ retains the expected cost of coin actually queried, and the second replaces it b
 schedule sum. -/
 theorem randomizedStopped_knowledge_soundness_actualAdversary
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (errors : (z : Input) → Errors (coin z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (state : Input → KnowledgeState.{w})
@@ -384,7 +397,8 @@ bound. The cap counts distinct hash keys even on failed selections; private unif
 not hash queries. -/
 theorem randomizedStopped_knowledge_soundness_queryBound
     [DecidableEq Input] [DecidableEq Salt]
-    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (coin : (z : Input) → PublicCoin (protocol z)) (guards : (z : Input) → GuardSchedule Salt (coin
+        z))
     (errors : (z : Input) → Errors (coin z))
     (adversary : RandomizedRestorationAdversary Input Salt W coin)
     (state : Input → KnowledgeState.{w})

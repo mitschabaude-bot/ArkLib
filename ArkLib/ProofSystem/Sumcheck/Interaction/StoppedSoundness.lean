@@ -53,7 +53,8 @@ variable (impl : Input → QueryImpl (OracleSpec.ofPFunctor A) Id)
 
 /-- A stopped accepted path has a false initial claim and a true actual closed native output. -/
 def stoppedFalseAccepts :
-    Option (Outcome Input Unit (fun _ => Security.StateRestoration.protocol (rounds F deg n))) → Prop
+    Option (Outcome Input Unit (fun _ => Security.StateRestoration.protocol (rounds F deg n))) →
+        Prop
   | none => False
   | some ⟨z, path, _⟩ =>
       ¬ initialClaimTrue F n deg D stmt p z ∧
@@ -65,7 +66,8 @@ The stateless source handler is matched to the original polynomial realization e
 theorem stoppedSumcheck_expected_soundness
     (sourceLaw : ∀ z, (originalOracle z).eval (impl z) =
       (polynomialFamily F n deg).behaviorOfRealizations (fun _ => p z))
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg n))) :
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg
+        n))) :
     Pr{let joint ← (randomOracleLoggedRun
       (randomizedStoppedRestoredExecutionWithAdversaryLog (fun _ => Round.coin (rounds F deg n))
         (fun z => sumcheckGuards F n deg D n 0 (by omega) (stmt z)) adversary) ∅)}[
@@ -83,7 +85,8 @@ theorem stoppedSumcheck_expected_soundness
   let terminalWitness := fun z path =>
     terminalWitnessEquiv F n deg D (p z) n 0 (by omega) (stmt z) True path
   have howner := randomizedStopped_badRelation_le_expectedFreshCharge
-    (fun _ => Round.coin (rounds F deg n)) (fun z => sumcheckGuards F n deg D n 0 (by omega) (stmt z))
+    (fun _ => Round.coin (rounds F deg n)) (fun z => sumcheckGuards F n deg D n 0 (by omega) (stmt
+        z))
     (fun _ _ => fieldError F deg) adversary state extractor Set.univ
     (by intro z _; exact certificate_preserving F n deg D (p z) n 0 (by omega) (stmt z) True)
     (by intro z _; exact certificate_bounded_constant F n deg D (p z) (stmt z))
@@ -114,12 +117,14 @@ Its coarse consequence is the usual field error times the expected adversary cos
 theorem stoppedSumcheck_expected_round_bound
     (sourceLaw : ∀ z, (originalOracle z).eval (impl z) =
       (polynomialFamily F n deg).behaviorOfRealizations (fun _ => p z))
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg n))) :
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg
+        n))) :
     Pr{let joint ← (randomOracleLoggedRun
       (randomizedStoppedRestoredExecutionWithAdversaryLog (fun _ => Round.coin (rounds F deg n))
         (fun z => sumcheckGuards F n deg D n 0 (by omega) (stmt z)) adversary) ∅)}[
       stoppedFalseAccepts F n deg D A stmt p originalOracle impl joint.1.1.1] ≤
-      fieldError F deg * expectedAdversaryFreshKeys (fun _ => Round.coin (rounds F deg n)) adversary +
+      fieldError F deg * expectedAdversaryFreshKeys (fun _ => Round.coin (rounds F deg n))
+          adversary +
         expectedStoppedVerifierRoundCost (fun _ => Round.coin (rounds F deg n))
           (fun z => sumcheckGuards F n deg D n 0 (by omega) (stmt z)) (fun _ _ => fieldError F deg)
           adversary ∧

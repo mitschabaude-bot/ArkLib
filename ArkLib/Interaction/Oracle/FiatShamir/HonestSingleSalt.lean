@@ -375,7 +375,8 @@ theorem honestCompiledRun_eq_interactive {Input : Type} [DecidableEq Input]
 
 /-- Draw a salt independently, then compile a private-coin strategy to a complete proof. The
 selected proof is emitted only if every reached guard passed. -/
-def honestSingleSaltAdversary {Statement GlobalSalt Witness : Type} {protocol : Statement → Protocol}
+def honestSingleSaltAdversary {Statement GlobalSalt Witness : Type} {protocol : Statement →
+    Protocol}
     [SampleableType GlobalSalt] (coin : (statement : Statement) → PublicCoin (protocol statement))
     (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
     (statement : Statement) (witness : Witness)
@@ -388,7 +389,8 @@ def honestSingleSaltAdversary {Statement GlobalSalt Witness : Type} {protocol : 
 
 /-- Uniform interactive challenges with the same independent salt and terminal check. This is
 the observation compared with the accepted native-verifier output. -/
-def honestInteractiveAccepted {Statement GlobalSalt Witness : Type} {protocol : Statement → Protocol}
+def honestInteractiveAccepted {Statement GlobalSalt Witness : Type} {protocol : Statement →
+    Protocol}
     [SampleableType GlobalSalt] (coin : (statement : Statement) → PublicCoin (protocol statement))
     (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
     (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath →
@@ -405,7 +407,8 @@ def honestInteractiveAccepted {Statement GlobalSalt Witness : Type} {protocol : 
 
 /-- The honest source endpoint uses the actual guarded public strategy executor and a pure
 terminal acceptance predicate. The strategy is selected after the independent salt draw. -/
-def honestNativeInteractiveAccepted {Statement GlobalSalt Witness : Type} {protocol : Statement → Protocol}
+def honestNativeInteractiveAccepted {Statement GlobalSalt Witness : Type} {protocol : Statement →
+    Protocol}
     [SampleableType GlobalSalt] (coin : (statement : Statement) → PublicCoin (protocol statement))
     (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
     (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath →
@@ -448,8 +451,9 @@ def honestSingleSaltAccepted {Statement GlobalSalt Witness : Type} {protocol : S
     (honestSingleSaltAdversary coin guards statement witness prover)
 
 
-/-- With an initially empty oracle cache, the compiler's complete path has exactly the interactive uniform-challenge distribution. Ordered hash logs are projected
-away; private sampling remains inside the same `ProbComp`. -/
+/-- With an initially empty oracle cache, the compiler's complete path has exactly the
+interactive uniform-challenge distribution. Ordered hash logs are projected away; private sampling
+remains inside the same `ProbComp`. -/
 theorem honestCompiledRun_empty_eq_interactive {Input : Type} [DecidableEq Input]
     {protocol : Input → Protocol} (coin : (z : Input) → PublicCoin (protocol z))
     (guards : (z : Input) → GuardSchedule PUnit (coin z))
@@ -556,7 +560,8 @@ theorem honestRom_cache_le {Input : Type} [DecidableEq Input]
     QueryImpl.PreservesInv.withCaching_le uniformSampleImpl initial
   have himpl : QueryImpl.PreservesInv (oracleSpec Input PUnit coin).romImpl (initial ≤ ·) :=
     hprivate.add hhash
-  exact OracleComp.simulateQ_run_preservesInv (oracleSpec Input PUnit coin).romImpl (initial ≤ ·) himpl
+  exact OracleComp.simulateQ_run_preservesInv (oracleSpec Input PUnit coin).romImpl (initial ≤ ·)
+      himpl
     program initial le_rfl result supported
 
 /-- A successful compiler output records challenges that the final cache can replay, with every
@@ -812,7 +817,8 @@ def honestCompiledVerify {Statement GlobalSalt Witness : Type} {protocol : State
 
 /-- Draw the independent global salt before running any private prover action, then compile
 and verify in one shared lazy random-oracle execution. -/
-def honestSingleSaltVerifiedProgram {Statement GlobalSalt Witness : Type} {protocol : Statement → Protocol}
+def honestSingleSaltVerifiedProgram {Statement GlobalSalt Witness : Type} {protocol : Statement →
+    Protocol}
     [SampleableType GlobalSalt]
     (coin : (statement : Statement) → PublicCoin (protocol statement))
     (guards : (z : Statement × GlobalSalt) → GuardSchedule PUnit (coin z.1))
@@ -1028,7 +1034,8 @@ theorem honestSingleSaltAccepted_event_eq_interactive
       Bool)
     (statement : Statement) (witness : Witness)
     (prover : GlobalSalt → HonestProver (coin statement))
-    (event : Option (Outcome (Statement × GlobalSalt) Witness (saltedProtocol GlobalSalt protocol)) →
+    (event : Option (Outcome (Statement × GlobalSalt) Witness (saltedProtocol GlobalSalt protocol))
+        →
       Prop) :
     Pr{let result ← randomOracleLoggedRun
         (honestSingleSaltAccepted coin guards accepts statement witness prover) ∅}[
@@ -1089,7 +1096,8 @@ theorem honestSingleSaltAccepted_native_event
       Bool)
     (statement : Statement) (witness : Witness)
     (prover : GlobalSalt → HonestProver (coin statement))
-    (event : Option (Outcome (Statement × GlobalSalt) Witness (saltedProtocol GlobalSalt protocol)) →
+    (event : Option (Outcome (Statement × GlobalSalt) Witness (saltedProtocol GlobalSalt protocol))
+        →
       Prop) :
     Pr{let result ← randomOracleLoggedRun
         (honestSingleSaltAccepted coin guards accepts statement witness prover) ∅}[

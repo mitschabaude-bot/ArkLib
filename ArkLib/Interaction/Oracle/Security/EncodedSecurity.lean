@@ -26,7 +26,8 @@ namespace Interaction.Oracle.Security.StateRestoration
 
 universe w
 
-variable {Input Salt C D W : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
+variable {Input Salt C D W : Type} {protocol : Input → Protocol}
+  {coin : (z : Input) → PublicCoin (protocol z)}
 
 /-- The adversary-phase budget is exactly the expected distinct native hash-log count of the
 adversary program itself. Surface query logging does not add hash queries. -/

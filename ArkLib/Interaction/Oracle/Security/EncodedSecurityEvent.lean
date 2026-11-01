@@ -170,7 +170,7 @@ theorem encodedExternalStopped_expectedCharge_eq_native
           codec.expectedNativeCharge_eq_external externalProgram weight
 
 /-- The external stopped run's own weighted cost is bounded by its original adversary's
-expected distinct queries and the round-error sum. This resource bound needs no security
+expected distinct queries and the path error sum. This resource bound needs no security
 certificate or acceptance hypothesis. -/
 theorem encodedExternalStopped_expectedCharge_le_adversaryCount
     [DecidableEq D] [SampleableType C]

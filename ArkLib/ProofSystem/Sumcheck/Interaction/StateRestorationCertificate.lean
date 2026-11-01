@@ -68,7 +68,7 @@ variable (F : Type) [Field F] [Fintype F] [DecidableEq F] [SampleableType F] (n 
               (checksPassed ∧
                 ((Finset.univ.map D).toList.map (fun x => q.val.eval x)).sum = stmt.target)⟩⟩
 
-omit [DecidableEq F] in
+omit [Fintype F] [DecidableEq F] in
 /-- Sending a polynomial cannot turn a false ordinary state into a true one. -/
 theorem certificate_preserving {m : ℕ} (D : Fin m ↪ F)
     (p : Spec.OracleStatement F n deg ())

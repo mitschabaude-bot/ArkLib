@@ -21,7 +21,8 @@ open OracleComp OracleSpec MeasureTheory
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-variable {Input Salt C A : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
+variable {Input Salt C A : Type} {protocol : Input → Protocol}
+  {coin : (z : Input) → PublicCoin (protocol z)}
 
 /-- Changing challenge representations preserves every distinct key in the hash log. -/
 theorem CommonChallenge.freshKeys_toCommonLog

@@ -14,8 +14,9 @@ The restoration certificate is phrased over oracle-message nodes. A Fiat–Shami
 contains every prover message in the clear: `publicProtocol` sends each oracle message as a
 public prover message. A proof is a `Messages PUnit coin`: the prover's moves and messages, with
 the trivial per-challenge salt, since the single global salt is part of the statement. These are
-distinct native protocol nodes: a public message is retained in the branch history, whereas an oracle message contributes only a unit branch and its
-payload is available through its declared oracle interface. This file gives the public protocol
+distinct native protocol nodes: a public message is retained in the branch history, whereas an
+oracle message contributes only a unit branch and its payload is available through its declared
+oracle interface. This file gives the public protocol
 and transports its *concrete execution path* to the certificate protocol's execution path.
 
 The path equivalence by itself does not equate the two branch histories or grant a verifier access

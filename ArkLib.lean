@@ -730,6 +730,7 @@ public import ArkLib.Interaction.Oracle.PhasedExecution
 public import ArkLib.Interaction.Oracle.PhasedRun
 public import ArkLib.Interaction.Oracle.Prefix
 public import ArkLib.Interaction.Oracle.Protocol
+public import ArkLib.Interaction.Oracle.PublicCoin
 public import ArkLib.Interaction.Oracle.Resource
 public import ArkLib.Interaction.Oracle.RunSources
 public import ArkLib.Interaction.Oracle.Runtime

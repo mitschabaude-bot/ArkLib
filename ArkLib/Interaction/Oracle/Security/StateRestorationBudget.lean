@@ -55,8 +55,10 @@ def errorSchedule : {protocol : Protocol} → (coin : PublicCoin protocol) → E
 noncomputable def pathError : {protocol : Protocol} → (coin : PublicCoin protocol) →
     Errors coin → ENNReal
   | _, .done, _ => 0
-  | _, @PublicCoin.sender _ _ _ next, errors => ⨆ move, pathError (next move) fun q => errors ⟨move, q⟩
-  | _, @PublicCoin.oracle _ _ _ _ next, errors => ⨆ message, pathError next fun q => errors ⟨message, q⟩
+  | _, @PublicCoin.sender _ _ _ next, errors => ⨆ move, pathError (next move) fun q => errors
+      ⟨move, q⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, errors => ⨆ message, pathError next fun q => errors
+      ⟨message, q⟩
   | _, @PublicCoin.challenge _ _ _ next, errors =>
       errors (.inl PUnit.unit) + pathError next fun q => errors (.inr ⟨PUnit.unit, q⟩)
 
@@ -297,9 +299,11 @@ theorem completePrefix_cost {Salt : Type} {protocol : Protocol} (coin : PublicCo
   | sender next ih =>
       rcases messages with ⟨move, messages⟩
       simp only [completePrefix, pathError]
-      refine worstCaseCostBound_mono (budget := pathError (next move) (fun q => errors ⟨move, q⟩) + 0)
+      refine worstCaseCostBound_mono (budget := pathError (next move) (fun q => errors ⟨move, q⟩) +
+          0)
         ((worstCaseCostBound_reindexQuery (R := Prefix.Challenge (coin := .sender next))
-          (Sigma.mk move) (prefixError errors) _ _ (ih move (fun q => errors ⟨move, q⟩) messages)).bind fun _ => (worstCaseCostBound_pure _ _ _).mpr le_rfl) ?_
+          (Sigma.mk move) (prefixError errors) _ _ (ih move (fun q => errors ⟨move, q⟩)
+              messages)).bind fun _ => (worstCaseCostBound_pure _ _ _).mpr le_rfl) ?_
       rw [add_zero]
       exact le_iSup (fun move => pathError (next move) fun q => errors ⟨move, q⟩) move
   | oracle next ih =>
@@ -307,7 +311,8 @@ theorem completePrefix_cost {Salt : Type} {protocol : Protocol} (coin : PublicCo
       simp only [completePrefix, pathError]
       refine worstCaseCostBound_mono (budget := pathError next (fun q => errors ⟨message, q⟩) + 0)
         ((worstCaseCostBound_reindexQuery (R := Prefix.Challenge (coin := .oracle next))
-          (Prod.mk message) (prefixError errors) _ _ (ih (fun q => errors ⟨message, q⟩) messages)).bind fun _ => (worstCaseCostBound_pure _ _ _).mpr le_rfl) ?_
+          (Prod.mk message) (prefixError errors) _ _ (ih (fun q => errors ⟨message, q⟩)
+              messages)).bind fun _ => (worstCaseCostBound_pure _ _ _).mpr le_rfl) ?_
       rw [add_zero]
       exact le_iSup (fun message => pathError next fun q => errors ⟨message, q⟩) message
   | challenge next ih =>
@@ -315,7 +320,8 @@ theorem completePrefix_cost {Salt : Type} {protocol : Protocol} (coin : PublicCo
       simp only [completePrefix, pathError]
       apply (worstCaseCostBound_query_bind_iff _ _ _ _).mpr
       intro challenge result supported
-      have combined := (worstCaseCostBound_reindexQuery (R := Prefix.Challenge (coin := .challenge next))
+      have combined := (worstCaseCostBound_reindexQuery (R := Prefix.Challenge (coin := .challenge
+          next))
         (fun q : Prefix Salt next => Sum.inr ⟨salt, q⟩) (prefixError errors) _ _
         (ih (fun q => errors (.inr ⟨PUnit.unit, q⟩)) messages)).bind
           (k := fun path => (pure ⟨challenge, path⟩ : OracleComp (prefixSpec Salt (.challenge next))
@@ -386,8 +392,10 @@ theorem restored_extraction_bound {Input Salt W : Type} {protocol : Input → Pr
 def UniformChallenges : {protocol : Protocol} → (coin : PublicCoin protocol) →
     RoundExtractor.ChallengeSchedule protocol.tree protocol.roles → Prop
   | _, .done, _ => True
-  | _, @PublicCoin.sender _ _ _ next, schedule => ∀ move, UniformChallenges (next move) (schedule.2 move)
-  | _, @PublicCoin.oracle _ _ _ _ next, schedule => ∀ message, UniformChallenges next (schedule message)
+  | _, @PublicCoin.sender _ _ _ next, schedule => ∀ move, UniformChallenges (next move) (schedule.2
+      move)
+  | _, @PublicCoin.oracle _ _ _ _ next, schedule => ∀ message, UniformChallenges next (schedule
+      message)
   | _, @PublicCoin.challenge Challenge _ _ next, schedule =>
       schedule.1.1 = $ᵗ Challenge ∧ ∀ challenge, UniformChallenges next (schedule.2 challenge)
 
@@ -396,8 +404,10 @@ challenges. -/
 noncomputable def supErrors : {protocol : Protocol} → (coin : PublicCoin protocol) →
     RoundExtractor.ChallengeSchedule protocol.tree protocol.roles → Errors coin
   | _, .done, _, node => nomatch node
-  | _, @PublicCoin.sender _ _ _ next, schedule, ⟨move, node⟩ => supErrors (next move) (schedule.2 move) node
-  | _, @PublicCoin.oracle _ _ _ _ next, schedule, ⟨message, node⟩ => supErrors next (schedule message) node
+  | _, @PublicCoin.sender _ _ _ next, schedule, ⟨move, node⟩ => supErrors (next move) (schedule.2
+      move) node
+  | _, @PublicCoin.oracle _ _ _ _ next, schedule, ⟨message, node⟩ => supErrors next (schedule
+      message) node
   | _, @PublicCoin.challenge _ _ _ _, schedule, .inl _ => schedule.1.2
   | _, @PublicCoin.challenge _ _ _ next, schedule, .inr ⟨_, node⟩ =>
       ⨆ challenge, supErrors next (schedule.2 challenge) node

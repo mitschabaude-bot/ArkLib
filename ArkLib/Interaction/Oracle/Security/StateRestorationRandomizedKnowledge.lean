@@ -24,7 +24,8 @@ namespace Interaction.Oracle.Security.StateRestoration
 
 universe w
 
-variable {Input Salt W : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
+variable {Input Salt W : Type} {protocol : Input → Protocol}
+  {coin : (z : Input) → PublicCoin (protocol z)}
 
 /-- Observe the selected native path while retaining the adversary's exact source query log.
 Both scalar observations and closed oracle outputs use this one owner-level wrapper. -/

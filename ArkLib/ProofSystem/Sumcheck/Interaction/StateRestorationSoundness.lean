@@ -37,7 +37,7 @@ variable (k deg : ℕ)
 /-- The local field-error bound, including `deg = 0`. -/
 noncomputable def fieldError : ENNReal := (deg : ENNReal) / Fintype.card F
 
-omit [DecidableEq F] in
+omit [Fintype F] [DecidableEq F] in
 /-- The fixed restoration presentation has exactly `k` field challenges. -/
 theorem rounds_length : (rounds F deg k).length = k := by
   induction k with
@@ -100,7 +100,7 @@ noncomputable def nativeObservedOutput (z : Input)
     Option (ClosedClaim (Native.FinalStatement F k) (polynomialFamily F k deg)) :=
   nativeReplayOutput F k deg D k 0 (by omega) A (originalOracle z) (stmt z) (impl z) path
 
-omit [DecidableEq Input] in
+omit [Fintype F] [DecidableEq Input] in
 /-- The proved deterministic native replay equation supplies the terminal output law.
 No probabilistic correspondence is assumed. -/
 theorem terminal_certificate_holds_iff_native
@@ -119,7 +119,8 @@ theorem terminal_certificate_holds_iff_native
 
 /-- Source-only native replay game. Its output contains the actual closed claim, if accepted. -/
 noncomputable def nativeRestorationGame
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg k))) :
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg
+        k))) :
     OracleComp (unifSpec + oracleSpec Input Salt (fun _ => Round.coin (rounds F deg k)))
       (Option ((_ : Input) ×
         (_ : (Security.StateRestoration.protocol (rounds F deg k)).tree.ExecutionPath) ×
@@ -144,11 +145,12 @@ def nativeFalseAccepts :
       ¬ initialClaimTrue F k deg D stmt p z ∧
         ∃ claim, output = some claim ∧ Native.outputRelation F k deg claim
 
-omit [DecidableEq Input] [DecidableEq Salt] in
+omit [Fintype F] [DecidableEq Input] [DecidableEq Salt] in
 /-- The native replay game is exactly the source-log erasure of the owner-level joint game.
 This equation retains the original source-only execution; it assumes no probability bridge. -/
 theorem nativeRestorationGame_eq_observedErase
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg k))) :
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg
+        k))) :
     nativeRestorationGame F k deg D A stmt originalOracle impl adversary =
       Prod.fst <$> randomizedObservedGameWithAdversaryLog
         (fun _ _ => Option (ClosedClaim (Native.FinalStatement F k)
@@ -159,9 +161,11 @@ theorem nativeRestorationGame_eq_observedErase
       (polynomialFamily F k deg)))
     (nativeObservedOutput F k deg D A stmt originalOracle impl) adversary).symm
 
+omit [Fintype F] in
 /-- The actual native cached output marginal equals the instrumented joint output marginal. -/
 theorem nativeRestorationGame_marginal
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg k))) :
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg
+        k))) :
     (simulateQ (oracleSpec Input Salt (fun _ => Round.coin (rounds F deg k))).romImpl
       (nativeRestorationGame F k deg D A stmt originalOracle impl adversary)).run' ∅ =
     (fun joint => joint.1.1.1) <$>
@@ -176,10 +180,13 @@ theorem nativeRestorationGame_marginal
       (polynomialFamily F k deg)))
     (nativeObservedOutput F k deg D A stmt originalOracle impl) adversary).symm
 
+omit [Fintype F] in
 /-- The false-acceptance event has the same probability on the exact logged joint run. -/
 theorem nativeRestorationGame_falseAccept_event
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg k))) :
-    Pr{let result ← (simulateQ (oracleSpec Input Salt (fun _ => Round.coin (rounds F deg k))).romImpl
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg
+        k))) :
+    Pr{let result ← (simulateQ (oracleSpec Input Salt (fun _ => Round.coin (rounds F deg
+        k))).romImpl
       (nativeRestorationGame F k deg D A stmt originalOracle impl adversary)).run' ∅}[
       nativeFalseAccepts F k deg D stmt p result] =
     Pr{let joint ← (randomOracleLoggedRun
@@ -191,7 +198,7 @@ theorem nativeRestorationGame_falseAccept_event
   rw [nativeRestorationGame_marginal]
   exact prEvent_map _ _ _
 
-omit [DecidableEq F] [DecidableEq Input] in
+omit [Fintype F] [DecidableEq F] [DecidableEq Input] in
 /-- The owner relation event specializes to ordinary Sumcheck false-claim acceptance.
 Its generic witness argument is `Unit` and carries no extra condition. -/
 theorem nativeFalseAccepts_iff_ownerEvent
@@ -221,8 +228,10 @@ branches on which the adversary returns no transcript. -/
 theorem nativeRestoration_expected_soundness
     (sourceLaw : ∀ z, (originalOracle z).eval (impl z) =
       (polynomialFamily F k deg).behaviorOfRealizations (fun _ => p z))
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg k))) :
-    Pr{let result ← (simulateQ (oracleSpec Input Salt (fun _ => Round.coin (rounds F deg k))).romImpl
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg
+        k))) :
+    Pr{let result ← (simulateQ (oracleSpec Input Salt (fun _ => Round.coin (rounds F deg
+        k))).romImpl
       (nativeRestorationGame F k deg D A stmt originalOracle impl adversary)).run' ∅}[
         nativeFalseAccepts F k deg D stmt p result] ≤
       expectedFreshQueryCharge
@@ -237,7 +246,8 @@ theorem nativeRestoration_expected_soundness
             (polynomialFamily F k deg)))
           (nativeObservedOutput F k deg D A stmt originalOracle impl) adversary)
         (keyError (coin := fun _ => Round.coin (rounds F deg k)) fun _ _ => fieldError F deg) ≤
-      fieldError F deg * expectedAdversaryFreshKeys (fun _ => Round.coin (rounds F deg k)) adversary +
+      fieldError F deg * expectedAdversaryFreshKeys (fun _ => Round.coin (rounds F deg k))
+          adversary +
         (k : ENNReal) * fieldError F deg := by
   let Out := fun (_ : Input)
       (_ : (Security.StateRestoration.protocol (rounds F deg k)).tree.ExecutionPath) =>
@@ -274,7 +284,8 @@ theorem nativeRestoration_expected_soundness
       (fun joint => nativeFalseAccepts_iff_ownerEvent F k deg D stmt p joint.1.1.1)
     exact hevent.le.trans howner
   · exact (expectedObservedFreshCharge_le_actualAdversary
-      (fun _ => Round.coin (rounds F deg k)) (fun _ _ => fieldError F deg) adversary Out observe).trans
+      (fun _ => Round.coin (rounds F deg k)) (fun _ _ => fieldError F deg) adversary Out
+          observe).trans
         (constant_round_expected_budget_le F k deg
           (expectedAdversaryFreshKeys (fun _ => Round.coin (rounds F deg k)) adversary))
 
@@ -284,11 +295,13 @@ are covered by the same `ENNReal` statement. -/
 theorem nativeRestoration_queryBound_soundness
     (sourceLaw : ∀ z, (originalOracle z).eval (impl z) =
       (polynomialFamily F k deg).behaviorOfRealizations (fun _ => p z))
-    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg k)))
+    (adversary : RandomizedRestorationAdversary Input Salt Unit (fun _ => Round.coin (rounds F deg
+        k)))
     (Q : ℕ)
     (actualQueryBound : ∀ phase ∈ support (randomOracleLoggedRun adversary.withQueryLog ∅),
       (freshKeysOfLog phase.1.2).card ≤ Q) :
-    Pr{let result ← (simulateQ (oracleSpec Input Salt (fun _ => Round.coin (rounds F deg k))).romImpl
+    Pr{let result ← (simulateQ (oracleSpec Input Salt (fun _ => Round.coin (rounds F deg
+        k))).romImpl
       (nativeRestorationGame F k deg D A stmt originalOracle impl adversary)).run' ∅}[
         nativeFalseAccepts F k deg D stmt p result] ≤
       (Q + k : ℕ) * fieldError F deg := by

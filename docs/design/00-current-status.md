@@ -408,41 +408,56 @@ local bound to the actual interpreted receiver action when the verifier satisfie
 invalid input witness with probability at most the largest sum of local errors along a path of
 the challenge schedule.
 
-**State restoration.** The protocol is a public-coin protocol on an interaction tree whose rounds
-are a function of the input: input `z` runs `protocol (rounds z)`. Each restoration key is an input
-together with a salted prefix of its rounds (round, prover-message prefix and salt prefix), and
-challenges come from one cached random oracle. The adversary chooses the input, all messages and
-salts, and an output witness after adaptive queries, with at most `Q` queries in total. When every
-input has at most `k` rounds, `stateRestoration_knowledge_soundness` bounds by `(Q + k) * error` the
-probability that the output relation holds while the named backward extraction fails. The actual
+**State restoration.** The protocol of input `z` is `protocol z`, presented as public-coin by
+`coin z : PublicCoin (protocol z)` (`Oracle/PublicCoin.lean`): every verifier move is a uniform
+challenge, and after a challenge the protocol does not depend on its value, though it may depend on
+the input and on the prover's public moves. Protocols built from `Protocol` constructors get the
+presentation from the same constructors; `PublicCoin.append` composes it along a suffix selected by
+the prover's public moves alone, the shape of `KnowledgeCertificate.append` and `sequential`.
+`Round.coin` presents alternating oracle messages and challenges (`List Round`), and FRI's
+`publicCoin` presents FRI. Each restoration key is an input together with a salted prefix ending at
+a challenge: the prover's moves and oracle payloads before it and a salt at each challenge, with the
+earlier challenges erased. Challenges come from one cached random oracle. The adversary chooses the
+input, all messages and salts, and an output witness after adaptive queries, with at most `Q`
+queries in total. Local errors are per challenge node (`Errors`, with schedule `errorSchedule`), and
+`stateRestoration_knowledge_soundness` bounds by `Q * maxError errors + sumError errors` the
+probability that the output relation holds while the named backward extraction fails: `Q` times
+the largest node error over all inputs, plus the largest sum of errors along a path. The actual
 verifier runs on the completed challenges, and its execution equation is proved from the paired
 runner. `stateRestoration_oracle_knowledge_soundness` gives the same bound when the verifier returns
 an open oracle claim and the relation observes its closed behavior under that path's handler;
-rejection is unsuccessful. With per-round errors `error z j`, which may depend on the input,
-`stateRestoration_oracle_knowledge_soundness_nonuniform` gives
-`Q * (⨆ z, max_j error z j) + ⨆ z, Σ_j error z j`; with rounds and errors independent of the input,
-`stateRestoration_oracle_knowledge_soundness_nonuniform_fixed` gives `Q * max_j error_j + Σ_j error_j`.
-The `privateCoins` forms keep the `(Q + k) * error` bound when the adversary's possibly failing
-private coins are sampled before the fresh cached game; they do not cover arbitrary interleaving of
-coin and oracle effects. Inputs and salts may have infinite types; each round's challenges use a
-finite nonempty uniform sampler.
+rejection is unsuccessful. `KnowledgeCertificate.stateRestoration_oracle_knowledge_soundness` takes
+the errors from certificates that sample every challenge uniformly (`UniformChallenges`): a node's
+error is the certificate's largest error there over the erased earlier challenges (`supErrors`).
+FRI's certificate satisfies `UniformChallenges` (`uniformChallenges_certificate`). The
+`privateCoins` forms keep the bound when the adversary's possibly failing private coins are sampled
+before the fresh cached game; they do not cover arbitrary interleaving of coin and oracle effects.
+Inputs, salts and prover moves may have infinite types; challenges use uniform samplers.
 
 **Measured extraction.** `RoundExtractor.stageMap` combines the backward maps at a node into one
 stage. `RoundExtractor.MeasuredStages` names, for the stage at every authored node, a budgeted
 program (`OracleComp.BudgetedProgram`) that realizes it, and `MeasuredKnowledgeCertificate` adds
 these stages to a `KnowledgeCertificate` for the same extractor.
-`MeasuredKnowledgeCertificate.stateRestoration_oracle_knowledge_soundness_nonuniform` conjoins the
+`MeasuredKnowledgeCertificate.stateRestoration_oracle_knowledge_soundness` conjoins the
 state-restoration bound with a uniform stage budget for that extractor. Budgets count declared
 instructions only. Views, handlers, witness-carrier identifications, stage composition and
 knowledge predicates are uncharged, and every function has a zero-budget program, so only a named
 program with a stated instruction set is evidence. This is the interaction-layer form of the
 measured-operation contract in the [extractor-efficiency chapter](03a-extractor-efficiency.md).
 
-**Open.** There is no interaction-layer rewinding extractor and no Fiat–Shamir or BCS bridge from state
-restoration. The `privateCoins` forms are the only randomized-adversary state-restoration results;
-coin sampling interleaved with oracle queries is not covered. No protocol under
-`ArkLib/ProofSystem/` instantiates the interaction-layer knowledge or state-restoration certificates yet;
-their clients are the acceptance examples. The [design roadmap](05-roadmap.md) lists this work.
+**Randomized and stopped restoration, Fiat–Shamir.** `StateRestorationRandomized*` let the
+adversary interleave private coins with oracle queries and bound extraction failure by the
+expected distinct-key charge. `StateRestorationStopped*` stop completion at the first failing
+prefix guard before a challenge is queried. `Oracle/FiatShamir/` compiles a public-coin protocol
+with a single global salt: every prover message is public (`publicProtocol`), the challenge of a
+node is the random oracle at the statement, salt and erased prefix, and
+`singleSalt_knowledge_soundness_queryBound` bounds knowledge error by `Q * max + sum`. Honest
+completeness transfers exactly (`honestSingleSaltAccepted_logged_eq_native`), and the encoded
+random oracle (`EncodedSecurityEvent`) answers an external adversary over an injective encoding of
+the keys. Sumcheck (`ProofSystem/Sumcheck/Interaction/`) is a client through `Round.coin`.
+
+**Open.** There is no interaction-layer rewinding extractor and no BCS bridge from state
+restoration. The [design roadmap](05-roadmap.md) lists this work.
 
 ## Legacy oracle-reduction layer
 

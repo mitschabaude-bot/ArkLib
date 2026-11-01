@@ -12,13 +12,13 @@ public import ArkLib.Interaction.Oracle.Security.StateRestorationStoppedBudget
 /-!
 # Knowledge security of native single-salt Fiat–Shamir
 
-The coin are a function of the statement. The adversary selects a statement, one global salt, a
-full message proof for that statement's coin and a terminal seed. Verification runs the
-public-message native strategy executor. Both phases share the same lazy challenge oracle, keyed by
-`(statement, salt)` and a prefix of the statement's coin; verification stops before querying a
-challenge whose prefix guard fails. Errors may depend on the statement: the bounds charge the
-largest error over all statements and coin per distinct adversary key, and the largest total
-error of one statement's coin for verification.
+The public-coin protocol is a function of the statement. The adversary selects a statement, one
+global salt, a full message proof for that statement's protocol and a terminal seed. Verification
+runs the public-message native strategy executor. Both phases share the same lazy challenge oracle,
+keyed by `(statement, salt)` and a prefix of the statement's protocol; verification stops before
+querying a challenge whose prefix guard fails. Errors may depend on the statement and the node: the
+bounds charge the largest node error over all statements per distinct adversary key, and the
+largest path sum of errors for verification.
 -/
 
 @[expose] public section
@@ -85,7 +85,8 @@ theorem singleSaltExecution_eq_stopped
         publicStoppedVerify_eq_stoppedComplete]
 
 /-- The adversary phase includes its selected proof, ordered logs and final challenge cache. -/
-abbrev SingleSaltAdversaryResult (Statement GlobalSalt Witness : Type) {protocol : Statement → Protocol}
+abbrev SingleSaltAdversaryResult (Statement GlobalSalt Witness : Type) {protocol : Statement →
+    Protocol}
     (coin : (statement : Statement) → PublicCoin (protocol statement)) :=
   (((Option (SaltedSelection Statement GlobalSalt Witness coin) ×
       QueryLog (unifSpec + saltedSpec Statement GlobalSalt coin)) ×
@@ -131,7 +132,8 @@ def singleSaltVerify (coin : (statement : Statement) → PublicCoin (protocol st
 /-- Filter the returned transcript using the terminal check, leaving all phase logs intact. -/
 def acceptSingleSaltResult
     (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
-    (result : Option (Outcome (Statement × GlobalSalt) Witness (saltedProtocol GlobalSalt protocol)) ×
+    (result : Option (Outcome (Statement × GlobalSalt) Witness (saltedProtocol GlobalSalt
+        protocol)) ×
         QueryLog (unifSpec + saltedSpec Statement GlobalSalt coin)) :=
   (result.1.filter (fun selected => accepts selected.1 selected.2.1), result.2)
 
@@ -214,7 +216,8 @@ theorem badRelation_acceptSingleSaltResult
       Witness → ((extractor z).terminalState path).Witness)
     (Z : Set (Statement × GlobalSalt))
     (accepts : (z : Statement × GlobalSalt) → (protocol z.1).tree.ExecutionPath → Bool)
-    (result : Option (Outcome (Statement × GlobalSalt) Witness (saltedProtocol GlobalSalt protocol)) ×
+    (result : Option (Outcome (Statement × GlobalSalt) Witness (saltedProtocol GlobalSalt
+        protocol)) ×
         QueryLog (unifSpec + saltedSpec Statement GlobalSalt coin)) :
     badStoppedRelation state extractor Rin Rout seed Z (acceptSingleSaltResult accepts result).1 ↔
       badStoppedRelation state extractor Rin

@@ -46,6 +46,7 @@ noncomputable def singleSaltSumcheckAccepts (z : Input × Salt)
   | some output =>
       decide ((show F from output.oracles ⟨(), output.stmt.challenges⟩) = output.stmt.target)
 
+omit [Fintype F] in
 /-- Terminal acceptance is exactly a returned closed native claim satisfying its output relation. -/
 theorem singleSaltSumcheckAccepts_iff (z : Input × Salt)
     (path : (Security.StateRestoration.protocol (rounds F deg n)).tree.ExecutionPath) :
@@ -74,6 +75,7 @@ def singleSaltSumcheckFalseClaim :
   | none => False
   | some ⟨z, _, _⟩ => ¬ initialClaimTrue F n deg D stmt p z.1
 
+omit [Fintype F] in
 /-- The actual compiled terminal check validates the explicit Sumcheck terminal seed. -/
 theorem singleSaltSumcheck_terminal_seed_valid
     (sourceLaw : ∀ z, (originalOracle z).eval (impl z) =

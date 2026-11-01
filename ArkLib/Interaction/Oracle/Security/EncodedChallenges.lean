@@ -22,7 +22,8 @@ open OracleComp OracleSpec MeasureTheory ProbabilityTheory
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-variable {Input Salt C : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
+variable {Input Salt C : Type} {protocol : Input → Protocol}
+  {coin : (z : Input) → PublicCoin (protocol z)}
 
 /-- The restricted common-challenge fragment of an otherwise dependent restoration schedule. -/
 structure CommonChallenge (Input Salt C : Type) {protocol : Input → Protocol}

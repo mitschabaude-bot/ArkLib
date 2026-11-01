@@ -46,7 +46,8 @@ def terminalObservation (initial : PFunctor)
 
 /-- The actual restoration game: complete with the same oracle, then execute the
 prover/verifier on the completed challenges. Replay sees only the completed path, not a table. -/
-noncomputable def verificationGame (coin : (z : Input) → PublicCoin (protocol z)) (initial : PFunctor)
+noncomputable def verificationGame (coin : (z : Input) → PublicCoin (protocol z)) (initial :
+    PFunctor)
     (impl : Input → QueryImpl (ofPFunctor initial) Id)
     (Out : (z : Input) → (protocol z).tree.BranchPath → Type)
     (terminal : (z : Input) → (p : (protocol z).tree.BranchPath) →

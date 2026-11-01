@@ -22,7 +22,8 @@ open Interaction.Oracle.TypeTree
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-variable {Input Salt C D W : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
+variable {Input Salt C D W : Type} {protocol : Input → Protocol}
+  {coin : (z : Input) → PublicCoin (protocol z)}
 
 /-- The actual external verifier challenge call at an encoded native key. -/
 def encodedCompletionQueries
