@@ -6,6 +6,7 @@ Authors: Quang Dao, Gregor Mitscha-Baude
 module
 
 public import ArkLib.Interaction.Oracle.Security.StateRestoration
+public import ArkLib.Interaction.Oracle.Security.KnowledgeAppend
 public import VCVio.OracleComp.QueryTracking.CostModel
 
 /-!
@@ -23,7 +24,8 @@ extraction error at most `Q * maxError errors + sumError errors`
 A knowledge certificate whose schedule samples every challenge uniformly
 (`UniformChallenges`) gives node errors by taking, at each node, the largest error over the
 erased earlier challenges (`supErrors`), and its local bound holds for their schedule
-(`isLocallyBounded_supErrors`).
+(`isLocallyBounded_errorSchedule`). Uniform challenges compose along `PublicCoin.append`
+(`uniformChallenges_append`).
 -/
 
 @[expose] public section
@@ -398,6 +400,33 @@ def UniformChallenges : {protocol : Protocol} → (coin : PublicCoin protocol) �
       message)
   | _, @PublicCoin.challenge Challenge _ _ next, schedule =>
       schedule.1.1 = $ᵗ Challenge ∧ ∀ challenge, UniformChallenges next (schedule.2 challenge)
+
+/-- Uniform challenges compose along `PublicCoin.append`: the schedule of
+`KnowledgeCertificate.append` is uniform when both stages are, for a suffix selected by the
+prover's public moves alone. -/
+theorem uniformChallenges_append : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    {suffix : coin.ErasedBranch → Protocol} →
+    (second : (branch : coin.ErasedBranch) → PublicCoin (suffix branch)) →
+    (first : RoundExtractor.ChallengeSchedule protocol.tree protocol.roles) →
+    (rest : (path : protocol.tree.ExecutionPath) → RoundExtractor.ChallengeSchedule
+      (suffix (coin.eraseBranch path.toBranchPath)).tree
+      (suffix (coin.eraseBranch path.toBranchPath)).roles) →
+    UniformChallenges coin first →
+    (∀ path, UniformChallenges (second (coin.eraseBranch path.toBranchPath)) (rest path)) →
+    UniformChallenges (coin.append second)
+      (RoundExtractor.appendSchedule (fun path => (suffix (coin.eraseBranch path)).tree)
+        protocol.roles (fun path => (suffix (coin.eraseBranch path)).roles) first rest)
+  | _, .done, _, _, _, _, _, hrest => hrest PUnit.unit
+  | _, @PublicCoin.sender _ _ _ next, _, second, first, rest, hfirst, hrest => fun move =>
+      uniformChallenges_append (next move) (fun branch => second ⟨move, branch⟩) (first.2 move)
+        (fun path => rest ⟨move, path⟩) (hfirst move) fun path => hrest ⟨move, path⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, _, second, first, rest, hfirst, hrest => fun message =>
+      uniformChallenges_append next second (first message)
+        (fun path => rest ⟨message, path⟩) (hfirst message) fun path => hrest ⟨message, path⟩
+  | _, @PublicCoin.challenge _ _ _ next, _, second, first, rest, hfirst, hrest =>
+      ⟨hfirst.1, fun challenge => uniformChallenges_append next second (first.2 challenge)
+        (fun path => rest ⟨challenge, path⟩) (hfirst.2 challenge)
+        fun path => hrest ⟨challenge, path⟩⟩
 
 /-- The error of a schedule at each node: its largest error over the erased earlier
 challenges. -/
