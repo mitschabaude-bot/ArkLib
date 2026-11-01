@@ -31,7 +31,7 @@ namespace Interaction.Oracle.Security.Bcs
 
 open OracleComp OracleSpec PublicCoin StateRestoration HashChain
 
-variable {F Snap Com C S O : Type}
+variable {F Snap C S O : Type}
 
 /-! ### Ideal inputs of real inputs -/
 
@@ -68,7 +68,7 @@ def SnapConsistent (snapAt : S × List F → Snap) (answerAt : S × List F → S
     (r : List (F ⊕ Snap) × List (List (F ⊕ Snap))) : Prop :=
   r = idealOf snapAt answerAt s₀ (eraseInputs r)
 
-variable [DecidableEq Snap] [DecidableEq Com] [SampleableType C]
+variable [DecidableEq Snap] [SampleableType C]
 
 /-! ### Snapshot moves along a transcript -/
 
@@ -76,7 +76,7 @@ variable [DecidableEq Snap] [DecidableEq Com] [SampleableType C]
 observed since the last squeeze, `tail` observed at the first squeeze: none if no challenge ahead
 squeezes. -/
 def blockInput : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
-    (dec : Decoder C coin) → (lay : Layout F Snap Com coin dec) → (start : Bool) →
+    (dec : Decoder C coin) → (lay : Layout F Snap coin dec) → (start : Bool) →
     (pending tail : List F) →
     Messages PUnit (decoded C (snapCoin coin dec lay start) (snapDecoder coin dec lay start)) →
     Option (List F)
@@ -88,9 +88,9 @@ def blockInput : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
       blockInput (next msgs.1) (dec msgs.1) (lay.2 msgs.1) false (pending ++ lay.1 msgs.1) tail
         msgs.2
   | _, @PublicCoin.oracle _ _ _ _ next, dec, lay, true, pending, tail, msgs =>
-      blockInput next dec lay.2.2 false (pending ++ lay.1 msgs.2.1) tail msgs.2.2
+      blockInput next dec lay.2 false (pending ++ lay.1.observe msgs.2.1) tail msgs.2.2
   | _, @PublicCoin.oracle _ _ _ _ next, dec, lay, false, pending, tail, msgs =>
-      blockInput next dec lay.2.2 false (pending ++ lay.1 msgs.1) tail msgs.2
+      blockInput next dec lay.2 false (pending ++ lay.1.observe msgs.1) tail msgs.2
   | _, @PublicCoin.challenge _ _ _ next, dec, lay, true, pending, tail, msgs =>
       if lay.1 = 0 then
         blockInput next dec.2 lay.2.2 (lay.1 != 0) (pending ++ lay.2.1 msgs.2.1) tail msgs.2.2.2
@@ -105,7 +105,7 @@ def blockInput : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
 earlier blocks and their extra squeezes. A block that no challenge squeezes keeps its snapshot. -/
 def fillSnaps (snapAt : S × List F → Snap) (answerAt : S × List F → S × O) :
     {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
-    (dec : Decoder C coin) → (lay : Layout F Snap Com coin dec) → (start : Bool) → (s : S) →
+    (dec : Decoder C coin) → (lay : Layout F Snap coin dec) → (start : Bool) → (s : S) →
     (pending tail : List F) →
     Messages PUnit (decoded C (snapCoin coin dec lay start) (snapDecoder coin dec lay start)) →
     List Snap
@@ -119,12 +119,12 @@ def fillSnaps (snapAt : S × List F → Snap) (answerAt : S × List F → S × O
       fillSnaps snapAt answerAt (next msgs.1) (dec msgs.1) (lay.2 msgs.1) false s
         (pending ++ lay.1 msgs.1) tail msgs.2
   | _, @PublicCoin.oracle _ _ _ _ next, dec, lay, true, s, pending, tail, msgs =>
-      (blockInput next dec lay.2.2 false (pending ++ lay.1 msgs.2.1) tail msgs.2.2).elim msgs.1
-          (fun b => snapAt (s, b)) ::
-        fillSnaps snapAt answerAt next dec lay.2.2 false s (pending ++ lay.1 msgs.2.1) tail
+      (blockInput next dec lay.2 false (pending ++ lay.1.observe msgs.2.1) tail msgs.2.2).elim
+          msgs.1 (fun b => snapAt (s, b)) ::
+        fillSnaps snapAt answerAt next dec lay.2 false s (pending ++ lay.1.observe msgs.2.1) tail
           msgs.2.2
   | _, @PublicCoin.oracle _ _ _ _ next, dec, lay, false, s, pending, tail, msgs =>
-      fillSnaps snapAt answerAt next dec lay.2.2 false s (pending ++ lay.1 msgs.1) tail msgs.2
+      fillSnaps snapAt answerAt next dec lay.2 false s (pending ++ lay.1.observe msgs.1) tail msgs.2
   | _, @PublicCoin.challenge _ _ _ next, dec, lay, true, s, pending, tail, msgs =>
       (if lay.1 = 0 then
           blockInput next dec.2 lay.2.2 (lay.1 != 0) (pending ++ lay.2.1 msgs.2.1) tail
@@ -148,7 +148,7 @@ def fillSnaps (snapAt : S × List F → Snap) (answerAt : S × List F → S × O
 /-- The messages with their snapshot moves set to `l`, in order; a snapshot move past the end of
 `l` is kept. -/
 def setSnaps : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
-    (dec : Decoder C coin) → (lay : Layout F Snap Com coin dec) → (start : Bool) → List Snap →
+    (dec : Decoder C coin) → (lay : Layout F Snap coin dec) → (start : Bool) → List Snap →
     Messages PUnit (decoded C (snapCoin coin dec lay start) (snapDecoder coin dec lay start)) →
     Messages PUnit (decoded C (snapCoin coin dec lay start) (snapDecoder coin dec lay start))
   | _, .done, _, _, _, _, msgs => msgs
@@ -158,9 +158,9 @@ def setSnaps : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
   | _, @PublicCoin.sender _ _ _ next, dec, lay, false, l, msgs =>
       ⟨msgs.1, setSnaps (next msgs.1) (dec msgs.1) (lay.2 msgs.1) false l msgs.2⟩
   | _, @PublicCoin.oracle _ _ _ _ next, dec, lay, true, l, msgs =>
-      ⟨l.headD msgs.1, msgs.2.1, setSnaps next dec lay.2.2 false l.tail msgs.2.2⟩
+      ⟨l.headD msgs.1, msgs.2.1, setSnaps next dec lay.2 false l.tail msgs.2.2⟩
   | _, @PublicCoin.oracle _ _ _ _ next, dec, lay, false, l, msgs =>
-      ⟨msgs.1, setSnaps next dec lay.2.2 false l msgs.2⟩
+      ⟨msgs.1, setSnaps next dec lay.2 false l msgs.2⟩
   | _, @PublicCoin.challenge _ _ _ next, dec, lay, true, l, msgs =>
       ⟨l.headD msgs.1, msgs.2.1, msgs.2.2.1,
         setSnaps next dec.2 lay.2.2 (lay.1 != 0) l.tail msgs.2.2.2⟩
@@ -169,7 +169,7 @@ def setSnaps : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
 
 /-- A prefix with its snapshot moves set to `l`, in order. -/
 def setSnapsPre : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
-    (dec : Decoder C coin) → (lay : Layout F Snap Com coin dec) → (start : Bool) → List Snap →
+    (dec : Decoder C coin) → (lay : Layout F Snap coin dec) → (start : Bool) → List Snap →
     Prefix PUnit (decoded C (snapCoin coin dec lay start) (snapDecoder coin dec lay start)) →
     Prefix PUnit (decoded C (snapCoin coin dec lay start) (snapDecoder coin dec lay start))
   | _, .done, _, _, _, _, pre => pre
@@ -179,9 +179,9 @@ def setSnapsPre : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
   | _, @PublicCoin.sender _ _ _ next, dec, lay, false, l, pre =>
       ⟨pre.1, setSnapsPre (next pre.1) (dec pre.1) (lay.2 pre.1) false l pre.2⟩
   | _, @PublicCoin.oracle _ _ _ _ next, dec, lay, true, l, pre =>
-      ⟨l.headD pre.1, pre.2.1, setSnapsPre next dec lay.2.2 false l.tail pre.2.2⟩
+      ⟨l.headD pre.1, pre.2.1, setSnapsPre next dec lay.2 false l.tail pre.2.2⟩
   | _, @PublicCoin.oracle _ _ _ _ next, dec, lay, false, l, pre =>
-      ⟨pre.1, setSnapsPre next dec lay.2.2 false l pre.2⟩
+      ⟨pre.1, setSnapsPre next dec lay.2 false l pre.2⟩
   | _, @PublicCoin.challenge _ _ _ next, dec, lay, true, l, pre =>
       ⟨l.headD pre.1, pre.2.1, pre.2.2.map id fun q =>
         (q.1, setSnapsPre next dec.2 lay.2.2 (lay.1 != 0) l.tail q.2)⟩
@@ -190,7 +190,7 @@ def setSnapsPre : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
 
 /-- A path with its snapshot moves set to `l`, in order. -/
 def setSnapsPath : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
-    (dec : Decoder C coin) → (lay : Layout F Snap Com coin dec) → (start : Bool) → List Snap →
+    (dec : Decoder C coin) → (lay : Layout F Snap coin dec) → (start : Bool) → List Snap →
     (decodedProtocol C (snapCoin coin dec lay start)
       (snapDecoder coin dec lay start)).tree.ExecutionPath →
     (decodedProtocol C (snapCoin coin dec lay start)
@@ -202,9 +202,9 @@ def setSnapsPath : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) �
   | _, @PublicCoin.sender _ _ _ next, dec, lay, false, l, path =>
       ⟨path.1, setSnapsPath (next path.1) (dec path.1) (lay.2 path.1) false l path.2⟩
   | _, @PublicCoin.oracle _ _ _ _ next, dec, lay, true, l, path =>
-      ⟨l.headD path.1, path.2.1, setSnapsPath next dec lay.2.2 false l.tail path.2.2⟩
+      ⟨l.headD path.1, path.2.1, setSnapsPath next dec lay.2 false l.tail path.2.2⟩
   | _, @PublicCoin.oracle _ _ _ _ next, dec, lay, false, l, path =>
-      ⟨path.1, setSnapsPath next dec lay.2.2 false l path.2⟩
+      ⟨path.1, setSnapsPath next dec lay.2 false l path.2⟩
   | _, @PublicCoin.challenge _ _ _ next, dec, lay, true, l, path =>
       ⟨l.headD path.1, path.2.1, path.2.2.1,
         setSnapsPath next dec.2 lay.2.2 (lay.1 != 0) l.tail path.2.2.2⟩
@@ -215,7 +215,7 @@ def setSnapsPath : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) �
 
 section Lists
 
-omit [DecidableEq Snap] [DecidableEq Com] [SampleableType C]
+omit [DecidableEq Snap] [SampleableType C]
 
 /-- Erasing nothing leaves nothing. -/
 @[simp] theorem erase_nil : erase ([] : List (F ⊕ Snap)) = [] := rfl
@@ -324,7 +324,7 @@ end Lists
 theorem encodeFrom_snap_challenge {Challenge : Type} [SampleableType Challenge]
     {rest : Protocol.{0}} (next : PublicCoin rest)
     (dec : Decoder C (.challenge (Challenge := Challenge) next))
-    (lay : Layout F Snap Com (.challenge next) dec) (pending tail : List (F ⊕ Snap))
+    (lay : Layout F Snap (.challenge next) dec) (pending tail : List (F ⊕ Snap))
     (acc : List (List (F ⊕ Snap))) (w : dec.1.Witness) (u : PUnit)
     (q : Prefix PUnit
       (decoded C (snapCoin next dec.2 lay.2.2 (lay.1 != 0)) (snapDecoder next dec.2 lay.2.2 _))) :
@@ -344,7 +344,7 @@ snapshot `T` of the block's real query and observing the real elements `rp` so f
 start of a block (`start = true`). -/
 def FillGoal (snapAt : S × List F → Snap) (answerAt : S × List F → S × O) (s₀ : S)
     {protocol : Protocol.{0}} (coin : PublicCoin protocol) (dec : Decoder C coin)
-    (lay : Layout F Snap Com coin dec) (start : Bool) : Prop :=
+    (lay : Layout F Snap coin dec) (start : Bool) : Prop :=
   ∀ (filled : Prop), Layout.Fills coin dec lay filled →
   ∀ (s : S) (pending : List (F ⊕ Snap)) (rp t : List F) (ra : List (List F))
     (msgs : Messages PUnit
@@ -370,7 +370,7 @@ def FillGoal (snapAt : S × List F → Snap) (answerAt : S × List F → S × O)
 /-- **Filled snapshots are consistent** at every node of the snapshot protocol. -/
 theorem fillGoal (snapAt : S × List F → Snap) (answerAt : S × List F → S × O) (s₀ : S) :
     {protocol : Protocol.{0}} → (coin : PublicCoin protocol) → (dec : Decoder C coin) →
-    (lay : Layout F Snap Com coin dec) → (start : Bool) →
+    (lay : Layout F Snap coin dec) → (start : Bool) →
     FillGoal snapAt answerAt s₀ coin dec lay start
   | _, .done, _, _, _ => by
       intro _ _ _ _ _ _ _ _ pre hpre
@@ -400,8 +400,8 @@ theorem fillGoal (snapAt : S × List F → Snap) (answerAt : S × List F → S �
         obtain ⟨c, msgs⟩ := msgs
         obtain ⟨q, hq, rfl⟩ := List.mem_map.1 hpre
         obtain ⟨-, T, rfl, hT⟩ := hpend.resolve_left (by simp)
-        exact fillGoal snapAt answerAt s₀ next dec lay.2.2 false _ (hfills c) s _ (rp ++ lay.1 c)
-          t ra msgs q hq hsq hs (fun h => fills_step hfilled h)
+        exact fillGoal snapAt answerAt s₀ next dec lay.2 false _ (hfills c) s _
+          (rp ++ lay.1.observe c) t ra msgs q hq hsq hs (fun h => fills_step hfilled h)
           (Or.inr ⟨rfl, T, by rw [List.map_append, List.cons_append]; rfl, hT⟩)
       cases start
       · exact hf
@@ -464,7 +464,7 @@ theorem fillGoal (snapAt : S × List F → Snap) (answerAt : S × List F → S �
 
 /-- A key of messages with their snapshots set is a key of the messages with its snapshots set. -/
 theorem mem_prefixKeys_setSnaps : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
-    (dec : Decoder C coin) → (lay : Layout F Snap Com coin dec) → (start : Bool) →
+    (dec : Decoder C coin) → (lay : Layout F Snap coin dec) → (start : Bool) →
     (l : List Snap) →
     (msgs : Messages PUnit
       (decoded C (snapCoin coin dec lay start) (snapDecoder coin dec lay start))) →
@@ -494,7 +494,7 @@ theorem mem_prefixKeys_setSnaps : {protocol : Protocol.{0}} → (coin : PublicCo
         intro l msgs pre h
         obtain ⟨c, msgs⟩ := msgs
         obtain ⟨p, hp, rfl⟩ := List.mem_map.1 h
-        obtain ⟨q, hq, rfl⟩ := mem_prefixKeys_setSnaps next dec lay.2.2 false l msgs p hp
+        obtain ⟨q, hq, rfl⟩ := mem_prefixKeys_setSnaps next dec lay.2 false l msgs p hp
         exact ⟨Sigma.mk c q, List.mem_map.2 ⟨q, hq, rfl⟩, rfl⟩
       cases start
       · exact hf l msgs pre h
@@ -525,7 +525,7 @@ theorem mem_prefixKeys_setSnaps : {protocol : Protocol.{0}} → (coin : PublicCo
 
 /-- Setting snapshots changes no node's squeezes. -/
 theorem squeezes_setSnapsPre : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
-    (dec : Decoder C coin) → (lay : Layout F Snap Com coin dec) → (start : Bool) →
+    (dec : Decoder C coin) → (lay : Layout F Snap coin dec) → (start : Bool) →
     (l : List Snap) →
     (pre : Prefix PUnit
       (decoded C (snapCoin coin dec lay start) (snapDecoder coin dec lay start))) →
@@ -541,10 +541,10 @@ theorem squeezes_setSnapsPre : {protocol : Protocol.{0}} → (coin : PublicCoin 
       exact squeezes_setSnapsPre (next move) (dec move) (lay.2 move) false l pre
   | _, @PublicCoin.oracle _ _ _ _ next, dec, lay, true, l, pre => by
       obtain ⟨_, _, pre⟩ := pre
-      exact squeezes_setSnapsPre next dec lay.2.2 false l.tail pre
+      exact squeezes_setSnapsPre next dec lay.2 false l.tail pre
   | _, @PublicCoin.oracle _ _ _ _ next, dec, lay, false, l, pre => by
       obtain ⟨_, pre⟩ := pre
-      exact squeezes_setSnapsPre next dec lay.2.2 false l pre
+      exact squeezes_setSnapsPre next dec lay.2 false l pre
   | _, @PublicCoin.challenge _ _ _ next, dec, lay, true, l, pre => by
       obtain ⟨_, _, _ | ⟨_, pre⟩⟩ := pre
       · rfl
@@ -564,7 +564,7 @@ theorem eraseInputs_congr {x x' : List (F ⊕ Snap)} {acc acc' : List (List (F �
 /-- The real inputs of a prefix do not depend on its snapshot moves, nor on the snapshots among
 the pending and completed inputs. -/
 theorem eraseInputs_encodeFrom_setSnapsPre : {protocol : Protocol.{0}} →
-    (coin : PublicCoin protocol) → (dec : Decoder C coin) → (lay : Layout F Snap Com coin dec) →
+    (coin : PublicCoin protocol) → (dec : Decoder C coin) → (lay : Layout F Snap coin dec) →
     (start : Bool) → (l : List Snap) → (pending pending' tail : List (F ⊕ Snap)) →
     (acc acc' : List (List (F ⊕ Snap))) →
     (pre : Prefix PUnit
@@ -590,15 +590,16 @@ theorem eraseInputs_encodeFrom_setSnapsPre : {protocol : Protocol.{0}} →
   | _, @PublicCoin.oracle _ _ _ _ next, dec, lay, true, l, pending, pending', tail, acc, acc',
       pre, hp, hacc => by
       obtain ⟨T, c, pre⟩ := pre
-      exact eraseInputs_encodeFrom_setSnapsPre next dec lay.2.2 false l.tail
-        (pending ++ [.inr (l.headD T)] ++ (lay.1 c).map .inl)
-        (pending' ++ [.inr T] ++ (lay.1 c).map .inl) tail acc acc' pre
+      exact eraseInputs_encodeFrom_setSnapsPre next dec lay.2 false l.tail
+        (pending ++ [.inr (l.headD T)] ++ (lay.1.observe c).map .inl)
+        (pending' ++ [.inr T] ++ (lay.1.observe c).map .inl) tail acc acc' pre
         (by simp only [erase_append, hp]; rfl) hacc
   | _, @PublicCoin.oracle _ _ _ _ next, dec, lay, false, l, pending, pending', tail, acc, acc',
       pre, hp, hacc => by
       obtain ⟨c, pre⟩ := pre
-      exact eraseInputs_encodeFrom_setSnapsPre next dec lay.2.2 false l
-        (pending ++ (lay.1 c).map .inl) (pending' ++ (lay.1 c).map .inl) tail acc acc' pre
+      exact eraseInputs_encodeFrom_setSnapsPre next dec lay.2 false l
+        (pending ++ (lay.1.observe c).map .inl) (pending' ++ (lay.1.observe c).map .inl) tail acc
+        acc' pre
         (by simp only [erase_append, hp]) hacc
   | _, @PublicCoin.challenge _ _ _ next, dec, lay, start, l, pending, pending', tail, acc, acc',
       pre, hp, hacc => by
@@ -641,7 +642,7 @@ def coinQueries {ι : Type} {spec : OracleSpec ι} {protocol : Protocol.{0}}
     QueryImpl (prefixSpec PUnit (decoded C coin dec)) (OracleComp spec) :=
   fun pre => (Equiv.cast (challenge_decoded coin dec pre)).symm <$> Q pre
 
-omit [DecidableEq Snap] [DecidableEq Com] in
+omit [DecidableEq Snap] in
 /-- Completing messages at a sender node completes the rest after its move. -/
 theorem simulateQ_coinQueries_sender {ι : Type} {spec : OracleSpec ι} {Moves : Type}
     [DecidableEq Moves] {rest : Moves → Protocol.{0}}
@@ -659,7 +660,7 @@ theorem simulateQ_coinQueries_sender {ι : Type} {spec : OracleSpec ι} {Moves :
     map_eq_bind_pure_comp]
   rfl
 
-omit [DecidableEq Snap] [DecidableEq Com] in
+omit [DecidableEq Snap] in
 /-- Completing messages at a challenge node reads the node's coins, then completes the rest. -/
 theorem simulateQ_coinQueries_challenge {ι : Type} {spec : OracleSpec ι} {Challenge : Type}
     [SampleableType Challenge] {rest : Protocol.{0}} (next : PublicCoin rest)
@@ -686,14 +687,14 @@ theorem simulateQ_coinQueries_challenge {ι : Type} {spec : OracleSpec ι} {Chal
   intro x
   cases x <;> rfl
 
-omit [DecidableEq Snap] [DecidableEq Com] [SampleableType C] in
+omit [DecidableEq Snap] [SampleableType C] in
 /-- Mapping twice inside `Option` maps by the composite. -/
 theorem map_option_map {M : Type → Type v} [Monad M] [LawfulMonad M] {α β γ : Type} (f : β → γ)
     (g : α → β) (x : M (Option α)) :
     Option.map f <$> (Option.map g <$> x) = Option.map (f ∘ g) <$> x := by
   simp only [Functor.map_map, Option.map_map]
 
-omit [DecidableEq Snap] [DecidableEq Com] [SampleableType C] in
+omit [DecidableEq Snap] [SampleableType C] in
 /-- A completion step, mapped, matches another completion step, mapped. -/
 theorem map_option_step {M : Type → Type v} [Monad M] [LawfulMonad M] {α α' β γ : Type}
     {x : M (Option α')} {y : M (Option α)} {f : α' → γ} {k₀ : α → α'} {k : α → β} {h : β → γ}
@@ -702,7 +703,7 @@ theorem map_option_step {M : Type → Type v} [Monad M] [LawfulMonad M] {α α' 
   subst hx
   rw [map_option_map, map_option_map, show f ∘ k₀ = h ∘ k from funext hfg]
 
-omit [DecidableEq Snap] [DecidableEq Com] [SampleableType C] in
+omit [DecidableEq Snap] [SampleableType C] in
 /-- Equal first steps and mapped continuations give a mapped bind. -/
 theorem bind_map_step {M : Type → Type v} [Monad M] [LawfulMonad M] {α β γ : Type} {x y : M α}
     {f : α → M γ} {g : α → M β} {h : β → γ} (hxy : x = y) (hfg : ∀ a, f a = h <$> g a) :
@@ -715,7 +716,7 @@ theorem bind_map_step {M : Type → Type v} [Monad M] [LawfulMonad M] {α β γ 
 snapshots set are the coins `QB` at the prefix, completing the messages with their snapshots set
 on `QA` is completing them on `QB`, the path's snapshots set. -/
 theorem simulateQ_setSnaps {ι : Type} {spec : OracleSpec ι} : {protocol : Protocol.{0}} →
-    (coin : PublicCoin protocol) → (dec : Decoder C coin) → (lay : Layout F Snap Com coin dec) →
+    (coin : PublicCoin protocol) → (dec : Decoder C coin) → (lay : Layout F Snap coin dec) →
     (start : Bool) → (l : List Snap) →
     (QA QB : Prefix PUnit
       (decoded C (snapCoin coin dec lay start) (snapDecoder coin dec lay start)) →
@@ -777,14 +778,14 @@ theorem simulateQ_setSnaps {ι : Type} {spec : OracleSpec ι} : {protocol : Prot
               simulateQ (coinQueries _ _ QB)
                 (stoppedCompletePrefix _ (GuardSchedule.pass _) msgs) := by
         intro l QA QB hQ msgs
-        refine (simulateQ_coinQueries_sender (fun _ : Com => snapCoin next dec lay.2.2 false)
+        refine (simulateQ_coinQueries_sender (fun _ : lay.1.Com => snapCoin next dec lay.2 false)
           (snapDecoder (.oracle next) dec lay false) QA
           (setSnaps (.oracle next) dec lay false l msgs)).trans ?_
         refine Eq.trans ?_ (congrArg
           (fun x => Option.map (setSnapsPath (.oracle next) dec lay false l) <$> x)
-          (simulateQ_coinQueries_sender (fun _ : Com => snapCoin next dec lay.2.2 false)
+          (simulateQ_coinQueries_sender (fun _ : lay.1.Com => snapCoin next dec lay.2 false)
             (snapDecoder (.oracle next) dec lay false) QB msgs)).symm
-        have ih := simulateQ_setSnaps next dec lay.2.2 false l (fun q => QA (Sigma.mk msgs.1 q))
+        have ih := simulateQ_setSnaps next dec lay.2 false l (fun q => QA (Sigma.mk msgs.1 q))
           (fun q => QB (Sigma.mk msgs.1 q)) (fun q => hQ (Sigma.mk msgs.1 q)) msgs.2
         exact map_option_step ih fun _ => rfl
       cases start
@@ -850,7 +851,7 @@ variable {Input : Type} {protocol : Input → Protocol.{0}}
 inputs, the statement's elements `tail` observed at the first squeeze. -/
 def idealEncode (coin : (z : Input) → PublicCoin (protocol z))
     (dec : (z : Input) → Decoder C (coin z))
-    (lay : (z : Input) → Layout F Snap Com (coin z) (dec z))
+    (lay : (z : Input) → Layout F Snap (coin z) (dec z))
     (tail : Input → List F)
     (key : Key Input PUnit fun z =>
       decoded C (snapCoin (coin z) (dec z) (lay z) true)
@@ -862,7 +863,7 @@ def idealEncode (coin : (z : Input) → PublicCoin (protocol z))
 /-- The duplex verifier's chain inputs of a key: its ideal inputs with the snapshots erased. -/
 def realEncode (coin : (z : Input) → PublicCoin (protocol z))
     (dec : (z : Input) → Decoder C (coin z))
-    (lay : (z : Input) → Layout F Snap Com (coin z) (dec z))
+    (lay : (z : Input) → Layout F Snap (coin z) (dec z))
     (tail : Input → List F)
     (key : Key Input PUnit fun z =>
       decoded C (snapCoin (coin z) (dec z) (lay z) true)
@@ -874,7 +875,7 @@ def realEncode (coin : (z : Input) → PublicCoin (protocol z))
 ideal inputs its real inputs stand for. -/
 def SnapsOK (coin : (z : Input) → PublicCoin (protocol z))
     (dec : (z : Input) → Decoder C (coin z))
-    (lay : (z : Input) → Layout F Snap Com (coin z) (dec z))
+    (lay : (z : Input) → Layout F Snap (coin z) (dec z))
     (tail : Input → List F) (snapAt : S × List F → Snap) (answerAt : S × List F → S × O) (s₀ : S)
     (z : Input)
     (messages : Messages PUnit
@@ -892,7 +893,7 @@ def SnapsOK (coin : (z : Input) → PublicCoin (protocol z))
 real chain query, following the answers `answerAt` from `s₀`. -/
 def fill (coin : (z : Input) → PublicCoin (protocol z))
     (dec : (z : Input) → Decoder C (coin z))
-    (lay : (z : Input) → Layout F Snap Com (coin z) (dec z))
+    (lay : (z : Input) → Layout F Snap (coin z) (dec z))
     (tail : Input → List F) (snapAt : S × List F → Snap) (answerAt : S × List F → S × O) (s₀ : S)
     (z : Input)
     (messages : Messages PUnit
@@ -907,7 +908,7 @@ def fill (coin : (z : Input) → PublicCoin (protocol z))
 /-- The real inputs of a key do not depend on its snapshot moves. -/
 theorem realEncode_setSnapsPre (coin : (z : Input) → PublicCoin (protocol z))
     (dec : (z : Input) → Decoder C (coin z))
-    (lay : (z : Input) → Layout F Snap Com (coin z) (dec z))
+    (lay : (z : Input) → Layout F Snap (coin z) (dec z))
     (tail : Input → List F) (l : List Snap) (z : Input)
     (pre : Prefix PUnit
       (decoded C (snapCoin (coin z) (dec z) (lay z) true)
@@ -920,7 +921,7 @@ theorem realEncode_setSnapsPre (coin : (z : Input) → PublicCoin (protocol z))
 real input. -/
 theorem snapsOK_fill (coin : (z : Input) → PublicCoin (protocol z))
     (dec : (z : Input) → Decoder C (coin z))
-    (lay : (z : Input) → Layout F Snap Com (coin z) (dec z))
+    (lay : (z : Input) → Layout F Snap (coin z) (dec z))
     (tail : Input → List F) (snapAt : S × List F → Snap) (answerAt : S × List F → S × O) (s₀ : S)
     (z : Input) (hfills : Layout.Fills (coin z) (dec z) (lay z) False)
     (messages : Messages PUnit
@@ -938,7 +939,7 @@ theorem snapsOK_fill (coin : (z : Input) → PublicCoin (protocol z))
 /-- An outcome of the snapshot protocols with its path's snapshot moves set to `l`. -/
 def setSnapsOutcome {W : Type} (coin : (z : Input) → PublicCoin (protocol z))
     (dec : (z : Input) → Decoder C (coin z))
-    (lay : (z : Input) → Layout F Snap Com (coin z) (dec z))
+    (lay : (z : Input) → Layout F Snap (coin z) (dec z))
     (l : List Snap)
     (o : Outcome Input W fun z => decodedProtocol C (snapCoin (coin z) (dec z) (lay z) true)
       (snapDecoder (coin z) (dec z) (lay z) true)) :
@@ -953,7 +954,7 @@ theorem squeezeCompletionAfter_setSnaps [SampleableType S] [SampleableType O] [I
     [Inhabited O] {m : ℕ} {W : Type}
     (coin : (z : Input) → PublicCoin (protocol z))
     (dec : (z : Input) → Decoder (Fin m → S × O) (coin z))
-    (lay : (z : Input) → Layout F Snap Com (coin z) (dec z)) (tail : Input → List F) (s₀ : S)
+    (lay : (z : Input) → Layout F Snap (coin z) (dec z)) (tail : Input → List F) (s₀ : S)
     (l : List Snap) (z : Input)
     (messages : Messages PUnit
       (decoded (Fin m → S × O) (snapCoin (coin z) (dec z) (lay z) true)
@@ -985,7 +986,7 @@ theorem squeezeCompletionAfter_fill [SampleableType S] [SampleableType O] [Inhab
     [Inhabited O] {m : ℕ} {W : Type}
     (coin : (z : Input) → PublicCoin (protocol z))
     (dec : (z : Input) → Decoder (Fin m → S × O) (coin z))
-    (lay : (z : Input) → Layout F Snap Com (coin z) (dec z)) (tail : Input → List F)
+    (lay : (z : Input) → Layout F Snap (coin z) (dec z)) (tail : Input → List F)
     (snapAt : S × List F → Snap) (answerAt : S × List F → S × O) (s₀ : S) (z : Input)
     (messages : Messages PUnit
       (decoded (Fin m → S × O) (snapCoin (coin z) (dec z) (lay z) true)
