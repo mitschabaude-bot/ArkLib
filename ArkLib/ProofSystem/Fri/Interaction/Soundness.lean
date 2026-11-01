@@ -15,17 +15,18 @@ public import ArkLib.Interaction.Oracle.Security.StateRestorationBudget
 
 `certificate` composes FRI's knowledge certificate from its rounds with
 `KnowledgeCertificate.append`: each fold round's (`foldRoundCertificate`), then the final message's
-and the query phase's (`finalCertificate`). At the first layer its state holds exactly when the
-inputs are close to their codes (`agrees_of_root_holds`); its largest path error is the folds'
-lossy MCA errors and `(1 - δ + m · loss) ^ t` for the queries (`maxError_certificate`).
+and the query phase's (`finalCertificate`), the query positions drawn from a law `L`
+(`QueryLaw`). At the first layer its state holds exactly when the inputs are close to their codes
+(`agrees_of_root_holds`); its largest path error is the folds' lossy MCA errors and
+`(1 - δ + m · loss + L.slack) ^ t` for the queries (`maxError_certificate`).
 
-The verifier meets the certificate: it samples the challenges uniformly
-(`samplesChallenges_verifier`), and when it accepts, the terminal state holds
+The verifier meets the certificate: it samples the folding challenges uniformly and the query
+positions from `L` (`samplesChallenges_verifier`), and when it accepts, the terminal state holds
 (`terminal_holds_of_accepts`), its checks computing the consistent sets of the knowledge states.
-`KnowledgeCertificate.executeStrategies_extraction_le` then bounds acceptance of far inputs:
-`acceptance_le`, at most `error ω s d t δ`, the folds' errors and the query term minimized over
-the proximity loss. That is CompStark's `FriGame.error`, the error of `friErrorWith`, on the
-schedule's shape.
+`KnowledgeCertificate.executeStrategies_extraction_le` then bounds acceptance of far inputs by a
+verifier with uniform positions: `acceptance_le`, at most `error ω s d t δ`, the folds' errors and
+the query term minimized over the proximity loss. That is CompStark's `FriGame.error`, the error
+of `friErrorWith`, on the schedule's shape.
 -/
 
 @[expose] public section
@@ -37,17 +38,17 @@ open scoped ProbabilityTheory NNReal
 namespace Fri.Interaction
 
 variable {K : Type} [Field K] [Fintype K] [DecidableEq K] [SampleableType K]
-variable (top d t : ℕ) (inputs : (m : ℕ) → Fin (2 ^ m) → K) (δ loss : ℝ)
+variable (top d t : ℕ) (inputs : (m : ℕ) → Fin (2 ^ m) → K) (δ loss : ℝ) (L : QueryLaw top t)
 
 /-- **FRI's knowledge certificate** from a layer of log height `n ≤ top`, after `j` folds, where
 the verifier's word is `f` and the consistent set is `C`: each fold round's certificate, then the
-final message and the query phase, appended. -/
+final message and the query phase, the positions drawn from `L`, appended. -/
 noncomputable def certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
     {n : ℕ} → n ≤ top → (ω : SmoothCosetFftDomain n K) → (s : Schedule n) → (j : ℕ) →
       (f : Word K n) → (C : Finset (Fin (2 ^ top))) →
       KnowledgeCertificate (protocol K top d t s).tree (protocol K top d t s).roles
         (levelState top d inputs δ loss ω s j f C)
-  | _, _, ω, .final, j, f, C => finalCertificate top t δ loss d inputs ω j f C
+  | _, _, ω, .final, j, f, C => finalCertificate top t δ loss d inputs L ω j f C
   | n, hn, ω, .fold k hk inject rest, j, f, C =>
       (foldRoundCertificate top d inputs δ loss hd hloss hn hk ω inject rest j f C).append
         (fun _ => (protocol K top d t rest).tree) (fun _ => (protocol K top d t rest).roles)
@@ -60,16 +61,17 @@ noncomputable def certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
 theorem maxError_certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
     ∀ {n : ℕ} (hn : n ≤ top) (ω : SmoothCosetFftDomain n K) (s : Schedule n) (j : ℕ)
       (f : Word K n) (C : Finset (Fin (2 ^ top))),
-      (certificate top d t inputs δ loss hd hloss hn ω s j f C).challenges.maxError
+      (certificate top d t inputs δ loss L hd hloss hn ω s j f C).challenges.maxError
         (protocol K top d t s).roles ≤
-      s.foldError d δ loss ω + ENNReal.ofReal (threshold δ loss (j + s.numFolds)) ^ t
+      s.foldError d δ loss ω + (ENNReal.ofReal (threshold δ loss (j + s.numFolds)) + L.slack) ^ t
   | _, _, ω, .final, j, f, C => by
     refine iSup_le fun c => ?_
-    change ENNReal.ofReal (threshold δ loss j) ^ t + ⨆ _ : Fin t → Fin (2 ^ top), (0 : ENNReal) ≤ _
+    change (ENNReal.ofReal (threshold δ loss j) + L.slack) ^ t +
+      ⨆ _ : Fin t → Fin (2 ^ top), (0 : ENNReal) ≤ _
     simp [Schedule.foldError, Schedule.numFolds]
   | n, hn, ω, .fold k hk inject rest, j, f, C => by
     change (⨆ word : Word K n, Schedule.roundError ω k (rest.degree d) δ loss inject +
-        ⨆ β : K, (certificate top d t inputs δ loss hd hloss ((Nat.sub_le n k).trans hn)
+        ⨆ β : K, (certificate top d t inputs δ loss L hd hloss ((Nat.sub_le n k).trans hn)
           (ω.subdomain k) rest (j + 1) (foldNext hk ω word β (injected inputs (n - k) inject))
           (commitConsistent top f word C)).challenges.maxError
           (protocol K top d t rest).roles) ≤ _
@@ -78,13 +80,14 @@ theorem maxError_certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
     refine (maxError_certificate hd hloss _ _ rest (j + 1) _ _).trans (le_of_eq ?_)
     rw [show j + 1 + rest.numFolds = j + (rest.numFolds + 1) by omega]
 
-/-- FRI's certificate samples every challenge uniformly, so state restoration and Fiat–Shamir
-apply to it through FRI's public-coin presentation `publicCoin`. -/
+/-- FRI's certificate with uniform query positions samples every challenge uniformly, so state
+restoration applies to it through FRI's public-coin presentation `publicCoin`. -/
 theorem uniformChallenges_certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
     ∀ {n : ℕ} (hn : n ≤ top) (ω : SmoothCosetFftDomain n K) (s : Schedule n) (j : ℕ)
       (f : Word K n) (C : Finset (Fin (2 ^ top))),
       StateRestoration.UniformChallenges (publicCoin (K := K) top d t s)
-        (certificate top d t inputs δ loss hd hloss hn ω s j f C).challenges
+        (certificate top d t inputs δ loss (QueryLaw.uniform top t) hd hloss hn ω s j f
+          C).challenges
   | _, _, _, .final, _, _, _ => fun _ => ⟨rfl, fun _ => trivial⟩
   | n, hn, ω, .fold k hk inject rest, j, f, C => fun word => ⟨rfl, fun β =>
       uniformChallenges_certificate hd hloss ((Nat.sub_le n k).trans hn) (ω.subdomain k) rest
@@ -134,7 +137,7 @@ theorem terminal_holds_of_accepts (hd : 0 < d) (hloss : 0 ≤ loss)
       ∀ result ∈ support (executeStrategies ambient (protocol K top d t s).tree
         (protocol K top d t s).roles (protocol K top d t s).oracles A impl prover
         (verifier ambient top d t sample sampleQueries ω A r s)), result.2.2 = true →
-      ∃ w, ((certificate top d t inputs δ loss hd hloss hn ω s j f C).extractor.terminalState
+      ∃ w, ((certificate top d t inputs δ loss L hd hloss hn ω s j f C).extractor.terminalState
         result.1).holds w := by
   intro n s
   induction s with
@@ -189,15 +192,15 @@ theorem terminal_holds_of_accepts (hd : 0 < d) (hloss : 0 ≤ loss)
 
 set_option backward.isDefEq.respectTransparency false in
 /-- The verifier samples its challenges as the certificate's challenge programs: the folding
-challenges and the query positions are uniform. -/
+challenges uniformly and the query positions from `L`. -/
 theorem samplesChallenges_verifier (hd : 0 < d) (hloss : 0 ≤ loss) :
     ∀ {n : ℕ} (s : Schedule n) (hn : n ≤ top) (ω : SmoothCosetFftDomain n K) (A : PFunctor)
       (impl : QueryImpl (OracleSpec.ofPFunctor A) Id) (r : Reader (K := K) top A n) (j : ℕ)
       (f : Word K n) (C : Finset (Fin (2 ^ top))),
       SamplesChallenges unifSpec (QueryImpl.id' unifSpec) (protocol K top d t s).tree
         (protocol K top d t s).roles (protocol K top d t s).oracles A impl _
-        (verifier unifSpec top d t ($ᵗ K) ($ᵗ (Fin t → Fin (2 ^ top))) ω A r s)
-        (certificate top d t inputs δ loss hd hloss hn ω s j f C).challenges := by
+        (verifier unifSpec top d t ($ᵗ K) L.law ω A r s)
+        (certificate top d t inputs δ loss L hd hloss hn ω s j f C).challenges := by
   intro n s
   induction s with
   | final =>
@@ -240,20 +243,20 @@ theorem acceptance_le (hd : 0 < d) (ω : SmoothCosetFftDomain top K) (s : Schedu
       (verifier unifSpec top d t ($ᵗ K) ($ᵗ (Fin t → Fin (2 ^ top))) ω (inputAccess K)
         (Reader.root top) s))}[result.2.2 = true] ≤ error ω s d t δ := by
   refine le_iInf fun loss => ?_
-  let cert := certificate top d t inputs δ loss hd loss.coe_nonneg le_rfl ω s 0 (inputs top)
-    Finset.univ
+  let cert := certificate top d t inputs δ loss (QueryLaw.uniform top t) hd loss.coe_nonneg
+    le_rfl ω s 0 (inputs top) Finset.univ
   have key := cert.executeStrategies_extraction_le unifSpec (QueryImpl.id' unifSpec)
     (protocol K top d t s).oracles (inputAccess K) (inputImpl K inputs) prover
     (verifier unifSpec top d t ($ᵗ K) ($ᵗ (Fin t → Fin (2 ^ top))) ω (inputAccess K)
       (Reader.root top) s)
-    (samplesChallenges_verifier top d t inputs δ loss hd loss.coe_nonneg s le_rfl ω _ _ _ 0
-      (inputs top) Finset.univ)
+    (samplesChallenges_verifier top d t inputs δ loss (QueryLaw.uniform top t) hd
+      loss.coe_nonneg s le_rfl ω _ _ _ 0 (inputs top) Finset.univ)
   rw [simulateQ_id'] at key
   refine (prEvent_mono_of_support _ _ _ fun result hresult hacc => ?_).trans (key.trans
-    ((maxError_certificate top d t inputs δ loss hd loss.coe_nonneg le_rfl ω s 0 (inputs top)
-      Finset.univ).trans (le_of_eq ?_)))
-  · obtain ⟨w, hw⟩ := terminal_holds_of_accepts top d t inputs δ loss unifSpec hd
-      loss.coe_nonneg _ _ s le_rfl ω _ _ _ 0 (inputs top) Finset.univ prover
+    ((maxError_certificate top d t inputs δ loss (QueryLaw.uniform top t) hd loss.coe_nonneg
+      le_rfl ω s 0 (inputs top) Finset.univ).trans (le_of_eq ?_)))
+  · obtain ⟨w, hw⟩ := terminal_holds_of_accepts top d t inputs δ loss (QueryLaw.uniform top t)
+      unifSpec hd loss.coe_nonneg _ _ s le_rfl ω _ _ _ 0 (inputs top) Finset.univ prover
       (Reader.reads_root inputs top) (fun x => by simp only [Finset.mem_univ, decide_true]; rfl)
       result hresult hacc
     exact ⟨w, hw, fun hroot => hfar (agrees_of_root_holds top d inputs δ loss ω s _ hroot)⟩

@@ -18,10 +18,13 @@ knowledge state after `c` (`finalState`) asks for a subset of it of at least
 the witness `(S, c)` at the last layer, `c` being a codeword of the final code
 (`evalCoeffs_mem_code`), so it cannot create knowledge (`finalMessageCertificate`).
 
-The query phase samples `t` top positions. Its terminal state (`acceptedState`) holds for the
-final consistent set when every query lands in it, which is when the verifier accepts. A query
-challenge is bad only if every position lands in a final consistent set of density below
-`1 - δ + m · loss`, which has probability at most `(1 - δ + m · loss) ^ t`
+The query phase samples `t` top positions from a law `L` (`QueryLaw`): the positions all land in a
+set of density `ρ` with probability at most `(ρ + L.slack) ^ t`. Uniform positions have slack `0`
+(`QueryLaw.uniform`); positions read off the residues of uniform field elements, as a
+Fiat–Shamir verifier draws them, have a small positive one. Its terminal state (`acceptedState`)
+holds for the final consistent set when every query lands in it, which is when the verifier
+accepts. A query challenge is bad only if every position lands in a final consistent set of
+density below `1 - δ + m · loss`, which has probability at most `(1 - δ + m · loss + L.slack) ^ t`
 (`queryCertificate`). With the final message before it, this is `finalCertificate`.
 -/
 
@@ -42,6 +45,26 @@ theorem evalCoeffs_mem_code {n d : ℕ} (ω : SmoothCosetFftDomain n K) (c : Fin
     simp [evalCoeffs, Polynomial.eval_finsetSum]
 
 variable (top t : ℕ) (δ loss : ℝ)
+
+/-- A law of `t` positions of the top domain whose positions all land in any set of `c` positions
+with probability at most `(c / 2 ^ top + slack) ^ t`. -/
+structure QueryLaw where
+  /-- The positions' law. -/
+  law : ProbComp (Fin t → Fin (2 ^ top))
+  /-- The excess of each position's probability of landing in a set over the set's density. -/
+  slack : ENNReal
+  bound : ∀ C : Finset (Fin (2 ^ top)),
+    Pr{let xs ← law}[∀ i, xs i ∈ C] ≤ ((C.card : ENNReal) / 2 ^ top + slack) ^ t
+
+/-- Uniform positions, without slack. -/
+noncomputable def QueryLaw.uniform : QueryLaw top t where
+  law := $ᵗ (Fin t → Fin (2 ^ top))
+  slack := 0
+  bound C := by
+    rw [Probability.prob_uniform_pi_mem_finset_eq, Fintype.card_fin, add_zero, Nat.cast_pow,
+      Nat.cast_ofNat]
+
+@[simp] theorem QueryLaw.slack_uniform : (QueryLaw.uniform top t).slack = 0 := rfl
 
 /-- The final message: the final polynomial's `d` coefficients. -/
 def finalMessage (K : Type) (d : ℕ) : Protocol :=
@@ -83,18 +106,18 @@ theorem badChallenge_query (j : ℕ) (C : Finset (Fin (2 ^ top))) (xs : Fin t �
   subst hS
   exact ⟨hxs, lt_of_not_ge fun h => hnot ⟨subset_rfl, h⟩⟩
 
-/-- **The query bound.** Every query position lands in a set of density below `ρ` with
-probability at most `ρ ^ t`. -/
-theorem prob_badChallenge_query_le (j : ℕ) (C : Finset (Fin (2 ^ top))) :
-    Pr{let xs ←$ᵗ (Fin t → Fin (2 ^ top))}[(queryExtractor top t δ loss j C).badChallenge xs] ≤
-      ENNReal.ofReal (threshold δ loss j) ^ t := by
+/-- **The query bound.** Positions of the law `L` all land in a set of density below `ρ` with
+probability at most `(ρ + L.slack) ^ t`. -/
+theorem prob_badChallenge_query_le (L : QueryLaw top t) (j : ℕ) (C : Finset (Fin (2 ^ top))) :
+    Pr{let xs ← L.law}[(queryExtractor top t δ loss j C).badChallenge xs] ≤
+      (ENNReal.ofReal (threshold δ loss j) + L.slack) ^ t := by
   classical
   by_cases hC : (C.card : ℝ) < threshold δ loss j * 2 ^ top
-  · refine (prEvent_mono _ _ _ fun xs hbad => (badChallenge_query j C xs hbad).1).trans ?_
-    rw [Probability.prob_uniform_pi_mem_finset_eq]
-    refine pow_le_pow_left' ?_ t
+  · refine (prEvent_mono _ _ _ fun xs hbad => (badChallenge_query j C xs hbad).1).trans
+      ((L.bound C).trans ?_)
+    refine pow_le_pow_left' (add_le_add ?_ le_rfl) t
     have hpos : (0 : ℝ) < 2 ^ top := by positivity
-    rw [Fintype.card_fin, Nat.cast_pow, Nat.cast_ofNat, ← ENNReal.ofReal_natCast,
+    rw [← ENNReal.ofReal_natCast,
       show (2 : ENNReal) ^ top = ENNReal.ofReal (2 ^ top) by
         rw [ENNReal.ofReal_pow (by norm_num), ENNReal.ofReal_ofNat],
       ← ENNReal.ofReal_div_of_pos hpos]
@@ -104,19 +127,19 @@ theorem prob_badChallenge_query_le (j : ℕ) (C : Finset (Fin (2 ^ top))) :
 
 variable (top t δ loss)
 
-/-- **The query phase's knowledge certificate.** The query positions are uniform, and they are
-bad with probability at most `(1 - δ + j · loss) ^ t`. -/
-noncomputable def queryCertificate (j : ℕ) (C : Finset (Fin (2 ^ top))) :
+/-- **The query phase's knowledge certificate.** The query positions are drawn from the law `L`,
+and they are bad with probability at most `(1 - δ + j · loss + L.slack) ^ t`. -/
+noncomputable def queryCertificate (L : QueryLaw top t) (j : ℕ) (C : Finset (Fin (2 ^ top))) :
     KnowledgeCertificate (queryPhase top t).tree (queryPhase top t).roles
       (finalState top δ loss j C) where
   extractor := queryExtractor top t δ loss j C
-  challenges := ⟨($ᵗ (Fin t → Fin (2 ^ top)), ENNReal.ofReal (threshold δ loss j) ^ t),
+  challenges := ⟨(L.law, (ENNReal.ofReal (threshold δ loss j) + L.slack) ^ t),
     fun _ => PUnit.unit⟩
   prover_preserving := And.intro (fun _ h => nomatch h) fun _ => trivial
   local_bound := by
     refine ⟨?_, fun _ => trivial⟩
     rw [_root_.RoundByRound.GameFamily.isBounded_iff]
-    exact fun _ _ => prob_badChallenge_query_le j C
+    exact fun _ _ => prob_badChallenge_query_le L j C
 
 variable [DecidableEq K] (d : ℕ) (inputs : (m : ℕ) → Fin (2 ^ m) → K)
 
@@ -144,14 +167,14 @@ noncomputable def finalMessageCertificate {n : ℕ} (ω : SmoothCosetFftDomain n
   local_bound := fun _ => trivial
 
 /-- **The last round's knowledge certificate**: the final message, then the query phase. Its
-only error is the query phase's, `(1 - δ + j · loss) ^ t`. -/
-noncomputable def finalCertificate {n : ℕ} (ω : SmoothCosetFftDomain n K) (j : ℕ)
-    (f : Word K n) (C : Finset (Fin (2 ^ top))) :
+only error is the query phase's, `(1 - δ + j · loss + L.slack) ^ t`. -/
+noncomputable def finalCertificate (L : QueryLaw top t) {n : ℕ} (ω : SmoothCosetFftDomain n K)
+    (j : ℕ) (f : Word K n) (C : Finset (Fin (2 ^ top))) :
     KnowledgeCertificate (protocol K top d t (.final (n := n))).tree
       (protocol K top d t (.final (n := n))).roles
       (levelState top d inputs δ loss ω .final j f C) :=
   (finalMessageCertificate top δ loss d inputs ω j f C).append (fun _ => (queryPhase top t).tree)
     (fun _ => (queryPhase top t).roles)
-    fun path => queryCertificate top t δ loss j (finalConsistent top ω f path.1 C)
+    fun path => queryCertificate top t δ loss L j (finalConsistent top ω f path.1 C)
 
 end Fri.Interaction

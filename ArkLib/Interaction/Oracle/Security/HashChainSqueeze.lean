@@ -1077,16 +1077,16 @@ through the draws `dec`: after the prover's witness, absorbed into the key, it r
 that fail the draw's check (a grinding draw's proof of work) and decodes the challenge from the
 others, each draw reading only its node's squeezes. The encodings of the keys that squeeze are
 distinct and their absorbed inputs are not the empty input `e`; a key squeezed `0` times is not
-absorbed. Each draw is bounded by the ratio at its node (`ratio`). If every input's certificate
-samples its challenges uniformly and the adversary and the verifier together make at most `q`
-chain queries, the verifier completes a path whose coins all pass, decoding to a path of
+absorbed. Each draw is bounded by the ratio at its node (`ratio`) against the law the
+certificate samples there. If the adversary and the verifier together make at most `q` chain
+queries, the verifier completes a path whose coins all pass, decoding to a path of
 the protocol with a valid terminal witness whose backward extraction fails, with probability at
 most `chainError S q` plus the state-restoration bound `maxError * q + sumError` of the
 certificates' node errors, each multiplied by its node's ratio. -/
 theorem KnowledgeCertificate.chainSqueeze_knowledge_soundness (s₀ : S) (e : I)
     (coin : (z : Input) → PublicCoin (protocol z))
     (dec : (z : Input) → Decoder (Fin m → S × O) (coin z))
-    (ratio : (z : Input) → Errors (coin z)) (hdec : ∀ z, Decoder.Bounded (coin z) (dec z) (ratio z))
+    (ratio : (z : Input) → Errors (coin z))
     (squeezes : (z : Input) → Prefix PUnit (coin z) → ℕ)
     (hsqueezes : ∀ z node, squeezes z node ≤ m)
     (reads : ∀ z, Decoder.Reads (coin z) (dec z) (squeezes z))
@@ -1097,7 +1097,7 @@ theorem KnowledgeCertificate.chainSqueeze_knowledge_soundness (s₀ : S) (e : I)
     (state : Input → KnowledgeState)
     (certificate : (z : Input) → KnowledgeCertificate (protocol z).tree (protocol z).roles
       (state z))
-    (uniform : ∀ z, UniformChallenges (coin z) (certificate z).challenges)
+    (hdec : ∀ z, Decoder.Bounded (coin z) (dec z) (ratio z) (certificate z).challenges)
     (adversary : OracleComp (unifSpec + (chainSpec S I O + []ₒ))
       (Option (Selection Input PUnit W fun z => decoded (Fin m → S × O) (coin z) (dec z))))
     {q : ℕ} (hq : IsQueryBoundP (squeezeExecution s₀ e dec squeezes encode adversary)
@@ -1150,7 +1150,7 @@ theorem KnowledgeCertificate.chainSqueeze_knowledge_soundness (s₀ : S) (e : I)
       (certificate z).prover_preserving)
     (fun z _ => isLocallyBounded_errorSchedule _ _ _
       (uniformChallenges_decodeSchedule (coin z) (dec z) (ratio z) (certificate z).challenges)
-      (isLocallyBounded_decodeExtractor (coin z) (dec z) (ratio z) (hdec z) _ _ (uniform z)
+      (isLocallyBounded_decodeExtractor (coin z) (dec z) (ratio z) _ _ (hdec z)
         (certificate z).local_bound) _
       (supErrors_decodeSchedule_le (coin z) (dec z) (ratio z) (certificate z).challenges))
   have h5 : Pr{let r ← (simulateQ ((SqueezeBase e m ⊕ Key Input PUnit fun z =>
@@ -1206,6 +1206,24 @@ def _root_.Interaction.Oracle.PublicCoin.ChallengesLE :
   | _, @PublicCoin.sender _ _ _ next, N => ∀ move, PublicCoin.ChallengesLE (next move) N
   | _, @PublicCoin.oracle _ _ _ _ next, N => PublicCoin.ChallengesLE next N
   | _, @PublicCoin.challenge _ _ _ next, N => 0 < N ∧ PublicCoin.ChallengesLE next (N - 1)
+
+/-- On paths of at most `N` challenges, node errors of at most `ε` sum to at most `N * ε`. -/
+theorem _root_.Interaction.Oracle.Security.StateRestoration.pathError_le_of_challengesLE
+    {ε : ENNReal} : {protocol : Protocol} → (coin : PublicCoin protocol) → {N : ℕ} →
+    coin.ChallengesLE N → (errors : StateRestoration.Errors coin) → (∀ node, errors node ≤ ε) →
+    StateRestoration.pathError coin errors ≤ N * ε
+  | _, .done, _, _, _, _ => bot_le
+  | _, @PublicCoin.sender _ _ _ next, _, h, _, he => iSup_le fun move =>
+      StateRestoration.pathError_le_of_challengesLE (next move) (h move) _ fun node =>
+        he ⟨move, node⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, _, h, _, he => iSup_le fun message =>
+      StateRestoration.pathError_le_of_challengesLE next h _ fun node => he ⟨message, node⟩
+  | _, @PublicCoin.challenge _ _ _ next, N, h, _, he => by
+      refine (add_le_add (he _) (StateRestoration.pathError_le_of_challengesLE next h.2 _
+        fun node => he _)).trans (le_of_eq ?_)
+      obtain ⟨n, rfl⟩ := Nat.exists_eq_add_of_lt h.1
+      simp only [Nat.add_sub_cancel, Nat.cast_add, Nat.cast_one, add_mul, one_mul,
+        add_comm]
 
 section ChainQueries
 

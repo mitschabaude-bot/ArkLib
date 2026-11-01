@@ -29,9 +29,14 @@ carrier (`decodedCommon`); the key of a draw's coins includes the prover's witne
 A knowledge certificate of the protocol pulls back along the draws (`decodeCertificate`): the
 same states, with the state after accepted coins `c` the protocol's after the challenge decoded
 from `c`, and after rejected coins a state no witness satisfies (`KnowledgeState.empty`). A draw
-is bounded by a ratio `r` (`Draw.Bounded`) when accepted coins decode into any event with at most
-`r` times the event's uniform probability. The pulled-back certificate's error at a node is then
-the protocol's times the node's ratio (`supErrors_decodeSchedule_le`), and its terminal knowledge
+is bounded by a ratio `r` against a law of the challenge (`Draw.Bounded`) when accepted coins
+decode into any event with at most `r` times the event's probability under the law; the decoder
+is bounded against a certificate (`Decoder.Bounded`) when each draw is, against the law the
+certificate's schedule samples at its node. The certificate's local bounds are then bounds on the
+decoded coins: its challenges need not be uniform, so a certificate whose bound at a node holds
+for the law the draw actually decodes to (the residues of uniform field elements for query
+positions, say) pays no ratio for that law. The pulled-back certificate's error at a node is the
+protocol's times the node's ratio (`supErrors_decodeSchedule_le`), and its terminal knowledge
 failures are the protocol's on the decoded path (`badTerminal_decode`). A grinding draw's ratio is
 the proof-of-work pass probability (`powFraction` for a uniform residue) times its decoder's
 ratio, when the sample is independent of the decoded challenge (`Draw.Bounded.grind`).
@@ -122,24 +127,24 @@ def decodePath : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
         (decodePath next dec.2 path.2.2).map fun rest => ⟨dec.1.decode path.2.1, rest⟩
       else none
 
-/-- A draw is bounded by `ratio` when accepted coins decode into any event with at most `ratio`
-times the event's probability under the uniform challenge. -/
-def Draw.Bounded [SampleableType C] [SampleableType Challenge]
-    (draw : Draw C Challenge) (ratio : ENNReal) : Prop :=
+/-- A draw is bounded by `ratio` against the law `law` of the challenge when accepted coins decode
+into any event with at most `ratio` times the event's probability under `law`. -/
+def Draw.Bounded [SampleableType C] (draw : Draw C Challenge) (law : ProbComp Challenge)
+    (ratio : ENNReal) : Prop :=
   ∀ E : Challenge → Prop, Pr{let c ← ($ᵗ C : ProbComp C)}[draw.accept c = true ∧
-    E (draw.decode c)] ≤ ratio * Pr{let x ← ($ᵗ Challenge : ProbComp Challenge)}[E x]
+    E (draw.decode c)] ≤ ratio * Pr{let x ← law}[E x]
 
 /-- A plain draw is bounded by its decoder's ratio. -/
-theorem Draw.Bounded.plain [SampleableType C] [SampleableType Challenge]
+theorem Draw.Bounded.plain [SampleableType C] {law : ProbComp Challenge}
     {decode : C → Challenge} {ratio : ENNReal}
     (h : ∀ E : Challenge → Prop, Pr{let c ← ($ᵗ C : ProbComp C)}[E (decode c)] ≤
-      ratio * Pr{let x ← ($ᵗ Challenge : ProbComp Challenge)}[E x]) :
-    (Draw.plain decode).Bounded ratio := fun E =>
+      ratio * Pr{let x ← law}[E x]) :
+    (Draw.plain decode).Bounded law ratio := fun E =>
   (prEvent_mono _ _ _ fun _ hc => hc.2).trans (h E)
 
 /-- **Grinding.** A grinding draw whose proof-of-work sample passes with probability at most
 `pass`, independently of the decoded challenge, is bounded by `pass` times its decoder's ratio. -/
-theorem Draw.Bounded.grind [SampleableType C] [SampleableType Challenge]
+theorem Draw.Bounded.grind [SampleableType C] {law : ProbComp Challenge}
     (Witness : Type) [DecidableEq Witness] (bits : ℕ) {sample : C → ℕ} {decode : C → Challenge}
     {pass ratio : ENNReal}
     (independent : ∀ E : Challenge → Prop,
@@ -148,8 +153,8 @@ theorem Draw.Bounded.grind [SampleableType C] [SampleableType Challenge]
           Pr{let c ← ($ᵗ C : ProbComp C)}[E (decode c)])
     (passes : Pr{let c ← ($ᵗ C : ProbComp C)}[sample c % 2 ^ bits = 0] ≤ pass)
     (h : ∀ E : Challenge → Prop, Pr{let c ← ($ᵗ C : ProbComp C)}[E (decode c)] ≤
-      ratio * Pr{let x ← ($ᵗ Challenge : ProbComp Challenge)}[E x]) :
-    (Draw.grind Witness bits sample decode).Bounded (pass * ratio) := fun E => by
+      ratio * Pr{let x ← law}[E x]) :
+    (Draw.grind Witness bits sample decode).Bounded law (pass * ratio) := fun E => by
   simp only [Draw.grind, beq_iff_eq]
   rw [independent E, mul_assoc]
   exact mul_le_mul' passes (h E)
@@ -367,17 +372,20 @@ theorem isProverPreserving_decodeExtractor : {protocol : Protocol.{0}} →
         isProverPreserving_decodeExtractor next dec _ (h.2 message)⟩
 
 /-- Every draw is bounded by the ratio at its node (`ratio`, indexed by the protocol's erased
-prefixes). -/
+prefixes) against the law the schedule samples there. -/
 def Decoder.Bounded [SampleableType C] : {protocol : Protocol.{0}} →
-    (coin : PublicCoin protocol) → Decoder C coin → Errors coin → Prop
-  | _, .done, _, _ => True
-  | _, @PublicCoin.sender _ _ _ next, dec, ratio =>
-      ∀ move, Decoder.Bounded (next move) (dec move) fun node => ratio ⟨move, node⟩
-  | _, @PublicCoin.oracle _ _ _ _ next, dec, ratio =>
-      ∀ message, Decoder.Bounded next dec fun node => ratio ⟨message, node⟩
-  | _, @PublicCoin.challenge _ _ _ next, dec, ratio =>
-      dec.1.Bounded (ratio (.inl PUnit.unit)) ∧
-        Decoder.Bounded next dec.2 fun node => ratio (.inr ⟨PUnit.unit, node⟩)
+    (coin : PublicCoin protocol) → Decoder C coin → Errors coin →
+    RoundExtractor.ChallengeSchedule protocol.tree protocol.roles → Prop
+  | _, .done, _, _, _ => True
+  | _, @PublicCoin.sender _ _ _ next, dec, ratio, schedule =>
+      ∀ move, Decoder.Bounded (next move) (dec move) (fun node => ratio ⟨move, node⟩)
+        (schedule.2 move)
+  | _, @PublicCoin.oracle _ _ _ _ next, dec, ratio, schedule =>
+      ∀ message, Decoder.Bounded next dec (fun node => ratio ⟨message, node⟩) (schedule message)
+  | _, @PublicCoin.challenge _ _ _ next, dec, ratio, schedule =>
+      dec.1.Bounded schedule.1.1 (ratio (.inl PUnit.unit)) ∧ ∀ challenge,
+        Decoder.Bounded next dec.2 (fun node => ratio (.inr ⟨PUnit.unit, node⟩))
+          (schedule.2 challenge)
 
 /-- The challenge schedule of the decoded presentation: uniform coins, with the node's ratio
 times the protocol's error at the node; the schedule after rejected coins is the one after the
@@ -399,31 +407,30 @@ noncomputable def decodeSchedule [SampleableType C] : {protocol : Protocol.{0}} 
           (schedule.2 (dec.1.decode c))⟩⟩
 
 /-- The pulled-back witness maps are locally bounded by each node's ratio times the protocol's
-error there, when the protocol's challenges are uniform. -/
+error there, when each draw is bounded against the law the schedule samples at its node. -/
 theorem isLocallyBounded_decodeExtractor [SampleableType C] :
     {protocol : Protocol.{0}} → (coin : PublicCoin protocol) → (dec : Decoder C coin) →
-    (ratio : Errors coin) → Decoder.Bounded coin dec ratio → {state : KnowledgeState.{w}} →
+    (ratio : Errors coin) → {state : KnowledgeState.{w}} →
     (extractor : RoundExtractor protocol.tree state) →
     (schedule : RoundExtractor.ChallengeSchedule protocol.tree protocol.roles) →
-    UniformChallenges coin schedule → extractor.IsLocallyBounded protocol.roles schedule →
+    Decoder.Bounded coin dec ratio schedule → extractor.IsLocallyBounded protocol.roles schedule →
     (decodeExtractor coin dec extractor).IsLocallyBounded (decodedProtocol C coin dec).roles
       (decodeSchedule coin dec ratio schedule)
-  | _, .done, _, _, _, _, _, _, _, _ => trivial
-  | _, @PublicCoin.sender _ _ _ next, dec, _, hdec, _, _, _, uniform, bounded =>
-      fun move => isLocallyBounded_decodeExtractor (next move) (dec move) _ (hdec move) _ _
-        (uniform move) (bounded move)
-  | _, @PublicCoin.oracle _ _ _ _ next, dec, _, hdec, _, _, _, uniform, bounded =>
-      fun message => isLocallyBounded_decodeExtractor next dec _ (hdec message) _ _
-        (uniform message) (bounded message)
-  | _, @PublicCoin.challenge Challenge _ _ next, dec, ratio, hdec, state, extractor, schedule,
-      uniform, bounded => fun w => by
+  | _, .done, _, _, _, _, _, _, _ => trivial
+  | _, @PublicCoin.sender _ _ _ next, dec, _, _, _, _, hdec, bounded =>
+      fun move => isLocallyBounded_decodeExtractor (next move) (dec move) _ _ _
+        (hdec move) (bounded move)
+  | _, @PublicCoin.oracle _ _ _ _ next, dec, _, _, _, _, hdec, bounded =>
+      fun message => isLocallyBounded_decodeExtractor next dec _ _ _
+        (hdec message) (bounded message)
+  | _, @PublicCoin.challenge Challenge _ _ next, dec, ratio, state, extractor, schedule,
+      hdec, bounded => fun w => by
       refine ⟨?_, fun c => ?_⟩
       · have here := bounded.1
         rw [_root_.RoundByRound.GameFamily.isBounded_iff] at here ⊢
         intro round context
         have h := here round context
-        rw [uniform.1] at h
-        change Pr{let x ← ($ᵗ Challenge : ProbComp Challenge)}[
+        change Pr{let x ← schedule.1.1}[
           RoundExtractor.badChallenge extractor x] ≤ schedule.1.2 at h
         change Pr{let c ← ($ᵗ C : ProbComp C)}[RoundExtractor.badChallenge
           (decodeExtractor (.challenge next) dec extractor w).2.2 c] ≤
@@ -437,24 +444,23 @@ theorem isLocallyBounded_decodeExtractor [SampleableType C] :
               bad).trans
           ((hdec.1 _).trans (by gcongr))
       · exact isLocallyBounded_drawChild _ _ _ _ (isLocallyBounded_decodeExtractor next dec.2 _
-          hdec.2 _ _ (uniform.2 (dec.1.decode c)) (bounded.2 (dec.1.decode c)))
+          _ _ (hdec.2 (dec.1.decode c)) (bounded.2 (dec.1.decode c)))
 
-/-- **A certificate pulled back along draws.** A knowledge certificate whose challenges are
-uniform is a certificate of the decoded presentation, with every node's error multiplied by its
+/-- **A certificate pulled back along draws.** A knowledge certificate whose challenge laws bound
+the draws is a certificate of the decoded presentation, with every node's error multiplied by its
 draw's ratio. -/
 noncomputable def decodeCertificate [SampleableType C] {protocol : Protocol.{0}}
     (coin : PublicCoin protocol) (dec : Decoder C coin) (ratio : Errors coin)
-    (hdec : Decoder.Bounded coin dec ratio)
     {state : KnowledgeState.{w}} (certificate : KnowledgeCertificate protocol.tree protocol.roles
       state)
-    (uniform : UniformChallenges coin certificate.challenges) :
+    (hdec : Decoder.Bounded coin dec ratio certificate.challenges) :
     KnowledgeCertificate (decodedProtocol C coin dec).tree (decodedProtocol C coin dec).roles
       state where
   extractor := decodeExtractor coin dec certificate.extractor
   challenges := decodeSchedule coin dec ratio certificate.challenges
   prover_preserving := isProverPreserving_decodeExtractor coin dec _ certificate.prover_preserving
-  local_bound := isLocallyBounded_decodeExtractor coin dec ratio hdec certificate.extractor
-    certificate.challenges uniform certificate.local_bound
+  local_bound := isLocallyBounded_decodeExtractor coin dec ratio certificate.extractor
+    certificate.challenges hdec certificate.local_bound
 
 /-! ### Keys, errors and terminal states of the decoded presentation -/
 

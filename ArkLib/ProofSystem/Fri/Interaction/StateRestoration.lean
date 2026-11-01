@@ -48,7 +48,7 @@ def terminal : {n : ℕ} → (ω : SmoothCosetFftDomain n K) → (A : PFunctor) 
   | _, ω, _, r, .fold k hk inject rest, p =>
       terminal (ω.subdomain k) _ (r.commit.fold ω k hk inject p.2.1) rest p.2.2
 
-variable (inputs : (m : ℕ) → Fin (2 ^ m) → K) (δ loss : ℝ)
+variable (inputs : (m : ℕ) → Fin (2 ^ m) → K) (δ loss : ℝ) (L : QueryLaw top t)
 
 set_option backward.isDefEq.respectTransparency false in
 /-- When the terminal checks pass on a complete execution, closed with its messages, the
@@ -61,7 +61,7 @@ theorem terminal_holds_of_eval (hd : 0 < d) (hloss : 0 ≤ loss) :
       ∀ path : (protocol K top d t s).tree.ExecutionPath,
         evalWithAnswerFn (path.closingImpl (protocol K top d t s).oracles A impl)
           (terminal top d t ω A r s path.toBranchPath) = true →
-        ∃ w, ((certificate top d t inputs δ loss hd hloss hn ω s j f C).extractor.terminalState
+        ∃ w, ((certificate top d t inputs δ loss L hd hloss hn ω s j f C).extractor.terminalState
           path).holds w := by
   intro n s
   induction s with
@@ -86,13 +86,14 @@ theorem terminal_holds_of_eval (hd : 0 < d) (hloss : 0 ≤ loss) :
       path hacc
 
 /-- The node errors of FRI's public-coin presentation from a layer of log height `n`, `j` folds
-done: each fold's lossy MCA error, and the query error `(1 - δ + m · loss) ^ t` after `m` folds. -/
-noncomputable def nodeErrors : {n : ℕ} → (ω : SmoothCosetFftDomain n K) → (s : Schedule n) →
-    (j : ℕ) → Errors (publicCoin K top d t s)
-  | _, _, .final, j => fun _ => ENNReal.ofReal (threshold δ loss j) ^ t
+done, for query positions of slack `slack`: each fold's lossy MCA error, and the query error
+`(1 - δ + m · loss + slack) ^ t` after `m` folds. -/
+noncomputable def nodeErrors (slack : ENNReal) : {n : ℕ} → (ω : SmoothCosetFftDomain n K) →
+    (s : Schedule n) → (j : ℕ) → Errors (publicCoin K top d t s)
+  | _, _, .final, j => fun _ => (ENNReal.ofReal (threshold δ loss j) + slack) ^ t
   | n, ω, .fold k _ inject rest, j => fun node =>
       Sum.elim (fun _ => Schedule.roundError ω k (rest.degree d) δ loss inject)
-        (fun node => nodeErrors (ω.subdomain k) rest (j + 1) node.2)
+        (fun node => nodeErrors slack (ω.subdomain k) rest (j + 1) node.2)
         (node : Word K n × (PUnit ⊕ (PUnit × Prefix PUnit (publicCoin K top d t rest)))).2
 
 /-- The certificate's error at each node of the public-coin presentation is the node error. -/
@@ -100,8 +101,8 @@ theorem supErrors_certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
     ∀ {n : ℕ} (hn : n ≤ top) (ω : SmoothCosetFftDomain n K) (s : Schedule n) (j : ℕ)
       (f : Word K n) (C : Finset (Fin (2 ^ top))) (node : Prefix PUnit (publicCoin K top d t s)),
       supErrors (publicCoin K top d t s)
-        (certificate top d t inputs δ loss hd hloss hn ω s j f C).challenges node =
-      nodeErrors top d t δ loss ω s j node
+        (certificate top d t inputs δ loss L hd hloss hn ω s j f C).challenges node =
+      nodeErrors top d t δ loss L.slack ω s j node
   | _, _, _, .final, _, _, _, node => by
     obtain ⟨c, _ | ⟨_, node⟩⟩ := (node : (_ : Fin d → K) × (PUnit ⊕ (PUnit × Empty)))
     · rfl
@@ -116,18 +117,18 @@ theorem supErrors_certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
 
 /-- The path sum of the node errors is FRI's error at the proximity loss: the folds' errors and
 the query error. -/
-theorem pathError_nodeErrors :
+theorem pathError_nodeErrors (slack : ENNReal) :
     ∀ {n : ℕ} (ω : SmoothCosetFftDomain n K) (s : Schedule n) (j : ℕ),
-      pathError (publicCoin K top d t s) (nodeErrors top d t δ loss ω s j) =
-        s.foldError d δ loss ω + ENNReal.ofReal (threshold δ loss (j + s.numFolds)) ^ t
+      pathError (publicCoin K top d t s) (nodeErrors top d t δ loss slack ω s j) =
+        s.foldError d δ loss ω + (ENNReal.ofReal (threshold δ loss (j + s.numFolds)) + slack) ^ t
   | _, _, .final, j => by
-    change (⨆ _ : Fin d → K, ENNReal.ofReal (threshold δ loss j) ^ t + 0) = _
+    change (⨆ _ : Fin d → K, (ENNReal.ofReal (threshold δ loss j) + slack) ^ t + 0) = _
     simp [Schedule.foldError, Schedule.numFolds]
   | n, ω, .fold k hk inject rest, j => by
     change (⨆ _ : Word K n, Schedule.roundError ω k (rest.degree d) δ loss inject +
       pathError (publicCoin K top d t rest)
-        (nodeErrors top d t δ loss (ω.subdomain k) rest (j + 1))) = _
-    rw [iSup_const, pathError_nodeErrors (ω.subdomain k) rest (j + 1), Schedule.foldError,
+        (nodeErrors top d t δ loss slack (ω.subdomain k) rest (j + 1))) = _
+    rw [iSup_const, pathError_nodeErrors slack (ω.subdomain k) rest (j + 1), Schedule.foldError,
       Schedule.numFolds, add_assoc, Nat.add_comm 1 rest.numFolds]
     exact (add_assoc _ _ _).symm
 
@@ -149,26 +150,27 @@ theorem stateRestoration_le {Input Salt W : Type} [DecidableEq Input] [Decidable
         (fun _ => terminal top d t ω (inputAccess K) (Reader.root top) s) adversary)).run' ∅}[
       result.2.2.1 = true ∧ ¬ (Agrees ω (s.degree d) (1 - δ) (inputs result.1 top) ∧
         s.InputsAgree (inputs result.1) d (1 - δ) ω)] ≤
-      Q * maxError (fun _ : Input => nodeErrors top d t δ loss ω s 0) +
-        sumError (fun _ : Input => nodeErrors top d t δ loss ω s 0) := by
+      Q * maxError (fun _ : Input => nodeErrors top d t δ loss 0 ω s 0) +
+        sumError (fun _ : Input => nodeErrors top d t δ loss 0 ω s 0) := by
   have h := KnowledgeCertificate.stateRestoration_extraction_le (fun _ => publicCoin K top d t s)
     (fun z => levelState top d (inputs z) δ loss ω s 0 (inputs z top) Finset.univ)
-    (fun z => certificate top d t (inputs z) δ loss hd hloss le_rfl ω s 0 (inputs z top)
-      Finset.univ)
+    (fun z => certificate top d t (inputs z) δ loss (QueryLaw.uniform top t) hd hloss le_rfl ω s 0
+      (inputs z top) Finset.univ)
     (fun z => uniformChallenges_certificate top d t (inputs z) δ loss hd hloss le_rfl ω s 0 _ _)
     (inputAccess K) (fun z => inputImpl K (inputs z)) (fun _ _ => Bool)
     (fun _ => terminal top d t ω (inputAccess K) (Reader.root top) s) adversary Q queryBound
   have herr : (fun z : Input => supErrors (publicCoin K top d t s)
-      (certificate top d t (inputs z) δ loss hd hloss le_rfl ω s 0 (inputs z top)
-        Finset.univ).challenges) = fun _ => nodeErrors top d t δ loss ω s 0 :=
-    funext fun z => funext fun node => supErrors_certificate top d t (inputs z) δ loss hd hloss
-      le_rfl ω s 0 _ _ node
+      (certificate top d t (inputs z) δ loss (QueryLaw.uniform top t) hd hloss le_rfl ω s 0
+        (inputs z top) Finset.univ).challenges) = fun _ => nodeErrors top d t δ loss 0 ω s 0 :=
+    funext fun z => funext fun node => supErrors_certificate top d t (inputs z) δ loss
+      (QueryLaw.uniform top t) hd hloss le_rfl ω s 0 _ _ node
   rw [herr, verificationGame_eq, simulateQ_map] at h
   rw [verificationGame_eq, simulateQ_map]
   simp only [StateT.run'_map', prEvent_map] at h ⊢
   refine (prEvent_mono _ _ _ fun result hres => ?_).trans h
   obtain ⟨hacc, hfar⟩ := hres
-  obtain ⟨w, hw⟩ := terminal_holds_of_eval top d t (inputs result.1) δ loss hd hloss s le_rfl ω
+  obtain ⟨w, hw⟩ := terminal_holds_of_eval top d t (inputs result.1) δ loss
+    (QueryLaw.uniform top t) hd hloss s le_rfl ω
     (inputAccess K) (inputImpl K (inputs result.1)) (Reader.root top) 0 (inputs result.1 top)
     Finset.univ (Reader.reads_root (inputs result.1) top)
     (fun x => by simp only [Finset.mem_univ, decide_true]; rfl) result.2.1 hacc
