@@ -88,6 +88,30 @@ noncomputable def sumError {coin : (z : Input) → PublicCoin (protocol z)}
     (errors : (z : Input) → Errors (coin z)) : ENNReal :=
   ⨆ z, pathError (coin z) (errors z)
 
+/-- The largest path sum is monotone in the node errors. -/
+theorem pathError_mono : {protocol : Protocol} → (coin : PublicCoin protocol) →
+    {errors errors' : Errors coin} → (∀ node, errors node ≤ errors' node) →
+    pathError coin errors ≤ pathError coin errors'
+  | _, .done, _, _, _ => le_rfl
+  | _, @PublicCoin.sender _ _ _ next, _, _, h =>
+      iSup_mono fun move => pathError_mono (next move) fun node => h ⟨move, node⟩
+  | _, @PublicCoin.oracle _ _ _ _ next, _, _, h =>
+      iSup_mono fun message => pathError_mono next fun node => h ⟨message, node⟩
+  | _, @PublicCoin.challenge _ _ _ next, _, _, h =>
+      add_le_add (h (.inl PUnit.unit)) (pathError_mono next fun node => h (.inr ⟨PUnit.unit, node⟩))
+
+/-- The largest node error is monotone in the node errors. -/
+theorem maxError_mono {coin : (z : Input) → PublicCoin (protocol z)}
+    {errors errors' : (z : Input) → Errors (coin z)} (h : ∀ z node, errors z node ≤ errors' z node) :
+    maxError errors ≤ maxError errors' :=
+  iSup_mono fun z => iSup_mono fun node => h z node
+
+/-- The largest path sum over all inputs is monotone in the node errors. -/
+theorem sumError_mono {coin : (z : Input) → PublicCoin (protocol z)}
+    {errors errors' : (z : Input) → Errors (coin z)} (h : ∀ z node, errors z node ≤ errors' z node) :
+    sumError errors ≤ sumError errors' :=
+  iSup_mono fun z => pathError_mono (coin z) (h z)
+
 /-- Every key charge is bounded by the largest node error. -/
 theorem keyError_le_maxError {Salt : Type} {coin : (z : Input) → PublicCoin (protocol z)}
     (errors : (z : Input) → Errors (coin z)) (key : Key Input Salt coin) :
