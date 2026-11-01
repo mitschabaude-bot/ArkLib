@@ -15,7 +15,7 @@ Each stage of that extractor has a named measured program and budget, and every 
 one. The two message stages each perform one charged addition. The two challenge stages return the
 later witness or its first component; copying and projection are uncharged under this accounting,
 so they request no instruction. The theorem
-`MeasuredKnowledgeCertificate.stateRestoration_oracle_knowledge_soundness_nonuniform` packages the
+`MeasuredKnowledgeCertificate.stateRestoration_oracle_knowledge_soundness` packages the
 client's security bound with its uniform stage budget.
 -/
 
@@ -35,9 +35,6 @@ namespace Interaction.Oracle.Security.StateRestorationBudgetTest
   Challenge := Fin 8
   interface := messageInterface
   decEqMessage := inferInstance
-  finiteMessage := inferInstance
-  finiteChallenge := inferInstance
-  nonemptyChallenge := inferInstance
   sampleChallenge := inferInstance
 
 @[implicit_reducible] def secondRound : Round where
@@ -45,9 +42,6 @@ namespace Interaction.Oracle.Security.StateRestorationBudgetTest
   Challenge := Fin 16
   interface := messageInterface
   decEqMessage := inferInstance
-  finiteMessage := inferInstance
-  finiteChallenge := inferInstance
-  nonemptyChallenge := inferInstance
   sampleChallenge := inferInstance
 
 @[implicit_reducible] def rounds : List Round := [firstRound, secondRound]
@@ -55,6 +49,7 @@ abbrev tree := (protocol rounds).tree
 abbrev roles := (protocol rounds).roles
 abbrev oracles := (protocol rounds).oracles
 abbrev initial := emptySpec.toPFunctor
+abbrev coin : (_ : Nat) → PublicCoin (protocol rounds) := fun _ => Round.coin rounds
 
 noncomputable def errors : Fin 2 → ENNReal := fun j => if j = 0 then 1 / 8 else 1 / 16
 
@@ -214,18 +209,18 @@ theorem outputLaw (z : Nat) (path : tree.ExecutionPath) (w : Nat) :
       exact valid
   · simp [accepted]
 
-def messages : Messages Unit rounds := ⟨(5 : Fin 8), (), (7 : Fin 8), (), PUnit.unit⟩
+def messages : Messages Unit (Round.coin rounds) := ⟨(5 : Fin 8), (), (7 : Fin 8), (), PUnit.unit⟩
 def path (first : Fin 8) (second : Fin 16) : tree.ExecutionPath :=
   ⟨(5 : Fin 8), first, (7 : Fin 8), second, PUnit.unit⟩
 
-def lateKey : Key Nat Unit (fun _ => rounds) :=
-  ⟨0, Prefix.later (5 : Fin 8) () (Prefix.here (7 : Fin 8) ())⟩
+def lateKey : Key Nat Unit coin :=
+  ⟨0, ⟨(5 : Fin 8), .inr ⟨(), ⟨(7 : Fin 8), .inl ()⟩⟩⟩⟩
 
 /-- Query the later round first, twice, before completing the selected transcript. -/
-def adversary : OracleComp (oracleSpec Nat Unit (fun _ => rounds))
-    (Selection Nat Unit Nat (fun _ => rounds)) := do
-  let _ ← liftM ((oracleSpec Nat Unit (fun _ => rounds)).query lateKey)
-  let _ ← liftM ((oracleSpec Nat Unit (fun _ => rounds)).query lateKey)
+def adversary : OracleComp (oracleSpec Nat Unit coin)
+    (Selection Nat Unit Nat coin) := do
+  let _ ← liftM ((oracleSpec Nat Unit coin).query lateKey)
+  let _ ← liftM ((oracleSpec Nat Unit coin).query lateKey)
   pure ⟨0, messages, 6⟩
 
 theorem queryBound : IsTotalQueryBound adversary 2 := by
@@ -256,18 +251,20 @@ theorem sum_errors : (∑ j, errors j) = (3 / 16 : ENNReal) := by
 
 theorem actual_nonuniform_game_bound :
     Pr{let result ← (simulateQ randomOracle
-      (closedVerificationGame initial inputImpl Out family oracleTerminal adversary)).run' ∅}[
+      (closedVerificationGame coin initial inputImpl Out family oracleTerminal adversary)).run' ∅}[
       result.1 ∈ Set.univ ∧
       (∃ claim, result.2.2.1 = some claim ∧
         Rout result.1 result.2.1.toBranchPath claim result.2.2.2) ∧
       ¬ Rin result.1 (extractInputWitness inputState extractor terminalWitness
         result.1 result.2.1 result.2.2.2)] ≤ 7 / 16 := by
-  have general := stateRestoration_oracle_knowledge_soundness_nonuniform_fixed
-    inputState extractor Set.univ errors (fun z _ => preserving z) (fun z _ => bounded z)
-    initial inputImpl Out family oracleTerminal Rin Rout terminalWitness inputLaw outputLaw
-    adversary 2 queryBound
+  have general := stateRestoration_oracle_knowledge_soundness coin
+    inputState extractor Set.univ (fun _ => roundErrors rounds errors) (fun z _ => preserving z)
+    (fun z _ => bounded z) initial inputImpl Out family oracleTerminal Rin Rout terminalWitness
+    inputLaw outputLaw adversary 2 queryBound
   calc
-    _ ≤ 2 * Finset.univ.sup errors + ∑ j, errors j := general
+    _ ≤ 2 * Finset.univ.sup errors + ∑ j, errors j :=
+      general.trans (add_le_add (by gcongr; exact maxError_roundErrors_le rounds errors)
+        (sumError_roundErrors_le rounds errors))
     _ = 7 / 16 := by
       rw [max_errors, sum_errors]
       have equality : (2 : NNReal) * (1 / 8) + 3 / 16 = 7 / 16 := by norm_num
@@ -374,17 +371,17 @@ example (z : Nat) : (measuredCertificate z).toKnowledgeCertificate.extractor = e
 
 /-- The packaged theorem gives security and a uniform stage budget for the client's certificate. -/
 example : Pr{let result ← (simulateQ randomOracle
-      (closedVerificationGame initial inputImpl Out family oracleTerminal adversary)).run' ∅}[
+      (closedVerificationGame coin initial inputImpl Out family oracleTerminal adversary)).run' ∅}[
       result.1 ∈ Set.univ ∧
       (∃ claim, result.2.2.1 = some claim ∧
         Rout result.1 result.2.1.toBranchPath claim result.2.2.2) ∧
       ¬ Rin result.1 (extractInputWitness inputState (fun z => (measuredCertificate z).extractor)
         terminalWitness result.1 result.2.1 result.2.2.2)] ≤
-      2 * maxError (rounds := fun _ : Nat => rounds) (fun _ => errors) +
-        sumError (rounds := fun _ : Nat => rounds) (fun _ => errors) ∧
+      2 * maxError (coin := coin) (fun _ => roundErrors rounds errors) +
+        sumError (coin := coin) (fun _ => roundErrors rounds errors) ∧
       ∀ z ∈ Set.univ, (measuredCertificate z).stages.BudgetAtMost 1 :=
-  MeasuredKnowledgeCertificate.stateRestoration_oracle_knowledge_soundness_nonuniform inputState
-    measuredCertificate Set.univ (fun _ => errors) (fun _ _ => rfl) 1
+  MeasuredKnowledgeCertificate.stateRestoration_oracle_knowledge_soundness coin inputState
+    measuredCertificate Set.univ (fun _ => roundErrors rounds errors) (fun _ _ => rfl) 1
     (fun z _ => stages_budgetAtMost_one z) initial inputImpl Out family oracleTerminal
     Rin Rout terminalWitness inputLaw outputLaw adversary 2 queryBound
 

@@ -26,9 +26,6 @@ namespace Interaction.Oracle.Security.StateRestorationTest
   Challenge := Bool
   interface := messageInterface
   decEqMessage := inferInstance
-  finiteMessage := inferInstance
-  finiteChallenge := inferInstance
-  nonemptyChallenge := inferInstance
   sampleChallenge := inferInstance
 
 @[implicit_reducible] def rounds : List Round := [round]
@@ -36,6 +33,7 @@ abbrev tree := (protocol rounds).tree
 abbrev roles := (protocol rounds).roles
 abbrev oracles := (protocol rounds).oracles
 abbrev initial := emptySpec.toPFunctor
+abbrev coin : (_ : Nat) → PublicCoin (protocol rounds) := fun _ => Round.coin rounds
 
 def inputImpl : Nat → QueryImpl (ofPFunctor initial) Id := fun _ q => nomatch q
 
@@ -111,7 +109,7 @@ theorem badChallenge_iff (z : Nat) (message : Fin 8) (challenge : Bool) :
     exact ⟨⟨0, ()⟩, (fun impossible => impossible), ⟨isTrue, Nat.zero_le _⟩⟩
 
 theorem bounded (z : Nat) : RoundExtractor.IsLocallyBounded (extractor z) roles
-    (uniformSchedule (1 / 2) rounds) := by
+    (errorSchedule (Round.coin rounds) fun _ => 1 / 2) := by
   intro message
   refine ⟨?_, fun _ => trivial⟩
   apply (_root_.RoundByRound.GameFamily.isBounded_iff _ _).mpr
@@ -137,11 +135,11 @@ theorem bounded (z : Nat) : RoundExtractor.IsLocallyBounded (extractor z) roles
   rw [event]
   exact half.le
 
-def messages : Messages Unit rounds := ⟨(7 : Fin 8), (), PUnit.unit⟩
+def messages : Messages Unit (Round.coin rounds) := ⟨(7 : Fin 8), (), PUnit.unit⟩
 def path (challenge : Bool) : tree.ExecutionPath := ⟨(7 : Fin 8), challenge, PUnit.unit⟩
 
 def adversary :
-    OracleComp (oracleSpec Nat Unit (fun _ => rounds)) (Selection Nat Unit Nat (fun _ => rounds)) :=
+    OracleComp (oracleSpec Nat Unit coin) (Selection Nat Unit Nat coin) :=
   pure ⟨0, messages, 6⟩
 
 example (challenge : Bool) :
@@ -150,38 +148,43 @@ example (challenge : Bool) :
 
 example (z : Nat) :
     SamplesChallenges unifSpec (QueryImpl.id' unifSpec) tree roles oracles initial (inputImpl z) _
-      (challengeVerifier unifSpec rounds initial (uniformPrograms rounds) (Out z) (terminal z))
-      (uniformSchedule (1 / 2) rounds) :=
-  uniformVerifier_fresh (1 / 2) rounds initial (inputImpl z) (Out z) (terminal z)
+      (challengeVerifier unifSpec (Round.coin rounds) initial (uniformPrograms (Round.coin rounds))
+        (Out z) (terminal z))
+      (errorSchedule (Round.coin rounds) fun _ => 1 / 2) :=
+  uniformVerifier_fresh (Round.coin rounds) (fun _ => 1 / 2) initial (inputImpl z) (Out z)
+    (terminal z)
+
+/-- With error `1 / 2` at its one challenge, a path pays at most `1 / 2`. -/
+theorem sumError_le : sumError (coin := coin) (fun _ _ => (1 / 2 : ENNReal)) ≤ 1 / 2 :=
+  iSup_le fun _ => (pathError_const_le rounds _).trans (by simp [rounds])
 
 theorem actual_game_bound :
     Pr{let result ← (simulateQ randomOracle
-      (verificationGame initial inputImpl Out terminal adversary)).run' ∅}[
+      (verificationGame coin initial inputImpl Out terminal adversary)).run' ∅}[
       result.1 ∈ Set.univ ∧ Rout result.1 result.2.1.toBranchPath result.2.2.1 result.2.2.2 ∧
       ¬ Rin result.1 (extractInputWitness inputState extractor terminalWitness
         result.1 result.2.1 result.2.2.2)] ≤ 1 / 2 := by
-  have general := stateRestoration_knowledge_soundness inputState extractor Set.univ (1 / 2)
-    (fun z _ => preserving z) (fun z _ => bounded z) initial inputImpl Out terminal Rin Rout
-    terminalWitness inputLaw outputLaw adversary 0 1 (by trivial) (fun _ => le_rfl)
-  simpa [rounds] using general
+  have general := stateRestoration_knowledge_soundness coin inputState extractor Set.univ
+    (fun _ _ => 1 / 2) (fun z _ => preserving z) (fun z _ => bounded z) initial inputImpl Out
+    terminal Rin Rout terminalWitness inputLaw outputLaw adversary 0 (by trivial)
+  have bound := general.trans
+    (show _ ≤ (1 / 2 : ENNReal) by simp only [Nat.cast_zero, zero_mul, zero_add]; exact sumError_le)
+  simpa using bound
 
-def nativeResult (challenge : Bool) : OracleComp emptySpec (Nat × Bool × Nat) :=
-  (fun result => ⟨result.1.1.val, result.2.1.2.1,
+noncomputable def nativeResult (challenge : Bool) : OracleComp emptySpec (Nat × Bool × Nat) :=
+  (fun result => ⟨result.1.1.val, result.1.2.1,
     outputValue 0 result.1.toBranchPath result.2.2⟩) <$>
   executeStrategies emptySpec tree roles oracles initial (inputImpl 0)
-    (scriptedProver emptySpec rounds messages)
-    (challengeVerifier emptySpec rounds initial (pathPrograms emptySpec rounds (path challenge))
-      (Out 0) (terminal 0))
+    (pathProver emptySpec (Round.coin rounds) (path challenge))
+    (challengeVerifier emptySpec (Round.coin rounds) initial
+      (pathPrograms emptySpec (Round.coin rounds) (path challenge)) (Out 0) (terminal 0))
 
 theorem nativeResult_eq (challenge : Bool) :
     nativeResult challenge = pure ⟨7, challenge, 7⟩ := by
   unfold nativeResult
-  rw [execute_pathReplay emptySpec rounds initial (inputImpl 0) messages (path challenge)
-    (show MatchesMessages rounds messages (path challenge) from ⟨rfl, trivial⟩)]
+  rw [execute_pathReplay emptySpec (Round.coin rounds) initial (inputImpl 0) (path challenge)]
   cases challenge <;> rfl
 
-#eval evalWithAnswerFn (fun q => nomatch q) (nativeResult true)
-#eval evalWithAnswerFn (fun q => nomatch q) (nativeResult false)
 #eval extractInputWitness inputState extractor terminalWitness 0 (path true) 6
 
 @[implicit_reducible] def outputFamily : OracleFamily Unit (fun _ => Fin 8) :=
@@ -245,18 +248,19 @@ theorem oracleOutputLaw (z : Nat) (path : tree.ExecutionPath) (witness : Nat) :
 
 theorem actual_oracle_game_bound :
     Pr{let result ← (simulateQ randomOracle
-      (closedVerificationGame initial inputImpl Out family oracleTerminal adversary)).run' ∅}[
+      (closedVerificationGame coin initial inputImpl Out family oracleTerminal adversary)).run' ∅}[
       result.1 ∈ Set.univ ∧
       (∃ claim, result.2.2.1 = some claim ∧
         oracleRout result.1 result.2.1.toBranchPath claim result.2.2.2) ∧
       ¬ Rin result.1 (extractInputWitness inputState extractor terminalWitness
         result.1 result.2.1 result.2.2.2)] ≤ 1 / 2 := by
-  have general := stateRestoration_oracle_knowledge_soundness inputState extractor Set.univ
-    (1 / 2) (fun z _ => preserving z) (fun z _ => bounded z) initial inputImpl Out family
-    oracleTerminal Rin oracleRout terminalWitness inputLaw oracleOutputLaw adversary 0 1 (by
-        trivial)
-    (fun _ => le_rfl)
-  simpa [rounds] using general
+  have general := stateRestoration_oracle_knowledge_soundness coin inputState extractor Set.univ
+    (fun _ _ => 1 / 2) (fun z _ => preserving z) (fun z _ => bounded z) initial inputImpl Out
+    family oracleTerminal Rin oracleRout terminalWitness inputLaw oracleOutputLaw adversary 0
+    (by trivial)
+  have bound := general.trans
+    (show _ ≤ (1 / 2 : ENNReal) by simp only [Nat.cast_zero, zero_mul, zero_add]; exact sumError_le)
+  simpa using bound
 
 example (z : Nat) (message : Fin 8) (witness : Nat) :
     ¬ ∃ claim, closedTerminalObservation initial inputImpl Out family oracleTerminal z
@@ -270,45 +274,43 @@ example (z : Nat) (message : Fin 8) (witness : Nat) :
   (fun claim => (outputValue 0 (path false).toBranchPath claim.stmt,
     (claim.oracles ⟨(), ()⟩).val)))
 
-def coinAdversary (coin : Bool) :
-    OracleComp (oracleSpec Nat Unit (fun _ => rounds)) (Selection Nat Unit Nat (fun _ => rounds)) :=
-  if coin then adversary else pure ⟨0, ⟨(3 : Fin 8), (), PUnit.unit⟩, 2⟩
+def coinAdversary (flip : Bool) :
+    OracleComp (oracleSpec Nat Unit coin) (Selection Nat Unit Nat coin) :=
+  if flip then adversary else pure ⟨0, ⟨(3 : Fin 8), (), PUnit.unit⟩, 2⟩
 
 theorem actual_coin_oracle_game_bound :
-    Pr{let result ← ((OptionT.lift ($ᵗ Bool) : OptionT ProbComp Bool) >>= fun coin =>
+    Pr{let result ← ((OptionT.lift ($ᵗ Bool) : OptionT ProbComp Bool) >>= fun flip =>
       OptionT.lift ((simulateQ randomOracle
-        (closedVerificationGame initial inputImpl Out family oracleTerminal
-          (coinAdversary coin))).run' ∅))}[
+        (closedVerificationGame coin initial inputImpl Out family oracleTerminal
+          (coinAdversary flip))).run' ∅))}[
       result.1 ∈ Set.univ ∧
       (∃ claim, result.2.2.1 = some claim ∧
         oracleRout result.1 result.2.1.toBranchPath claim result.2.2.2) ∧
       ¬ Rin result.1 (extractInputWitness inputState extractor terminalWitness
         result.1 result.2.1 result.2.2.2)] ≤ 1 / 2 := by
-  have general := stateRestoration_oracle_knowledge_soundness_privateCoins
-    inputState extractor Set.univ (1 / 2) (fun z _ => preserving z) (fun z _ => bounded z)
-    initial inputImpl Out family oracleTerminal Rin oracleRout terminalWitness inputLaw
-    oracleOutputLaw (OptionT.lift ($ᵗ Bool) : OptionT ProbComp Bool) coinAdversary 0 1
-    (fun coin => by cases coin <;> trivial) (fun _ => le_rfl)
-  simpa [rounds] using general
+  have general := stateRestoration_oracle_knowledge_soundness_privateCoins coin
+    inputState extractor Set.univ (fun _ _ => 1 / 2) (fun z _ => preserving z)
+    (fun z _ => bounded z) initial inputImpl Out family oracleTerminal Rin oracleRout
+    terminalWitness inputLaw oracleOutputLaw (OptionT.lift ($ᵗ Bool) : OptionT ProbComp Bool)
+    coinAdversary 0 (fun flip => by cases flip <;> trivial)
+  have bound := general.trans
+    (show _ ≤ (1 / 2 : ENNReal) by simp only [Nat.cast_zero, zero_mul, zero_add]; exact sumError_le)
+  simpa using bound
 
-example : Pr{let _result ← ((failure : OptionT ProbComp Bool) >>= fun coin => OptionT.lift
+example : Pr{let _result ← ((failure : OptionT ProbComp Bool) >>= fun flip => OptionT.lift
     ((simulateQ randomOracle
-      (closedVerificationGame initial inputImpl Out family oracleTerminal
-        (coinAdversary coin))).run' ∅))}[True] = 0 := by
+      (closedVerificationGame coin initial inputImpl Out family oracleTerminal
+        (coinAdversary flip))).run' ∅))}[True] = 0 := by
   simp [failure_bind]
 
 /-! Rounds that depend on the input: input `n` runs `n` rounds. -/
 
 def lengthRounds (n : Nat) : List Round := List.replicate n round
 
-/-- Completion of input `2` reads one key per round, each carrying the input. -/
-example : completionKeys (Salt := Unit) lengthRounds 2
+/-- Completion of input `2` reads one key per round, each carrying the input and the messages
+before its challenge. -/
+example : completionKeys (Salt := Unit) (fun n => Round.coin (lengthRounds n)) 2
       ⟨(1 : Fin 8), (), (2 : Fin 8), (), PUnit.unit⟩ =
-    [⟨2, Prefix.here (1 : Fin 8) ()⟩,
-      ⟨2, Prefix.later (1 : Fin 8) () (Prefix.here (2 : Fin 8) ())⟩] := rfl
-
-example (n : Nat) (messages : Messages Unit (lengthRounds n)) :
-    IsTotalQueryBound (complete (Input := Nat) lengthRounds n messages) n := by
-  simpa [lengthRounds] using complete_queryBound lengthRounds n messages
+    [⟨2, ⟨(1 : Fin 8), .inl ()⟩⟩, ⟨2, ⟨(1 : Fin 8), .inr ⟨(), ⟨(2 : Fin 8), .inl ()⟩⟩⟩⟩] := rfl
 
 end Interaction.Oracle.Security.StateRestorationTest
