@@ -735,6 +735,10 @@ public import ArkLib.Interaction.Oracle.Resource
 public import ArkLib.Interaction.Oracle.RunSources
 public import ArkLib.Interaction.Oracle.Runtime
 public import ArkLib.Interaction.Oracle.RuntimeSoundness
+public import ArkLib.Interaction.Oracle.Security.BcsCertificate
+public import ArkLib.Interaction.Oracle.Security.BcsCodec
+public import ArkLib.Interaction.Oracle.Security.BcsProtocol
+public import ArkLib.Interaction.Oracle.Security.BcsSimulation
 public import ArkLib.Interaction.Oracle.Security.DecodedChallenges
 public import ArkLib.Interaction.Oracle.Security.EncodedChallengeCost
 public import ArkLib.Interaction.Oracle.Security.EncodedChallengeCoupling
@@ -750,6 +754,7 @@ public import ArkLib.Interaction.Oracle.Security.EncodedWeighted
 public import ArkLib.Interaction.Oracle.Security.GroupedOracle
 public import ArkLib.Interaction.Oracle.Security.HashChain
 public import ArkLib.Interaction.Oracle.Security.HashChainEncoded
+public import ArkLib.Interaction.Oracle.Security.HashChainObserver
 public import ArkLib.Interaction.Oracle.Security.HashChainSqueeze
 public import ArkLib.Interaction.Oracle.Security.Knowledge
 public import ArkLib.Interaction.Oracle.Security.KnowledgeAppend
