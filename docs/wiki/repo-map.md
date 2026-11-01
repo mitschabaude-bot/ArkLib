@@ -66,8 +66,10 @@ home_page/            site assets and assembled website root
   prefix encoding of chain keys off that event. `DecodedChallenges.lean` presents a public-coin protocol with
   every challenge drawn from common coins (`PublicCoin.decoded`): a prover witness, a check on the
   coins such as a proof of work (`Draw.grind`), and the decoded challenge. It pulls knowledge
-  certificates back along the draws, each node's error scaled by its draw's ratio to uniform, a
-  grinding draw's ratio carrying its proof-of-work pass probability (`powFraction`).
+  certificates back along the draws, each node's error scaled by its draw's ratio to the law the
+  certificate samples there (`Decoder.Bounded`), a grinding draw's ratio carrying its
+  proof-of-work pass probability (`powFraction`); a certificate whose bound holds for the law the
+  draw decodes to pays no ratio for that law.
   `HashChainEncoded.lean` is Fiat–Shamir on a hash chain: the verifier absorbs each key's encoding
   (`ChainCodec`) through the chain, and the knowledge error is `chainError S q` plus the encoded
   random oracle's bound (`chainStopped_knowledge_soundness`). `GroupedOracle.lean` reads a random
@@ -89,7 +91,10 @@ home_page/            site assets and assembled website root
   the node errors. The tree is Plonky3's commit phase: each fold round is the prover's word at the
   layer, the first being the batched input word, then the folding challenge; the last layer has no
   word, only the final polynomial. Each query checks every committed word against the verifier's
-  word there, computed from the inputs and the previous committed word.
+  word there, computed from the inputs and the previous committed word. The certificate draws the
+  query positions from a law (`QueryLaw`) whose positions land in a set of density `ρ` with
+  probability at most `(ρ + slack) ^ t`: uniform with slack `0` for the interactive verifier, and
+  for a Fiat–Shamir verifier the law it decodes the positions from.
 - `ArkLib/OracleReduction/` remains the conceptual center of the legacy reduction and security
   layer while protocol clients migrate. `FiatShamir/Basic.lean` owns the transform;
   `FiatShamir/Completeness.lean` adds fixed-table perfect completeness and shared lazy
