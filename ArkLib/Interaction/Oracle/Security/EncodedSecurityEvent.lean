@@ -206,10 +206,10 @@ theorem encodedExternalStopped_expectedCharge_le_adversaryCount
     _ ≤ _ := by
       gcongr
 
-/-- The actual external stopped verifier's bad accepted event is bounded by the image-weighted
-distinct-key charge of its own complete, cached encoded-domain run. Off-image keys have weight
-zero, and every executed verifier or adversary query remains in the observed log. -/
-theorem encodedExternalStopped_knowledge_soundness_sharp
+/-- A failed extraction on the actual external stopped verifier's path is bounded by the
+image-weighted distinct-key charge of its own complete, cached encoded-domain run. Off-image keys
+have weight zero, and every executed verifier or adversary query remains in the observed log. -/
+theorem encodedExternalStopped_extraction_le_sharp
     [DecidableEq D] [SampleableType C]
     (coin : (z : Input) → PublicCoin (protocol z))
     (common : CommonChallenge Input Salt C coin)
@@ -223,33 +223,26 @@ theorem encodedExternalStopped_knowledge_soundness_sharp
     (Z : Set Input)
     (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol z).roles (errorSchedule (coin z) (errors z)))
-    (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol z).tree.ExecutionPath) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
-      W → ((extractor z).terminalState path).Witness)
-    (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
-    (outputLaw : ∀ z path witness,
-      Rout z path witness →
-        ((extractor z).terminalState path).holds (terminalWitness z path witness)) :
+      (protocol z).roles (errorSchedule (coin z) (errors z))) :
     Pr{let joint ← (randomOracleLoggedRun
       (encodedExternalStoppedExecution coin common codec guards external) ∅)}[
-      badStoppedRelation state extractor Rin Rout terminalWitness Z joint.1.1] ≤
+      stoppedExtractionFails state extractor Z joint.1.1] ≤
     expectedFreshQueryCharge
       (encodedExternalStoppedExecution coin common codec guards external)
       (codec.encodedWeight (keyError errors)) := by
   classical
   rw [encodedExternalStopped_expectedCharge_eq_native]
   rw [encodedExternalStopped_prEvent_eq_native coin common codec guards
-    external (badStoppedRelation state extractor Rin Rout terminalWitness Z)]
-  exact randomizedStopped_badRelation_le_expectedFreshCharge
+    external (stoppedExtractionFails state extractor Z)]
+  exact randomizedStopped_extraction_le_expectedFreshCharge
     coin guards errors (encodedNativeAdversary common codec external)
-    state extractor Z preserving bounded Rin Rout terminalWitness inputLaw outputLaw
+    state extractor Z preserving bounded
 
-/-- The external bad accepted event also obeys the familiar query budget form. The budget is
-the expected number of distinct keys queried by the original external adversary, including
-off-image keys and failed selections; stopped verifier coin cost at most the error sum. -/
-theorem encodedExternalStopped_knowledge_soundness_adversaryCount
+/-- A failed extraction on the external stopped verifier's path also obeys the familiar query
+budget form. The budget is the expected number of distinct keys queried by the original external
+adversary, including off-image keys and failed selections; stopped verifier coins cost at most the
+error sum. -/
+theorem encodedExternalStopped_extraction_le_adversaryCount
     [DecidableEq D] [SampleableType C]
     (coin : (z : Input) → PublicCoin (protocol z))
     (common : CommonChallenge Input Salt C coin)
@@ -263,23 +256,14 @@ theorem encodedExternalStopped_knowledge_soundness_adversaryCount
     (Z : Set Input)
     (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol z).roles (errorSchedule (coin z) (errors z)))
-    (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol z).tree.ExecutionPath) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
-      W → ((extractor z).terminalState path).Witness)
-    (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
-    (outputLaw : ∀ z path witness,
-      Rout z path witness →
-        ((extractor z).terminalState path).holds (terminalWitness z path witness)) :
+      (protocol z).roles (errorSchedule (coin z) (errors z))) :
     Pr{let joint ← (randomOracleLoggedRun
       (encodedExternalStoppedExecution coin common codec guards external) ∅)}[
-      badStoppedRelation state extractor Rin Rout terminalWitness Z joint.1.1] ≤
+      stoppedExtractionFails state extractor Z joint.1.1] ≤
     maxError errors * expectedFreshQueryCharge external (fun _ => 1) +
-      sumError errors := by
-  exact (encodedExternalStopped_knowledge_soundness_sharp coin common codec guards
-    errors external state extractor Z preserving bounded Rin Rout terminalWitness
-    inputLaw outputLaw).trans
+      sumError errors :=
+  (encodedExternalStopped_extraction_le_sharp coin common codec guards errors external state
+    extractor Z preserving bounded).trans
       (encodedExternalStopped_expectedCharge_le_adversaryCount
         coin common codec guards errors external)
 
