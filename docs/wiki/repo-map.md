@@ -59,7 +59,10 @@ home_page/            site assets and assembled website root
   errors (`StateRestorationBudget`). The measured forms are described under measured extraction
   below. `ProofSystem/Sumcheck/Interaction/RoundByRound.lean` is the interaction-layer Sumcheck client.
   `KnowledgeSoundness.lean` bounds extraction failure of the actual executor by a certificate's
-  largest path error.
+  largest path error. `HashChain.lean` reduces a hash chain (a sponge or duplex oracle whose
+  answers carry the next query's state) to a random oracle keyed by the input prefix, up to a
+  state collision or prediction, `Q (Q + 1) / 2 / |S|` for `Q` chain queries, and gives the
+  prefix encoding of chain keys off that event.
 - `ProofSystem/Fri/Interaction/` is FRI on the interaction layer, with Plonky3's folds and injected
   inputs: `Protocol.lean` defines the tree, the query-reading verifier and the honest prover,
   `Completeness.lean` proves probability-one completeness, `RoundKnowledge.lean` and
