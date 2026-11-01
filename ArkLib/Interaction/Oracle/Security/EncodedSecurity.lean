@@ -26,25 +26,25 @@ namespace Interaction.Oracle.Security.StateRestoration
 
 universe w
 
-variable {Input Salt C D W : Type} {rounds : Input → List Round}
+variable {Input Salt C D W : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
 
 /-- The adversary-phase budget is exactly the expected distinct native hash-log count of the
 adversary program itself. Surface query logging does not add hash queries. -/
 theorem expectedAdversaryFreshKeys_eq_expectedFreshQueryCharge
     [DecidableEq Input] [DecidableEq Salt]
-    (rounds : Input → List Round)
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
-    expectedAdversaryFreshKeys rounds adversary =
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) :
+    expectedAdversaryFreshKeys coin adversary =
       expectedFreshQueryCharge adversary (fun _ => 1) := by
   let : MeasurableSpace
-      (((Option (Selection Input Salt W rounds) ×
-        QueryLog (unifSpec + oracleSpec Input Salt rounds)) ×
-          QueryLog (oracleSpec Input Salt rounds)) ×
-            (oracleSpec Input Salt rounds).QueryCache) := ⊤
+      (((Option (Selection Input Salt W coin) ×
+        QueryLog (unifSpec + oracleSpec Input Salt coin)) ×
+          QueryLog (oracleSpec Input Salt coin)) ×
+            (oracleSpec Input Salt coin).QueryCache) := ⊤
   let : MeasurableSpace
-      ((Option (Selection Input Salt W rounds) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache) := ⊤
+      ((Option (Selection Input Salt W coin) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache) := ⊤
   simp only [expectedAdversaryFreshKeys, expectedFreshQueryCharge,
     freshQueryCharge, Finset.sum_const, nsmul_eq_mul, mul_one]
   have herase : (fun result => ((result.1.1.1, result.1.2), result.2)) <$>
@@ -55,43 +55,28 @@ theorem expectedAdversaryFreshKeys_eq_expectedFreshQueryCharge
     exact loggingOracle.fst_map_run_simulateQ adversary
   rw [← herase, lintegral_evalDist_map_of_discrete]
 
-/-- Roundwise challenge equivalences give the common-carrier data for every native key.
-This is a structural restriction on the schedule, with no game-equality premise. -/
-def CommonChallenge.ofRoundEquivs
-    (rounds : Input → List Round)
-    (equivs : ∀ z, ∀ round ∈ rounds z, round.Challenge ≃ C) :
-    CommonChallenge Input Salt C rounds := by
-  let rec build : (rs : List Round) →
-      (∀ round, round ∈ rs → round.Challenge ≃ C) →
-      (pre : Prefix Salt rs) → pre.Challenge ≃ C
-    | [], _, pre => nomatch pre
-    | round :: rest, es, .inl _ => es round (by simp)
-    | round :: rest, es, .inr data =>
-        build rest (fun r hr => es r (by simp [hr])) data.2.2
-  exact ⟨fun key => build (rounds key.1) (equivs key.1) key.2⟩
-
 /-- Forgetting the external writer/off-image cache from the selected value does not erase any
 actual native hash query or alter its distinct-key expectation. -/
 theorem encodedNativeAdversary_expectedKeys_eq_route
     [DecidableEq Input] [DecidableEq Salt] [DecidableEq D] [SampleableType C]
-    (rounds : Input → List Round)
-    (common : CommonChallenge Input Salt C rounds)
-    (codec : StrictCodec (Key Input Salt rounds) D)
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (common : CommonChallenge Input Salt C coin)
+    (codec : StrictCodec (Key Input Salt coin) D)
     (external : OracleComp (unifSpec + (D →ₒ C))
-      (Option (Selection Input Salt W rounds))) :
-    expectedAdversaryFreshKeys rounds
+      (Option (Selection Input Salt W coin))) :
+    expectedAdversaryFreshKeys coin
       (encodedNativeAdversary common codec external) =
     expectedFreshQueryCharge
       (common.simulateNative (codec.routeProgram external ∅)) (fun _ => 1) := by
   rw [expectedAdversaryFreshKeys_eq_expectedFreshQueryCharge]
   let : MeasurableSpace
-      ((Option (Selection Input Salt W rounds) ×
-        QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache) := ⊤
+      ((Option (Selection Input Salt W coin) ×
+        QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache) := ⊤
   let : MeasurableSpace
-      ((((Option (Selection Input Salt W rounds) × QueryLog (D →ₒ C)) ×
-        (D →ₒ C).QueryCache) × QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache) := ⊤
+      ((((Option (Selection Input Salt W coin) × QueryLog (D →ₒ C)) ×
+        (D →ₒ C).QueryCache) × QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache) := ⊤
   simp only [expectedFreshQueryCharge, freshQueryCharge, Finset.sum_const,
     nsmul_eq_mul, mul_one]
   unfold encodedNativeAdversary
@@ -101,35 +86,35 @@ theorem encodedNativeAdversary_expectedKeys_eq_route
 The resource term is the native image-query count. Its external transport is separate. -/
 theorem encodedNativeReduction_knowledge_soundness
     [DecidableEq Input] [DecidableEq Salt] [DecidableEq D] [SampleableType C]
-    (rounds : Input → List Round)
-    (common : CommonChallenge Input Salt C rounds)
-    (codec : StrictCodec (Key Input Salt rounds) D)
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (common : CommonChallenge Input Salt C coin)
+    (codec : StrictCodec (Key Input Salt coin) D)
     (external : OracleComp (unifSpec + (D →ₒ C))
-      (Option (Selection Input Salt W rounds)))
-    (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (errors : (z : Input) → RoundErrors (rounds z))
+      (Option (Selection Input Salt W coin)))
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (errors : (z : Input) → Errors (coin z))
     (state : Input → KnowledgeState.{w})
-    (extractor : (z : Input) → RoundExtractor (protocol (rounds z)).tree (state z))
+    (extractor : (z : Input) → RoundExtractor (protocol z).tree (state z))
     (Z : Set Input)
-    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol (rounds z)).roles)
+    (preserving : ∀ z ∈ Z, (extractor z).IsProverPreserving (protocol z).roles)
     (bounded : ∀ z ∈ Z, RoundExtractor.IsLocallyBounded (extractor z)
-      (protocol (rounds z)).roles (roundErrorSchedule (rounds z) (errors z)))
+      (protocol z).roles (errorSchedule (coin z) (errors z)))
     (Rin : (z : Input) → (state z).Witness → Prop)
-    (Rout : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) → W → Prop)
-    (terminalWitness : (z : Input) → (path : (protocol (rounds z)).tree.ExecutionPath) →
+    (Rout : (z : Input) → (path : (protocol z).tree.ExecutionPath) → W → Prop)
+    (terminalWitness : (z : Input) → (path : (protocol z).tree.ExecutionPath) →
       W → ((extractor z).terminalState path).Witness)
     (inputLaw : ∀ z witness, (state z).holds witness ↔ Rin z witness)
     (outputLaw : ∀ z path witness,
       Rout z path witness →
         ((extractor z).terminalState path).holds (terminalWitness z path witness)) :
     Pr{let joint ← (randomOracleLoggedRun
-      (randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards
+      (randomizedStoppedRestoredExecutionWithAdversaryLog coin guards
         (encodedNativeAdversary common codec external)) ∅)}[
       badStoppedRelation state extractor Rin Rout terminalWitness Z joint.1.1.1] ≤
       maxError errors *
-        expectedAdversaryFreshKeys rounds (encodedNativeAdversary common codec external) +
+        expectedAdversaryFreshKeys coin (encodedNativeAdversary common codec external) +
       sumError errors := by
-  have h := randomizedStopped_knowledge_soundness_actualAdversary rounds guards errors
+  have h := randomizedStopped_knowledge_soundness_actualAdversary coin guards errors
     (encodedNativeAdversary common codec external) state extractor Z preserving bounded
     Rin Rout terminalWitness inputLaw outputLaw
   exact h.1.trans h.2

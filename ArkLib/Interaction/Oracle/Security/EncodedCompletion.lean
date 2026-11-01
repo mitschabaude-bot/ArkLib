@@ -22,20 +22,20 @@ open Interaction.Oracle.TypeTree
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-variable {Input Salt C D W : Type} {rounds : Input → List Round}
+variable {Input Salt C D W : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
 
 /-- The actual external verifier challenge call at an encoded native key. -/
 def encodedCompletionQueries
-    (common : CommonChallenge Input Salt C rounds)
-    (codec : StrictCodec (Key Input Salt rounds) D) :
-    QueryImpl (oracleSpec Input Salt rounds)
+    (common : CommonChallenge Input Salt C coin)
+    (codec : StrictCodec (Key Input Salt coin) D) :
+    QueryImpl (oracleSpec Input Salt coin)
       (OracleComp (unifSpec + (D →ₒ C))) :=
   fun key => (common.challengeEquiv key).symm <$>
     liftM ((unifSpec + (D →ₒ C)).query (.inr (codec.encode key)))
 
 /-- Mapping a returned value leaves the routed external writer and off-image cache intact. -/
 theorem StrictCodec.routeProgram_map
-    (codec : StrictCodec (Key Input Salt rounds) D)
+    (codec : StrictCodec (Key Input Salt coin) D)
     [DecidableEq D] [SampleableType C]
     {A B : Type} (f : A → B)
     (program : OracleComp (unifSpec + (D →ₒ C)) A)
@@ -48,42 +48,42 @@ theorem StrictCodec.routeProgram_map
 /-- One verifier image query routes to the corresponding common-carrier native hash key,
 with no change to the off-image cache. -/
 theorem encodedCompletionQuery_route
-    (common : CommonChallenge Input Salt C rounds)
-    (codec : StrictCodec (Key Input Salt rounds) D)
+    (common : CommonChallenge Input Salt C coin)
+    (codec : StrictCodec (Key Input Salt coin) D)
     [DecidableEq D] [SampleableType C]
-    (key : Key Input Salt rounds) (off : (D →ₒ C).QueryCache) :
+    (key : Key Input Salt coin) (off : (D →ₒ C).QueryCache) :
     codec.routeProgram ((encodedCompletionQueries common codec) key) off =
       (fun answer => (((common.challengeEquiv key).symm answer,
         [⟨codec.encode key, answer⟩]), off)) <$>
-        liftM ((unifSpec + (Key Input Salt rounds →ₒ C)).query (.inr key)) := by
+        liftM ((unifSpec + (Key Input Salt coin →ₒ C)).query (.inr key)) := by
   rw [encodedCompletionQueries, codec.routeProgram_map]
   simp [StrictCodec.routeProgram, StrictCodec.encodedQueryImpl,
     codec.decode_encode, Functor.map_map]
 
 /-- Native challenge queries interpreted through the common-carrier key oracle. -/
 def commonCompletionQueries
-    (common : CommonChallenge Input Salt C rounds) :
-    QueryImpl (oracleSpec Input Salt rounds)
-      (OracleComp (unifSpec + (Key Input Salt rounds →ₒ C))) :=
+    (common : CommonChallenge Input Salt C coin) :
+    QueryImpl (oracleSpec Input Salt coin)
+      (OracleComp (unifSpec + (Key Input Salt coin →ₒ C))) :=
   fun key => (common.challengeEquiv key).symm <$>
-    liftM ((unifSpec + (Key Input Salt rounds →ₒ C)).query (.inr key))
+    liftM ((unifSpec + (Key Input Salt coin →ₒ C)).query (.inr key))
 
 /-- Encode an ordered native completion log as the corresponding external hash calls. -/
 def encodeCompletionLog
-    (common : CommonChallenge Input Salt C rounds)
-    (codec : StrictCodec (Key Input Salt rounds) D)
-    (log : QueryLog (oracleSpec Input Salt rounds)) : QueryLog (D →ₒ C) :=
+    (common : CommonChallenge Input Salt C coin)
+    (codec : StrictCodec (Key Input Salt coin) D)
+    (log : QueryLog (oracleSpec Input Salt coin)) : QueryLog (D →ₒ C) :=
   log.map fun entry => ⟨codec.encode entry.1, (common.challengeEquiv entry.1).toFun entry.2⟩
 
 @[simp] theorem encodeCompletionLog_nil
-    (common : CommonChallenge Input Salt C rounds)
-    (codec : StrictCodec (Key Input Salt rounds) D) :
+    (common : CommonChallenge Input Salt C coin)
+    (codec : StrictCodec (Key Input Salt coin) D) :
     encodeCompletionLog common codec [] = [] := rfl
 
 @[simp] theorem encodeCompletionLog_append
-    (common : CommonChallenge Input Salt C rounds)
-    (codec : StrictCodec (Key Input Salt rounds) D)
-    (first second : QueryLog (oracleSpec Input Salt rounds)) :
+    (common : CommonChallenge Input Salt C coin)
+    (codec : StrictCodec (Key Input Salt coin) D)
+    (first second : QueryLog (oracleSpec Input Salt coin)) :
     encodeCompletionLog common codec (first ++ second) =
       encodeCompletionLog common codec first ++ encodeCompletionLog common codec second := by
   simp [encodeCompletionLog]
@@ -91,10 +91,10 @@ def encodeCompletionLog
 /-- The entire stopped completion query program cancels through the strict codec. The external
 writer contains exactly its encoded native challenge calls, and off-image cache stays unchanged. -/
 theorem encodedCompletion_routeProgram
-    (common : CommonChallenge Input Salt C rounds)
-    (codec : StrictCodec (Key Input Salt rounds) D)
+    (common : CommonChallenge Input Salt C coin)
+    (codec : StrictCodec (Key Input Salt coin) D)
     [DecidableEq D] [SampleableType C]
-    {A : Type} (program : OracleComp (oracleSpec Input Salt rounds) A)
+    {A : Type} (program : OracleComp (oracleSpec Input Salt coin) A)
     (off : (D →ₒ C).QueryCache) :
     codec.routeProgram
       (simulateQ (encodedCompletionQueries common codec) program) off =
@@ -124,20 +124,20 @@ theorem encodedCompletion_routeProgram
 
 /-- The common-carrier translation and native challenge translation cancel on one verifier query. -/
 theorem commonCompletionQuery_native
-    (common : CommonChallenge Input Salt C rounds)
-    (key : Key Input Salt rounds) :
+    (common : CommonChallenge Input Salt C coin)
+    (key : Key Input Salt coin) :
     common.simulateNative ((commonCompletionQueries common) key) =
-      (restorationQueries Input Salt rounds) key := by
+      (restorationQueries Input Salt coin) key := by
   simp [CommonChallenge.simulateNative, commonCompletionQueries,
     CommonChallenge.commonQueryImpl, restorationQueries]
 
 /-- The translations cancel for an entire adaptive native challenge program. -/
 theorem commonCompletion_native
-    (common : CommonChallenge Input Salt C rounds)
-    {A : Type} (program : OracleComp (oracleSpec Input Salt rounds) A) :
+    (common : CommonChallenge Input Salt C coin)
+    {A : Type} (program : OracleComp (oracleSpec Input Salt coin) A) :
     common.simulateNative
       (simulateQ (commonCompletionQueries common) program) =
-      simulateQ (restorationQueries Input Salt rounds) program := by
+      simulateQ (restorationQueries Input Salt coin) program := by
   induction program using OracleComp.inductionOn with
   | pure value => rfl
   | query_bind key next ih =>
@@ -146,8 +146,8 @@ theorem commonCompletion_native
       change common.simulateNative ((commonCompletionQueries common) key) >>=
           (fun x => common.simulateNative
             (simulateQ (commonCompletionQueries common) (next x))) =
-        (restorationQueries Input Salt rounds) key >>=
-          (fun x => simulateQ (restorationQueries Input Salt rounds) (next x))
+        (restorationQueries Input Salt coin) key >>=
+          (fun x => simulateQ (restorationQueries Input Salt coin) (next x))
       rw [commonCompletionQuery_native]
       apply bind_congr
       intro answer
@@ -156,11 +156,11 @@ theorem commonCompletion_native
 /-- Erasing the completion source log after the common/native round trip recovers the actual
 native completion program exactly. -/
 theorem commonCompletion_native_eraseLog
-    (common : CommonChallenge Input Salt C rounds)
-    {A : Type} (program : OracleComp (oracleSpec Input Salt rounds) A) :
+    (common : CommonChallenge Input Salt C coin)
+    {A : Type} (program : OracleComp (oracleSpec Input Salt coin) A) :
     Prod.fst <$> common.simulateNative
       (simulateQ (commonCompletionQueries common) program.withQueryLog) =
-        simulateQ (restorationQueries Input Salt rounds) program := by
+        simulateQ (restorationQueries Input Salt coin) program := by
   calc
     _ = common.simulateNative
         (simulateQ (commonCompletionQueries common)
@@ -176,50 +176,50 @@ theorem commonCompletion_native_eraseLog
 /-- Reduction of an external encoded-domain adversary to the genuine dependent native oracle.
 Off-image queries are sampled and memoized privately; image queries touch the native cache. -/
 def encodedNativeAdversary
-    (common : CommonChallenge Input Salt C rounds)
-    (codec : StrictCodec (Key Input Salt rounds) D)
+    (common : CommonChallenge Input Salt C coin)
+    (codec : StrictCodec (Key Input Salt coin) D)
     [DecidableEq D] [SampleableType C]
     (external : OracleComp (unifSpec + (D →ₒ C))
-      (Option (Selection Input Salt W rounds))) :
-    RandomizedRestorationAdversary Input Salt W rounds :=
+      (Option (Selection Input Salt W coin))) :
+    RandomizedRestorationAdversary Input Salt W coin :=
   (fun result => result.1.1) <$>
     common.simulateNative (codec.routeProgram external ∅)
 
 /-- Complete a native selected transcript, retaining the selected witness but no source log. -/
-def nativeStoppedCompletionAfter (rounds : Input → List Round)
-    (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (selected : Option (Selection Input Salt W rounds)) :
-    OracleComp (unifSpec + oracleSpec Input Salt rounds)
-      (Option (Outcome Input W rounds)) :=
+def nativeStoppedCompletionAfter (coin : (z : Input) → PublicCoin (protocol z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (selected : Option (Selection Input Salt W coin)) :
+    OracleComp (unifSpec + oracleSpec Input Salt coin)
+      (Option (Outcome Input W protocol)) :=
   match selected with
   | none => pure none
   | some ⟨z, messages, witness⟩ =>
       (fun path => path.map (fun p => ⟨z, p, witness⟩)) <$>
-        simulateQ (restorationQueries Input Salt rounds)
-          (stoppedComplete rounds guards z messages)
+        simulateQ (restorationQueries Input Salt coin)
+          (stoppedComplete coin guards z messages)
 
 /-- The same stopped native verifier without the auxiliary adversary source log. -/
-def nativeStoppedExecution (rounds : Input → List Round)
-    (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
-    OracleComp (unifSpec + oracleSpec Input Salt rounds)
-      (Option (Outcome Input W rounds)) :=
-  adversary >>= nativeStoppedCompletionAfter rounds guards
+def nativeStoppedExecution (coin : (z : Input) → PublicCoin (protocol z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) :
+    OracleComp (unifSpec + oracleSpec Input Salt coin)
+      (Option (Outcome Input W protocol)) :=
+  adversary >>= nativeStoppedCompletionAfter coin guards
 
 /-- Erasing the returned source log from the established stopped joint program recovers the
 unlogged native stopped execution without changing any oracle effect. -/
 theorem randomizedStoppedExecution_eraseSourceLog
-    (rounds : Input → List Round)
-    (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (adversary : RandomizedRestorationAdversary Input Salt W rounds) :
+    (coin : (z : Input) → PublicCoin (protocol z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (adversary : RandomizedRestorationAdversary Input Salt W coin) :
     Prod.fst <$>
-      randomizedStoppedRestoredExecutionWithAdversaryLog rounds guards adversary =
-      nativeStoppedExecution rounds guards adversary := by
+      randomizedStoppedRestoredExecutionWithAdversaryLog coin guards adversary =
+      nativeStoppedExecution coin guards adversary := by
   have herase : Prod.fst <$> adversary.withQueryLog = adversary :=
     loggingOracle.fst_map_run_simulateQ adversary
   calc
     _ = (Prod.fst <$> adversary.withQueryLog) >>=
-          nativeStoppedCompletionAfter rounds guards := by
+          nativeStoppedCompletionAfter coin guards := by
       simp only [randomizedStoppedRestoredExecutionWithAdversaryLog,
         randomizedStoppedCompletionAfterAdversaryLog,
         nativeStoppedCompletionAfter, map_bind, bind_map_left]
@@ -231,42 +231,42 @@ theorem randomizedStoppedExecution_eraseSourceLog
       | some selected =>
           rcases selected with ⟨z, messages, witness⟩
           simp
-    _ = adversary >>= nativeStoppedCompletionAfter rounds guards := by rw [herase]
+    _ = adversary >>= nativeStoppedCompletionAfter coin guards := by rw [herase]
     _ = _ := rfl
 
 /-- Complete one selected transcript by querying only the encoded image of native keys. -/
-def encodedExternalCompletionAfter (rounds : Input → List Round)
-    (common : CommonChallenge Input Salt C rounds)
-    (codec : StrictCodec (Key Input Salt rounds) D)
-    (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (selected : Option (Selection Input Salt W rounds)) :
+def encodedExternalCompletionAfter (coin : (z : Input) → PublicCoin (protocol z))
+    (common : CommonChallenge Input Salt C coin)
+    (codec : StrictCodec (Key Input Salt coin) D)
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (selected : Option (Selection Input Salt W coin)) :
     OracleComp (unifSpec + (D →ₒ C))
-      (Option (Outcome Input W rounds)) :=
+      (Option (Outcome Input W protocol)) :=
   match selected with
   | none => pure none
   | some ⟨z, messages, witness⟩ =>
       (fun path => path.map (fun p => ⟨z, p, witness⟩)) <$>
         simulateQ (encodedCompletionQueries common codec)
-          (stoppedComplete rounds guards z messages)
+          (stoppedComplete coin guards z messages)
 
 /-- One external encoded-domain run: arbitrary adversary calls, then stopped completion on the
 selected messages. Rejection and adversary failure retain their already executed oracle effects. -/
-def encodedExternalStoppedExecution (rounds : Input → List Round)
-    (common : CommonChallenge Input Salt C rounds)
-    (codec : StrictCodec (Key Input Salt rounds) D)
-    (guards : (z : Input) → GuardSchedule Salt (rounds z))
+def encodedExternalStoppedExecution (coin : (z : Input) → PublicCoin (protocol z))
+    (common : CommonChallenge Input Salt C coin)
+    (codec : StrictCodec (Key Input Salt coin) D)
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
     (external : OracleComp (unifSpec + (D →ₒ C))
-      (Option (Selection Input Salt W rounds))) :
+      (Option (Selection Input Salt W coin))) :
     OracleComp (unifSpec + (D →ₒ C))
-      (Option (Outcome Input W rounds)) :=
-  external >>= encodedExternalCompletionAfter rounds common codec guards
+      (Option (Outcome Input W protocol)) :=
+  external >>= encodedExternalCompletionAfter coin common codec guards
 
 
 /-- Erasing the routed external writer after a bind still threads its off-image cache through
 both phases; the selected result is the second phase's result. -/
 theorem encodedRoute_nativeValue_bind
-    (common : CommonChallenge Input Salt C rounds)
-    (codec : StrictCodec (Key Input Salt rounds) D)
+    (common : CommonChallenge Input Salt C coin)
+    (codec : StrictCodec (Key Input Salt coin) D)
     [DecidableEq D] [SampleableType C]
     {A B : Type} (program : OracleComp (unifSpec + (D →ₒ C)) A)
     (next : A → OracleComp (unifSpec + (D →ₒ C)) B)
@@ -282,18 +282,18 @@ theorem encodedRoute_nativeValue_bind
 
 /-- The external completion branch has exactly the native stopped result after decoding its
 image hash queries. This is program equality, including rejection and already sampled coins. -/
-theorem encodedExternalCompletion_route_value (rounds : Input → List Round)
-    (common : CommonChallenge Input Salt C rounds)
-    (codec : StrictCodec (Key Input Salt rounds) D)
+theorem encodedExternalCompletion_route_value (coin : (z : Input) → PublicCoin (protocol z))
+    (common : CommonChallenge Input Salt C coin)
+    (codec : StrictCodec (Key Input Salt coin) D)
     [DecidableEq D] [SampleableType C]
-    (guards : (z : Input) → GuardSchedule Salt (rounds z))
-    (selected : Option (Selection Input Salt W rounds))
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
+    (selected : Option (Selection Input Salt W coin))
     (off : (D →ₒ C).QueryCache) :
     (fun result => result.1.1) <$>
       common.simulateNative
         (codec.routeProgram
-          (encodedExternalCompletionAfter rounds common codec guards selected) off) =
-      nativeStoppedCompletionAfter rounds guards selected := by
+          (encodedExternalCompletionAfter coin common codec guards selected) off) =
+      nativeStoppedCompletionAfter coin guards selected := by
   cases selected with
   | none =>
       simp [encodedExternalCompletionAfter, nativeStoppedCompletionAfter,
@@ -305,27 +305,27 @@ theorem encodedExternalCompletion_route_value (rounds : Input → List Round)
       simp only [CommonChallenge.simulateNative, simulateQ_map, Functor.map_map]
       simpa only [CommonChallenge.simulateNative, Functor.map_map,
         Function.comp_def] using (congrArg (fun program =>
-        (fun path => path.map (fun p => (⟨z, p, witness⟩ : Outcome Input W rounds))) <$> program)
+        (fun path => path.map (fun p => (⟨z, p, witness⟩ : Outcome Input W protocol))) <$> program)
         (commonCompletion_native_eraseLog common
-          (stoppedComplete rounds guards z messages)))
+          (stoppedComplete coin guards z messages)))
 
 
 /-- The *actual external* adversary and stopped verifier, sharing one encoded-domain cache,
 have the same selected output as the translated native stopped game. This is a source-program
 equality, not a postulated game correspondence. The full external log/cache remain available
 from `StrictCodec.routedLoggedRun_eq_randomOracleLoggedRun`. -/
-theorem encodedExternalStopped_route_nativeValue (rounds : Input → List Round)
-    (common : CommonChallenge Input Salt C rounds)
-    (codec : StrictCodec (Key Input Salt rounds) D)
+theorem encodedExternalStopped_route_nativeValue (coin : (z : Input) → PublicCoin (protocol z))
+    (common : CommonChallenge Input Salt C coin)
+    (codec : StrictCodec (Key Input Salt coin) D)
     [DecidableEq D] [SampleableType C]
-    (guards : (z : Input) → GuardSchedule Salt (rounds z))
+    (guards : (z : Input) → GuardSchedule Salt (coin z))
     (external : OracleComp (unifSpec + (D →ₒ C))
-      (Option (Selection Input Salt W rounds))) :
+      (Option (Selection Input Salt W coin))) :
     (fun result => result.1.1) <$>
       common.simulateNative
         (codec.routeProgram
-          (encodedExternalStoppedExecution rounds common codec guards external) ∅) =
-      nativeStoppedExecution rounds guards
+          (encodedExternalStoppedExecution coin common codec guards external) ∅) =
+      nativeStoppedExecution coin guards
         (encodedNativeAdversary common codec external) := by
   rw [encodedExternalStoppedExecution, encodedRoute_nativeValue_bind]
   simp only [encodedExternalCompletion_route_value,

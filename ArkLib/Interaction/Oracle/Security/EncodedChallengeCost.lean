@@ -21,13 +21,13 @@ open OracleComp OracleSpec MeasureTheory
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-variable {Input Salt C A : Type} {rounds : Input → List Round}
+variable {Input Salt C A : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
 
 /-- Changing challenge representations preserves every distinct key in the hash log. -/
 theorem CommonChallenge.freshKeys_toCommonLog
     [DecidableEq Input] [DecidableEq Salt]
-    (common : CommonChallenge Input Salt C rounds)
-    (log : QueryLog (oracleSpec Input Salt rounds)) :
+    (common : CommonChallenge Input Salt C coin)
+    (log : QueryLog (oracleSpec Input Salt coin)) :
     freshKeysOfLog (common.toCommonLog log) = freshKeysOfLog log := by
   induction log with
   | nil => rfl
@@ -41,17 +41,17 @@ theorem CommonChallenge.freshKeys_toCommonLog
 No termination or successful-return condition is imposed on the observed log. -/
 theorem CommonChallenge.expectedFreshQueryCharge_simulateNative
     [DecidableEq Input] [DecidableEq Salt] [SampleableType C]
-    (common : CommonChallenge Input Salt C rounds)
-    (program : OracleComp (unifSpec + (Key Input Salt rounds →ₒ C)) A)
-    (weight : Key Input Salt rounds → ENNReal) :
+    (common : CommonChallenge Input Salt C coin)
+    (program : OracleComp (unifSpec + (Key Input Salt coin →ₒ C)) A)
+    (weight : Key Input Salt coin → ENNReal) :
     expectedFreshQueryCharge (common.simulateNative program) weight =
       expectedFreshQueryCharge program weight := by
   let : MeasurableSpace
-      ((A × QueryLog (oracleSpec Input Salt rounds)) ×
-        (oracleSpec Input Salt rounds).QueryCache) := ⊤
+      ((A × QueryLog (oracleSpec Input Salt coin)) ×
+        (oracleSpec Input Salt coin).QueryCache) := ⊤
   let : MeasurableSpace
-      ((A × QueryLog (Key Input Salt rounds →ₒ C)) ×
-        (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+      ((A × QueryLog (Key Input Salt coin →ₒ C)) ×
+        (Key Input Salt coin →ₒ C).QueryCache) := ⊤
   have h := common.evalDist_randomOracleLoggedRun_simulateNative program ∅
   rw [common.toCommonCache_empty] at h
   unfold expectedFreshQueryCharge

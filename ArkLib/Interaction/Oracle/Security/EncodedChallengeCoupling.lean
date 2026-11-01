@@ -20,27 +20,27 @@ open OracleComp OracleSpec MeasureTheory ProbabilityTheory
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-variable {Input Salt C : Type} {rounds : Input → List Round}
+variable {Input Salt C : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
 
 @[simp] theorem CommonChallenge.toCommonCache_apply
-    (common : CommonChallenge Input Salt C rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache)
-    (key : Key Input Salt rounds) :
+    (common : CommonChallenge Input Salt C coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache)
+    (key : Key Input Salt coin) :
     common.toCommonCache cache key = (cache key).map (common.challengeEquiv key) := rfl
 
 @[simp] theorem CommonChallenge.toCommonCache_empty
-    (common : CommonChallenge Input Salt C rounds) :
-    common.toCommonCache (∅ : (oracleSpec Input Salt rounds).QueryCache) = ∅ := by
+    (common : CommonChallenge Input Salt C coin) :
+    common.toCommonCache (∅ : (oracleSpec Input Salt coin).QueryCache) = ∅ := by
   apply QueryCache.ext
   intro key
   simp [CommonChallenge.toCommonCache]
 
 /-- Encoding a native cache update updates exactly the corresponding common-carrier cell. -/
 theorem CommonChallenge.toCommonCache_update
-    (common : CommonChallenge Input Salt C rounds)
+    (common : CommonChallenge Input Salt C coin)
     [DecidableEq Input] [DecidableEq Salt]
-    (cache : (oracleSpec Input Salt rounds).QueryCache)
-    (key : Key Input Salt rounds) (answer : key.Challenge) :
+    (cache : (oracleSpec Input Salt coin).QueryCache)
+    (key : Key Input Salt coin) (answer : key.Challenge) :
     common.toCommonCache (cache.cacheQuery key answer) =
       (common.toCommonCache cache).cacheQuery key ((common.challengeEquiv key).toFun answer) := by
   apply QueryCache.ext
@@ -51,19 +51,19 @@ theorem CommonChallenge.toCommonCache_update
   · simp [h]
 
 @[simp] theorem CommonChallenge.toCommonLog_nil
-    (common : CommonChallenge Input Salt C rounds) :
-    common.toCommonLog ([] : QueryLog (oracleSpec Input Salt rounds)) = [] := rfl
+    (common : CommonChallenge Input Salt C coin) :
+    common.toCommonLog ([] : QueryLog (oracleSpec Input Salt coin)) = [] := rfl
 
 @[simp] theorem CommonChallenge.toCommonLog_append
-    (common : CommonChallenge Input Salt C rounds)
-    (first second : QueryLog (oracleSpec Input Salt rounds)) :
+    (common : CommonChallenge Input Salt C coin)
+    (first second : QueryLog (oracleSpec Input Salt coin)) :
     common.toCommonLog (first ++ second) =
       common.toCommonLog first ++ common.toCommonLog second := by
   simp [CommonChallenge.toCommonLog]
 
 @[simp] theorem CommonChallenge.toCommonLog_single
-    (common : CommonChallenge Input Salt C rounds)
-    (key : Key Input Salt rounds) (answer : key.Challenge) :
+    (common : CommonChallenge Input Salt C coin)
+    (key : Key Input Salt coin) (answer : key.Challenge) :
     common.toCommonLog [⟨key, answer⟩] =
       [⟨key, (common.challengeEquiv key).toFun answer⟩] := rfl
 
@@ -71,34 +71,34 @@ end Interaction.Oracle.Security.StateRestoration
 
 namespace Interaction.Oracle.Security.StateRestoration
 
-variable {Input Salt C : Type} {rounds : Input → List Round}
+variable {Input Salt C : Type} {protocol : Input → Protocol} {coin : (z : Input) → PublicCoin (protocol z)}
 
 /-- Encode the entire observed native result, including ordered responses and final cache. -/
 def CommonChallenge.encodeJoint
-    (common : CommonChallenge Input Salt C rounds) {A : Type}
-    (joint : ((A × QueryLog (oracleSpec Input Salt rounds)) ×
-      (oracleSpec Input Salt rounds).QueryCache)) :
-    (A × QueryLog (Key Input Salt rounds →ₒ C)) ×
-      (Key Input Salt rounds →ₒ C).QueryCache :=
+    (common : CommonChallenge Input Salt C coin) {A : Type}
+    (joint : ((A × QueryLog (oracleSpec Input Salt coin)) ×
+      (oracleSpec Input Salt coin).QueryCache)) :
+    (A × QueryLog (Key Input Salt coin →ₒ C)) ×
+      (Key Input Salt coin →ₒ C).QueryCache :=
   ((joint.1.1, common.toCommonLog joint.1.2), common.toCommonCache joint.2)
 
 /-- A private coin operation is forwarded without touching the encoded challenge oracle. -/
 theorem CommonChallenge.simulateNative_uniformQuery
-    (common : CommonChallenge Input Salt C rounds) (n : ℕ) :
+    (common : CommonChallenge Input Salt C coin) (n : ℕ) :
     common.simulateNative
-        (liftM ((unifSpec + (Key Input Salt rounds →ₒ C)).query (.inl n))) =
-      (liftM ((unifSpec + oracleSpec Input Salt rounds).query (.inl n)) :
-        OracleComp (unifSpec + oracleSpec Input Salt rounds) (Fin (n + 1))) := by
+        (liftM ((unifSpec + (Key Input Salt coin →ₒ C)).query (.inl n))) =
+      (liftM ((unifSpec + oracleSpec Input Salt coin).query (.inl n)) :
+        OracleComp (unifSpec + oracleSpec Input Salt coin) (Fin (n + 1))) := by
   simp [CommonChallenge.simulateNative, CommonChallenge.commonQueryImpl]
 
 /-- A common-carrier hash request queries the identical native key and encodes its answer. -/
 theorem CommonChallenge.simulateNative_hashQuery
-    (common : CommonChallenge Input Salt C rounds) (key : Key Input Salt rounds) :
+    (common : CommonChallenge Input Salt C coin) (key : Key Input Salt coin) :
     common.simulateNative
-        (liftM ((unifSpec + (Key Input Salt rounds →ₒ C)).query (.inr key))) =
+        (liftM ((unifSpec + (Key Input Salt coin →ₒ C)).query (.inr key))) =
       (common.challengeEquiv key) <$>
-        (liftM ((unifSpec + oracleSpec Input Salt rounds).query (.inr key)) :
-          OracleComp (unifSpec + oracleSpec Input Salt rounds) key.Challenge) := by
+        (liftM ((unifSpec + oracleSpec Input Salt coin).query (.inr key)) :
+          OracleComp (unifSpec + oracleSpec Input Salt coin) key.Challenge) := by
   simp [CommonChallenge.simulateNative, CommonChallenge.commonQueryImpl]
 
 /-- Compose a pointwise continuation coupling after an equality of encoded prefix
@@ -128,17 +128,17 @@ private theorem evalDist_bind_transport {α β γ : Type}
 /-- A cached hash request has the same full observed answer and final cache after encoding;
 at a fresh cell this follows from the uniform challenge pushforward law. -/
 theorem CommonChallenge.evalDist_randomOracle_step
-    (common : CommonChallenge Input Salt C rounds)
+    (common : CommonChallenge Input Salt C coin)
     [DecidableEq Input] [DecidableEq Salt] [SampleableType C]
-    (key : Key Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache) :
-    letI : MeasurableSpace (C × (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+    (key : Key Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache) :
+    letI : MeasurableSpace (C × (Key Input Salt coin →ₒ C).QueryCache) := ⊤
     𝒟[(fun result => ((common.challengeEquiv key) result.1,
       common.toCommonCache result.2)) <$>
-        ((oracleSpec Input Salt rounds).randomOracle key).run cache] =
-      𝒟[((Key Input Salt rounds →ₒ C).randomOracle key).run
+        ((oracleSpec Input Salt coin).randomOracle key).run cache] =
+      𝒟[((Key Input Salt coin →ₒ C).randomOracle key).run
         (common.toCommonCache cache)] := by
-  let : MeasurableSpace (C × (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+  let : MeasurableSpace (C × (Key Input Salt coin →ₒ C).QueryCache) := ⊤
   let : MeasurableSpace C := ⊤
   let : MeasurableSpace key.Challenge := ⊤
   rw [randomOracle.run_eq, randomOracle.run_eq]
@@ -147,7 +147,7 @@ theorem CommonChallenge.evalDist_randomOracle_step
       have hcommon : common.toCommonCache cache key = none := by
         simp [CommonChallenge.toCommonCache, h]
       simp only [hcommon, bind_pure_comp]
-      let finish : C → C × (Key Input Salt rounds →ₒ C).QueryCache :=
+      let finish : C → C × (Key Input Salt coin →ₒ C).QueryCache :=
         fun answer => (answer, (common.toCommonCache cache).cacheQuery key answer)
       have hresult (answer : key.Challenge) :
           ((common.challengeEquiv key) answer, common.toCommonCache (cache.cacheQuery key answer)) =
@@ -165,35 +165,35 @@ theorem CommonChallenge.evalDist_randomOracle_step
 /-- A single encoded hash query has the same joint returned value, ordered log entry, and
 complete final cache distribution as the common-carrier query. -/
 theorem CommonChallenge.evalDist_logged_hashQuery
-    (common : CommonChallenge Input Salt C rounds)
+    (common : CommonChallenge Input Salt C coin)
     [DecidableEq Input] [DecidableEq Salt] [SampleableType C]
-    (key : Key Input Salt rounds)
-    (cache : (oracleSpec Input Salt rounds).QueryCache) :
+    (key : Key Input Salt coin)
+    (cache : (oracleSpec Input Salt coin).QueryCache) :
     letI : MeasurableSpace
-      (((unifSpec + (Key Input Salt rounds →ₒ C)).Range (.inr key) ×
-          QueryLog (Key Input Salt rounds →ₒ C)) ×
-        (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+      (((unifSpec + (Key Input Salt coin →ₒ C)).Range (.inr key) ×
+          QueryLog (Key Input Salt coin →ₒ C)) ×
+        (Key Input Salt coin →ₒ C).QueryCache) := ⊤
     𝒟[common.encodeJoint <$> randomOracleLoggedRun
       (common.simulateNative
-        (liftM ((unifSpec + (Key Input Salt rounds →ₒ C)).query (.inr key)))) cache] =
+        (liftM ((unifSpec + (Key Input Salt coin →ₒ C)).query (.inr key)))) cache] =
     𝒟[randomOracleLoggedRun
-      (liftM ((unifSpec + (Key Input Salt rounds →ₒ C)).query (.inr key)))
+      (liftM ((unifSpec + (Key Input Salt coin →ₒ C)).query (.inr key)))
       (common.toCommonCache cache)] := by
   let : MeasurableSpace
-      ((C × QueryLog (Key Input Salt rounds →ₒ C)) ×
-        (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+      ((C × QueryLog (Key Input Salt coin →ₒ C)) ×
+        (Key Input Salt coin →ₒ C).QueryCache) := ⊤
   let : MeasurableSpace
-      (((unifSpec + (Key Input Salt rounds →ₒ C)).Range (.inr key) ×
-          QueryLog (Key Input Salt rounds →ₒ C)) ×
-        (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
-  let : MeasurableSpace (C × (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+      (((unifSpec + (Key Input Salt coin →ₒ C)).Range (.inr key) ×
+          QueryLog (Key Input Salt coin →ₒ C)) ×
+        (Key Input Salt coin →ₒ C).QueryCache) := ⊤
+  let : MeasurableSpace (C × (Key Input Salt coin →ₒ C).QueryCache) := ⊤
   rw [common.simulateNative_hashQuery, randomOracleLoggedRun_map]
   rw [randomOracleLoggedRun_hashQuery, randomOracleLoggedRun_hashQuery]
-  let finish : C × (Key Input Salt rounds →ₒ C).QueryCache →
-      (C × QueryLog (Key Input Salt rounds →ₒ C)) ×
-        (Key Input Salt rounds →ₒ C).QueryCache :=
+  let finish : C × (Key Input Salt coin →ₒ C).QueryCache →
+      (C × QueryLog (Key Input Salt coin →ₒ C)) ×
+        (Key Input Salt coin →ₒ C).QueryCache :=
     fun p => ((p.1, [⟨key, p.1⟩]), p.2)
-  have hmap (p : key.Challenge × (oracleSpec Input Salt rounds).QueryCache) :
+  have hmap (p : key.Challenge × (oracleSpec Input Salt coin).QueryCache) :
       common.encodeJoint
         (((common.challengeEquiv key) p.1, [⟨key, p.1⟩]), p.2) =
       finish ((common.challengeEquiv key p.1), common.toCommonCache p.2) := by
@@ -205,38 +205,38 @@ theorem CommonChallenge.evalDist_logged_hashQuery
   rw [common.evalDist_randomOracle_step key cache]
   simpa only [finish] using
     (evalDist_map_of_discrete
-      (((Key Input Salt rounds →ₒ C).randomOracle key).run
+      (((Key Input Salt coin →ₒ C).randomOracle key).run
         (common.toCommonCache cache)) finish).symm
 
 /-- A private uniform query has identical observations on either side of the encoding. -/
 theorem CommonChallenge.evalDist_logged_uniformQuery
-    (common : CommonChallenge Input Salt C rounds)
+    (common : CommonChallenge Input Salt C coin)
     [DecidableEq Input] [DecidableEq Salt] [SampleableType C]
-    (n : ℕ) (cache : (oracleSpec Input Salt rounds).QueryCache) :
+    (n : ℕ) (cache : (oracleSpec Input Salt coin).QueryCache) :
     letI : MeasurableSpace
-      (((unifSpec + (Key Input Salt rounds →ₒ C)).Range (.inl n) ×
-          QueryLog (Key Input Salt rounds →ₒ C)) ×
-        (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+      (((unifSpec + (Key Input Salt coin →ₒ C)).Range (.inl n) ×
+          QueryLog (Key Input Salt coin →ₒ C)) ×
+        (Key Input Salt coin →ₒ C).QueryCache) := ⊤
     𝒟[common.encodeJoint <$> randomOracleLoggedRun
       (common.simulateNative
-        (liftM ((unifSpec + (Key Input Salt rounds →ₒ C)).query (.inl n)))) cache] =
+        (liftM ((unifSpec + (Key Input Salt coin →ₒ C)).query (.inl n)))) cache] =
     𝒟[randomOracleLoggedRun
-      (liftM ((unifSpec + (Key Input Salt rounds →ₒ C)).query (.inl n)))
+      (liftM ((unifSpec + (Key Input Salt coin →ₒ C)).query (.inl n)))
       (common.toCommonCache cache)] := by
   let : MeasurableSpace
-      ((Fin (n + 1) × QueryLog (Key Input Salt rounds →ₒ C)) ×
-        (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+      ((Fin (n + 1) × QueryLog (Key Input Salt coin →ₒ C)) ×
+        (Key Input Salt coin →ₒ C).QueryCache) := ⊤
   rw [common.simulateNative_uniformQuery]
   rw [randomOracleLoggedRun_uniformQuery, randomOracleLoggedRun_uniformQuery]
   simp [CommonChallenge.encodeJoint]
 
 /-- Encoding preserves the ordered log concatenation used by the cached bind interpreter. -/
 theorem CommonChallenge.encodeJoint_append
-    (common : CommonChallenge Input Salt C rounds) {A B : Type}
-    (first : (A × QueryLog (oracleSpec Input Salt rounds)) ×
-      (oracleSpec Input Salt rounds).QueryCache)
-    (second : (B × QueryLog (oracleSpec Input Salt rounds)) ×
-      (oracleSpec Input Salt rounds).QueryCache) :
+    (common : CommonChallenge Input Salt C coin) {A B : Type}
+    (first : (A × QueryLog (oracleSpec Input Salt coin)) ×
+      (oracleSpec Input Salt coin).QueryCache)
+    (second : (B × QueryLog (oracleSpec Input Salt coin)) ×
+      (oracleSpec Input Salt coin).QueryCache) :
     common.encodeJoint ((second.1.1, first.1.2 ++ second.1.2), second.2) =
       (((common.encodeJoint second).1.1,
         (common.encodeJoint first).1.2 ++ (common.encodeJoint second).1.2),
@@ -245,41 +245,41 @@ theorem CommonChallenge.encodeJoint_append
 
 /-- Joint couplings compose through the cached interpreter's exact log and cache handoff. -/
 theorem CommonChallenge.evalDist_logged_bind
-    (common : CommonChallenge Input Salt C rounds)
+    (common : CommonChallenge Input Salt C coin)
     [DecidableEq Input] [DecidableEq Salt] [SampleableType C]
     {A B : Type}
-    (nativeFirst : OracleComp (unifSpec + oracleSpec Input Salt rounds) A)
-    (commonFirst : OracleComp (unifSpec + (Key Input Salt rounds →ₒ C)) A)
-    (nativeNext : A → OracleComp (unifSpec + oracleSpec Input Salt rounds) B)
-    (commonNext : A → OracleComp (unifSpec + (Key Input Salt rounds →ₒ C)) B)
+    (nativeFirst : OracleComp (unifSpec + oracleSpec Input Salt coin) A)
+    (commonFirst : OracleComp (unifSpec + (Key Input Salt coin →ₒ C)) A)
+    (nativeNext : A → OracleComp (unifSpec + oracleSpec Input Salt coin) B)
+    (commonNext : A → OracleComp (unifSpec + (Key Input Salt coin →ₒ C)) B)
     (firstLaw : ∀ nativeCache,
       letI : MeasurableSpace
-        ((A × QueryLog (Key Input Salt rounds →ₒ C)) ×
-          (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+        ((A × QueryLog (Key Input Salt coin →ₒ C)) ×
+          (Key Input Salt coin →ₒ C).QueryCache) := ⊤
       𝒟[common.encodeJoint <$> randomOracleLoggedRun nativeFirst nativeCache] =
         𝒟[randomOracleLoggedRun commonFirst (common.toCommonCache nativeCache)])
     (nextLaw : ∀ a nativeCache,
       letI : MeasurableSpace
-        ((B × QueryLog (Key Input Salt rounds →ₒ C)) ×
-          (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+        ((B × QueryLog (Key Input Salt coin →ₒ C)) ×
+          (Key Input Salt coin →ₒ C).QueryCache) := ⊤
       𝒟[common.encodeJoint <$> randomOracleLoggedRun (nativeNext a) nativeCache] =
         𝒟[randomOracleLoggedRun (commonNext a) (common.toCommonCache nativeCache)])
-    (nativeCache : (oracleSpec Input Salt rounds).QueryCache) :
+    (nativeCache : (oracleSpec Input Salt coin).QueryCache) :
     letI : MeasurableSpace
-      ((B × QueryLog (Key Input Salt rounds →ₒ C)) ×
-        (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+      ((B × QueryLog (Key Input Salt coin →ₒ C)) ×
+        (Key Input Salt coin →ₒ C).QueryCache) := ⊤
     𝒟[common.encodeJoint <$>
       randomOracleLoggedRun (nativeFirst >>= nativeNext) nativeCache] =
     𝒟[randomOracleLoggedRun (commonFirst >>= commonNext)
       (common.toCommonCache nativeCache)] := by
   let : MeasurableSpace
-      ((B × QueryLog (Key Input Salt rounds →ₒ C)) ×
-        (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+      ((B × QueryLog (Key Input Salt coin →ₒ C)) ×
+        (Key Input Salt coin →ₒ C).QueryCache) := ⊤
   rw [randomOracleLoggedRun_bind, randomOracleLoggedRun_bind]
   simp only [map_bind]
   let : MeasurableSpace
-      ((A × QueryLog (Key Input Salt rounds →ₒ C)) ×
-        (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+      ((A × QueryLog (Key Input Salt coin →ₒ C)) ×
+        (Key Input Salt coin →ₒ C).QueryCache) := ⊤
   refine evalDist_bind_transport
     (nativePrefix := randomOracleLoggedRun nativeFirst nativeCache)
     (encodedPrefix := randomOracleLoggedRun commonFirst (common.toCommonCache nativeCache))
@@ -294,16 +294,16 @@ theorem CommonChallenge.evalDist_logged_bind
   · exact firstLaw nativeCache
   · intro first
     let : MeasurableSpace
-        ((B × QueryLog (oracleSpec Input Salt rounds)) ×
-          (oracleSpec Input Salt rounds).QueryCache) := ⊤
-    let finish : (B × QueryLog (Key Input Salt rounds →ₒ C)) ×
-        (Key Input Salt rounds →ₒ C).QueryCache →
-        (B × QueryLog (Key Input Salt rounds →ₒ C)) ×
-          (Key Input Salt rounds →ₒ C).QueryCache :=
+        ((B × QueryLog (oracleSpec Input Salt coin)) ×
+          (oracleSpec Input Salt coin).QueryCache) := ⊤
+    let finish : (B × QueryLog (Key Input Salt coin →ₒ C)) ×
+        (Key Input Salt coin →ₒ C).QueryCache →
+        (B × QueryLog (Key Input Salt coin →ₒ C)) ×
+          (Key Input Salt coin →ₒ C).QueryCache :=
       fun second =>
         ((second.1.1, (common.encodeJoint first).1.2 ++ second.1.2), second.2)
-    have hmap (second : (B × QueryLog (oracleSpec Input Salt rounds)) ×
-        (oracleSpec Input Salt rounds).QueryCache) :
+    have hmap (second : (B × QueryLog (oracleSpec Input Salt coin)) ×
+        (oracleSpec Input Salt coin).QueryCache) :
         common.encodeJoint
           ((second.1.1, first.1.2 ++ second.1.2), second.2) =
         finish (common.encodeJoint second) :=
@@ -319,14 +319,14 @@ theorem CommonChallenge.evalDist_logged_bind
 /-- Simulating any adaptive common-carrier program through native challenge types preserves
 its return value, ordered query log, and complete final random-oracle cache jointly. -/
 theorem CommonChallenge.evalDist_randomOracleLoggedRun_simulateNative
-    (common : CommonChallenge Input Salt C rounds)
+    (common : CommonChallenge Input Salt C coin)
     [DecidableEq Input] [DecidableEq Salt] [SampleableType C]
     {A : Type}
-    (program : OracleComp (unifSpec + (Key Input Salt rounds →ₒ C)) A)
-    (nativeCache : (oracleSpec Input Salt rounds).QueryCache) :
+    (program : OracleComp (unifSpec + (Key Input Salt coin →ₒ C)) A)
+    (nativeCache : (oracleSpec Input Salt coin).QueryCache) :
     letI : MeasurableSpace
-      ((A × QueryLog (Key Input Salt rounds →ₒ C)) ×
-        (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+      ((A × QueryLog (Key Input Salt coin →ₒ C)) ×
+        (Key Input Salt coin →ₒ C).QueryCache) := ⊤
     𝒟[common.encodeJoint <$>
       randomOracleLoggedRun (common.simulateNative program) nativeCache] =
     𝒟[randomOracleLoggedRun program (common.toCommonCache nativeCache)] := by
@@ -335,14 +335,14 @@ theorem CommonChallenge.evalDist_randomOracleLoggedRun_simulateNative
       simp [CommonChallenge.simulateNative, randomOracleLoggedRun,
         CommonChallenge.encodeJoint]
   | query_bind query next ih =>
-      let request : OracleComp (unifSpec + (Key Input Salt rounds →ₒ C))
-          ((unifSpec + (Key Input Salt rounds →ₒ C)).Range query) :=
-        liftM ((unifSpec + (Key Input Salt rounds →ₒ C)).query query)
-      have hfirst (cache : (oracleSpec Input Salt rounds).QueryCache) :
+      let request : OracleComp (unifSpec + (Key Input Salt coin →ₒ C))
+          ((unifSpec + (Key Input Salt coin →ₒ C)).Range query) :=
+        liftM ((unifSpec + (Key Input Salt coin →ₒ C)).query query)
+      have hfirst (cache : (oracleSpec Input Salt coin).QueryCache) :
           letI : MeasurableSpace
-            (((unifSpec + (Key Input Salt rounds →ₒ C)).Range query ×
-                QueryLog (Key Input Salt rounds →ₒ C)) ×
-              (Key Input Salt rounds →ₒ C).QueryCache) := ⊤
+            (((unifSpec + (Key Input Salt coin →ₒ C)).Range query ×
+                QueryLog (Key Input Salt coin →ₒ C)) ×
+              (Key Input Salt coin →ₒ C).QueryCache) := ⊤
           𝒟[common.encodeJoint <$>
             randomOracleLoggedRun (common.simulateNative request) cache] =
           𝒟[randomOracleLoggedRun request (common.toCommonCache cache)] := by
