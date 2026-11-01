@@ -11,7 +11,8 @@ public import ArkLib.ProofSystem.Fri.Interaction.RoundKnowledge
 # FRI's final polynomial and query phase: round-by-round knowledge
 
 After the folds, the prover sends the final polynomial `c`; the top positions consistent so far
-at which the last word agrees with `c` form the final consistent set (`finalConsistent`). The
+at which the verifier's word at the last layer agrees with `c` form the final consistent set
+(`finalConsistent`). The
 knowledge state after `c` (`finalState`) asks for a subset of it of at least
 `(1 - δ + m · loss) 2 ^ top` positions, `m` folds. The final message maps such a set `S` back to
 the witness `(S, c)` at the last layer, `c` being a codeword of the final code
@@ -46,8 +47,8 @@ variable (top t : ℕ) (δ loss : ℝ)
 def finalMessage (K : Type) (d : ℕ) : Protocol :=
   .public .sender (Fin d → K) fun _ => .done
 
-/-- The top positions consistent so far at which the last word `f` agrees with the final
-polynomial `c`. -/
+/-- The top positions consistent so far at which the verifier's word `f` at the last layer agrees
+with the final polynomial `c`. -/
 def finalConsistent [DecidableEq K] {n d : ℕ} (ω : SmoothCosetFftDomain n K) (f : Word K n)
     (c : Fin d → K) (C : Finset (Fin (2 ^ top))) : Finset (Fin (2 ^ top)) :=
   C.filter fun x => f (proj n x) = evalCoeffs c (ω (proj n x))

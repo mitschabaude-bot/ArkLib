@@ -15,12 +15,14 @@ injected input is a codeword of its code, the verifier accepts the honest prover
 one, for folds by `2 ^ k` with `k ≥ 1` (`Schedule.ArityPos`).
 
 The verifier's programs are read under the actual source handler (`Reader.Reads`): a program
-lifted past an oracle message reads the earlier sources as before (`simulateQ_extendAccess`), and
-a fold's check passes at a top position exactly when the next word is the fold of the current one
-on the fiber the position reduces to (`Reader.simulateQ_fold_check`). An honest next word is
-ArkLib's folded word plus the injected input (`foldNext_apply`), so it passes every check, and it
-is a codeword of the folded code (`foldNext_mem_code`); the final coefficients interpolate the
-last word (`evalCoeffs_finalCoeffs`). `honest_accepts` follows the execution round by round.
+lifted past an oracle message reads the earlier sources as before (`simulateQ_extendAccess`), a
+committed word's check passes at a top position exactly when it agrees with the verifier's word at
+the point the position reduces to (`Reader.simulateQ_commit_check`), and after a fold the
+verifier's word is the fold of the committed one (`Reader.reads_fold`). The honest prover commits
+the verifier's words, so it passes every check; a fold is ArkLib's folded word plus the injected
+input (`foldNext_apply`), a codeword of the folded code (`foldNext_mem_code`); the final
+coefficients interpolate the last word (`evalCoeffs_finalCoeffs`). `honest_accepts` follows the
+execution round by round.
 -/
 
 @[expose] public section
@@ -109,7 +111,7 @@ theorem foldFiber_eq_foldWord {n k : ℕ} (hk : k ≤ n) (ω : SmoothCosetFftDom
     (by simp [RoundConsistency.roundConsistencyCheck, foldFiber])
   exact h.symm
 
-/-- An honest next word is the folded word plus `β ^ 2 ^ k g`. -/
+/-- The fold is the folded word plus `β ^ 2 ^ k g`. -/
 theorem foldNext_apply {n k : ℕ} (hk : k ≤ n) (ω : SmoothCosetFftDomain n K) (f : Word K n)
     (β : K) (g : Word K (n - k)) (y : Fin (2 ^ (n - k))) :
     foldNext hk ω f β g y = ProximityGap.foldWord ω f k β y + β ^ 2 ^ k * g y := by
@@ -186,7 +188,7 @@ namespace Reader
 variable [Field K] [DecidableEq K] {top : ℕ} {A : PFunctor}
   (impl : QueryImpl (OracleSpec.ofPFunctor A) Id) (inputs : (m : ℕ) → Fin (2 ^ m) → K)
 
-/-- The reader reads the inputs `inputs` and the current word `f`. -/
+/-- The reader reads the inputs `inputs` and the verifier's word `f`. -/
 structure Reads {n : ℕ} (r : Reader (K := K) top A n) (f : Word K n) : Prop where
   input : ∀ m x, simulateQ impl (r.input m x) = inputs m x
   word : ∀ y, simulateQ impl (r.word y) = f y
@@ -203,27 +205,41 @@ theorem simulateQ_readInjected {n : ℕ} {r : Reader (K := K) top A n} {f : Word
   | true => hr.input m y
   | false => rfl
 
-/-- After a fold and its next word `next`, the reader reads `next`. -/
+omit [Field K] in
+/-- After the prover's word `f`, the reader reads `f`. -/
+theorem reads_commit {n : ℕ} {r : Reader (K := K) top A n} {v : Word K n}
+    (hr : r.Reads impl inputs v) (f : Word K n) :
+    r.commit.Reads (Access.extendImpl A _ impl f) inputs f where
+  input m x := by simp only [Reader.commit, simulateQ_extendAccess, hr.input]
+  word y := Access.eval_queryLatest A _ impl f y
+
+omit [Field K] in
+/-- After the prover's word `f`, a top position passes the checks if it passed them before and
+`f` agrees with the verifier's word at the point it reduces to. -/
+theorem simulateQ_commit_check {n : ℕ} {r : Reader (K := K) top A n} {v : Word K n}
+    (hr : r.Reads impl inputs v) (f : Word K n) (x : Fin (2 ^ top)) :
+    simulateQ (Access.extendImpl A _ impl f) (r.commit.check x) =
+      (simulateQ impl (r.check x) && v (proj n x) == f (proj n x)) := by
+  simp only [Reader.commit, simulateQ_bind, simulateQ_extendAccess, hr.word]
+  rfl
+
+/-- A fold keeps the checks. -/
+theorem fold_check {n : ℕ} (r : Reader (K := K) top A n) (ω : SmoothCosetFftDomain n K) (k : ℕ)
+    (hk : k ≤ n) (inject : Bool) (β : K) : (r.fold ω k hk inject β).check = r.check :=
+  rfl
+
+/-- After a fold by `2 ^ k` at `β`, the verifier's word is the fold of the word before it. -/
 theorem reads_fold {n : ℕ} {r : Reader (K := K) top A n} {f : Word K n}
     (hr : r.Reads impl inputs f) (ω : SmoothCosetFftDomain n K) (k : ℕ) (hk : k ≤ n)
-    (inject : Bool) (β : K) (next : Word K (n - k)) :
-    (r.fold ω k hk inject β).Reads (Access.extendImpl A _ impl next) inputs next where
-  input m x := by simp only [Reader.fold, simulateQ_extendAccess, hr.input]
-  word y := Access.eval_queryLatest A _ impl next y
-
-/-- After a fold and its next word `next`, a top position passes the checks if it passed them
-before and the next word is the fold of the current word on its fiber. -/
-theorem simulateQ_fold_check {n : ℕ} {r : Reader (K := K) top A n} {f : Word K n}
-    (hr : r.Reads impl inputs f) (ω : SmoothCosetFftDomain n K) (k : ℕ) (hk : k ≤ n)
-    (inject : Bool) (β : K) (next : Word K (n - k)) (x : Fin (2 ^ top)) :
-    simulateQ (Access.extendImpl A _ impl next) ((r.fold ω k hk inject β).check x) =
-      (simulateQ impl (r.check x) &&
-        foldNext hk ω f β (injected inputs (n - k) inject) (proj (n - k) x) ==
-          next (proj (n - k) x)) := by
-  simp only [Reader.fold, simulateQ_bind, simulateQ_extendAccess,
-    simulateQ_readAll impl _ _ _ (fun q => hr.word (fiberPoint hk (proj (n - k) x) q)),
-    simulateQ_readInjected impl inputs hr]
-  rfl
+    (inject : Bool) (β : K) :
+    (r.fold ω k hk inject β).Reads impl inputs
+      (foldNext hk ω f β (injected inputs (n - k) inject)) where
+  input := hr.input
+  word y := by
+    simp only [Reader.fold, simulateQ_bind,
+      simulateQ_readAll impl _ _ _ (fun q => hr.word (fiberPoint hk y q)),
+      simulateQ_readInjected impl inputs hr]
+    rfl
 
 /-- With the final polynomial `c`, a top position passes if it passed the folds and the current
 word agrees with `c` at it. -/
@@ -257,7 +273,7 @@ variable {K : Type} [Field K] [DecidableEq K]
 variable {ι : Type} (ambient : OracleSpec ι) (top d t : ℕ)
 
 set_option backward.isDefEq.respectTransparency false in
-/-- Every supported honest execution from a layer accepts, when the current word and the
+/-- Every supported honest execution from a layer accepts, when the verifier's word and the
 injected inputs are codewords and the reader reads them. -/
 theorem honest_accepts (sample : OracleComp ambient K)
     (sampleQueries : OracleComp ambient (Fin t → Fin (2 ^ top)))
@@ -300,19 +316,19 @@ theorem honest_accepts (sample : OracleComp ambient K)
   | @fold m k hk inject rest ih =>
     intro ω A impl r f hpos hin hf hr hcheck result hresult
     rw [executeStrategies_fold] at hresult
+    obtain ⟨sent, hsent, hresult⟩ := support_bind_exists hresult
+    rw [honestProver, mem_support_pure_iff] at hsent
+    subst hsent
+    obtain ⟨next, hnext, hresult⟩ := support_bind_exists hresult
+    rw [verifier, simulateQ_pure, mem_support_pure_iff] at hnext
+    subst hnext
     obtain ⟨chosen, hchosen, hresult⟩ := support_bind_exists hresult
-    rw [verifier, simulateQ_bind] at hchosen
+    rw [simulateQ_bind] at hchosen
     obtain ⟨β, -, hchosen⟩ := support_bind_exists hchosen
     rw [simulateQ_pure, mem_support_pure_iff] at hchosen
     subst hchosen
-    obtain ⟨next, hnext, hresult⟩ := support_bind_exists hresult
-    rw [honestProver, mem_support_pure_iff] at hnext
-    subst hnext
-    obtain ⟨sent, hsent, hresult⟩ := support_bind_exists hresult
-    rw [mem_support_pure_iff] at hsent
-    subst hsent
     obtain ⟨after, hafter, hresult⟩ := support_bind_exists hresult
-    rw [simulateQ_pure, mem_support_pure_iff] at hafter
+    rw [mem_support_pure_iff] at hafter
     subst hafter
     obtain ⟨res, hres, hresult⟩ := support_bind_exists hresult
     rw [mem_support_pure_iff] at hresult
@@ -326,11 +342,12 @@ theorem honest_accepts (sample : OracleComp ambient K)
       cases inject
       · exact hin
       · exact hin.2
-    have hr' := Reader.reads_fold impl inputs hr ω k hk inject β
-      (foldNext hk ω f β (injected inputs (m - k) inject))
+    have hr' := Reader.reads_fold _ inputs (Reader.reads_commit impl inputs hr f) ω k hk inject β
     exact ih _ _ _ _ _ hpos.2 hin'
       (foldNext_mem_code hpos.1 hk (Schedule.degree_pos hd rest) ω hf β hg) hr'
-      (fun x => by rw [Reader.simulateQ_fold_check impl inputs hr]; simp [hcheck])
+      (fun x => by
+        rw [Reader.fold_check, Reader.simulateQ_commit_check impl inputs hr]
+        simp [hcheck])
       res hres
 
 /-- **Completeness.** If the tallest input is a codeword of the code before the folds and every

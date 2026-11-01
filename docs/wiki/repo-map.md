@@ -76,7 +76,10 @@ home_page/            site assets and assembled website root
   bounds acceptance of far inputs (`acceptance_le`, `acceptance_le_plonky3`). `StateRestoration.lean`
   gives the verifier's checks as a terminal program of the branch and bounds the state-restoration
   game of FRI's public-coin presentation (`stateRestoration_le`) by `Q * maxError + sumError` of
-  the node errors.
+  the node errors. The tree is Plonky3's commit phase: each fold round is the prover's word at the
+  layer, the first being the batched input word, then the folding challenge; the last layer has no
+  word, only the final polynomial. Each query checks every committed word against the verifier's
+  word there, computed from the inputs and the previous committed word.
 - `ArkLib/OracleReduction/` remains the conceptual center of the legacy reduction and security
   layer while protocol clients migrate. `FiatShamir/Basic.lean` owns the transform;
   `FiatShamir/Completeness.lean` adds fixed-table perfect completeness and shared lazy

@@ -12,23 +12,24 @@ public import ArkLib.Interaction.Oracle.Security.KnowledgeComposition
 # FRI's fold rounds: round-by-round knowledge
 
 The knowledge state at a layer of log height `n` (`levelState`), after `j` folds, is about the
-current word `f` and the set `C` of top positions at which every fold so far is consistent. Its
-witness is a set `S` of top positions and a word `u`: `u` is a codeword of the layer's code that
-agrees with `f` on the points `S` reduces to, `S ⊆ C` has at least `(1 - δ + j · loss) 2 ^ top`
-points, and every input injected from this layer on is `δ`-close to its code. At the first layer,
-`C` is everything and `f` is the tallest input, so the state says that the inputs are close to
-their codes.
+verifier's word `f` at the layer and the set `C` of top positions at which every committed word
+so far agrees with the verifier's word. Its witness is a set `S` of top positions and a word `u`:
+`u` is a codeword of the layer's code that agrees with `f` on the points `S` reduces to, `S ⊆ C`
+has at least `(1 - δ + j · loss) 2 ^ top` points, and every input injected from this layer on is
+`δ`-close to its code. At the first layer, `C` is everything and `f` is the tallest input, so the
+state says that the inputs are close to their codes.
 
-A fold round (`foldRound`) is the verifier's challenge `β` and the prover's next word. After `β`
-the state (`foldedState`) is the same statement about the fold of `f` at `β`, one fold later; the
-next word is then consistent with that fold on the new consistent set (`foldConsistent`), so the
-oracle message maps witnesses back unchanged. The challenge maps a witness `(S, u)` back by
-lossy correlated agreement (`foldBack`): `u` agrees with the folded word on the points `S`
-reduces to, at least `1 - δ` of the folded domain, so unless `β` is a lossy MCA failure of the
-fold (`FoldFails`), `f` agrees with a codeword above all of them but at most `loss · 2 ^ (n - k)`,
-and so on all of `S` but at most `loss · 2 ^ top` positions (`exists_lift`). A challenge is bad
-only if it is a failure (`badChallenge_foldRound`), with probability at most the fold's lossy MCA
-error (`roundError`) whatever the earlier messages (`foldRoundCertificate`).
+A fold round (`foldRound`) is the prover's word at the layer and the verifier's challenge `β`.
+After the word, the state is the same statement about the committed word, on the positions where
+it agrees with the verifier's word (`commitConsistent`), so the oracle message maps witnesses back
+unchanged. After `β` the state is the next layer's, about the fold of the committed word at `β`
+plus the injected input. The challenge maps a witness `(S, u)` back by lossy correlated agreement
+(`foldBack`): `u` agrees with the folded word on the points `S` reduces to, at least `1 - δ` of the
+folded domain, so unless `β` is a lossy MCA failure of the fold (`FoldFails`), the committed word
+agrees with a codeword above all of them but at most `loss · 2 ^ (n - k)`, and so on all of `S`
+but at most `loss · 2 ^ top` positions (`exists_lift`). A challenge is bad only if it is a failure
+(`badChallenge_challengeExtractor`), with probability at most the fold's lossy MCA error
+(`roundError`) whatever the earlier messages (`foldRoundCertificate`).
 
 This is the argument of `FoldTrace.exists_codeword_agree_on_lossy`
 (`ArkLib/ProofSystem/Fri/QuerySoundness.lean`), with the injected inputs, cut into rounds.
@@ -103,8 +104,9 @@ variable (top d : ℕ) (inputs : (m : ℕ) → Fin (2 ^ m) → K) (δ loss : ℝ
 /-- The agreement density required after `j` folds: `1 - δ + j · loss`. -/
 def threshold (j : ℕ) : ℝ := 1 - δ + j * loss
 
-/-- The knowledge state at a layer of log height `n` with current word `f`, after `j` folds, with
-`C` the top positions at which every fold so far is consistent. -/
+/-- The knowledge state at a layer of log height `n` where the verifier's word is `f`, after `j`
+folds, with `C` the top positions at which every committed word so far agrees with the verifier's
+word. -/
 def levelState {n : ℕ} (ω : SmoothCosetFftDomain n K) (s : Schedule n) (j : ℕ) (f : Word K n)
     (C : Finset (Fin (2 ^ top))) : KnowledgeState where
   Witness := Finset (Fin (2 ^ top)) × Word K n
@@ -112,26 +114,15 @@ def levelState {n : ℕ} (ω : SmoothCosetFftDomain n K) (s : Schedule n) (j : �
     (∀ x ∈ w.1, w.2 (proj n x) = f (proj n x)) ∧ threshold δ loss j * 2 ^ top ≤ w.1.card ∧
     s.InputsAgree inputs d (1 - δ) ω
 
-/-- The knowledge state after a fold's challenge `β`: the level state of the folded word, one fold
-later, before the next word is sent. -/
-def foldedState {n k : ℕ} (hk : k ≤ n) (ω : SmoothCosetFftDomain n K) (inject : Bool)
-    (rest : Schedule (n - k)) (j : ℕ) (f : Word K n) (C : Finset (Fin (2 ^ top))) (β : K) :
-    KnowledgeState where
-  Witness := Finset (Fin (2 ^ top)) × Word K (n - k)
-  holds w := w.2 ∈ code (ω.subdomain k : Fin (2 ^ (n - k)) ↪ K) (rest.degree d) ∧ w.1 ⊆ C ∧
-    (∀ x ∈ w.1, w.2 (proj (n - k) x) =
-      foldNext hk ω f β (injected inputs (n - k) inject) (proj (n - k) x)) ∧
-    threshold δ loss (j + 1) * 2 ^ top ≤ w.1.card ∧
-    rest.InputsAgree inputs d (1 - δ) (ω.subdomain k)
+/-- The top positions of `C` at which the committed word `f` agrees with the verifier's word `v`
+on the point they reduce to. -/
+def commitConsistent {n : ℕ} (v f : Word K n) (C : Finset (Fin (2 ^ top))) :
+    Finset (Fin (2 ^ top)) :=
+  C.filter fun x => v (proj n x) = f (proj n x)
 
-/-- The top positions consistent so far at which the next word is the fold. -/
-def foldConsistent {n k : ℕ} (hk : k ≤ n) (ω : SmoothCosetFftDomain n K) (f : Word K n) (β : K)
-    (g next : Word K (n - k)) (C : Finset (Fin (2 ^ top))) : Finset (Fin (2 ^ top)) :=
-  C.filter fun x => foldNext hk ω f β g (proj (n - k) x) = next (proj (n - k) x)
-
-/-- A fold round: the verifier's challenge, then the prover's next word. -/
-def foldRound (K : Type) (n k : ℕ) : Protocol :=
-  .public .receiver K fun _ => .oracle (Word K (n - k)) .done
+/-- A fold round: the prover's word at the layer, then the verifier's challenge. -/
+def foldRound (K : Type) (n : ℕ) : Protocol :=
+  .oracle (Word K n) (.public .receiver K fun _ => .done)
 
 /-- A fold's lossy bad event at `β`: ArkLib's lossy folding failure, or the injected fold's. -/
 def FoldFails {n : ℕ} (ω : SmoothCosetFftDomain n K) (f : Word K n) (k D : ℕ) (θ : ℝ) (β : K) :
@@ -140,7 +131,7 @@ def FoldFails {n : ℕ} (ω : SmoothCosetFftDomain n K) (f : Word K n) (k D : �
   | true => LossyInjectFailure ω f k D (inputs (n - k)) θ loss β
 
 /-- A witness of the folded state lifts to `v` on the layer before the fold: `v` agrees with the
-current word on all of `S` but at most `loss · 2 ^ top` positions, and an injected input is close
+committed word on all of `S` but at most `loss · 2 ^ top` positions, and an injected input is close
 to its code. -/
 def Lifts {n k : ℕ} (ω : SmoothCosetFftDomain n K) (inject : Bool) (rest : Schedule (n - k))
     (f : Word K n) (w : Finset (Fin (2 ^ top)) × Word K (n - k))
@@ -175,7 +166,8 @@ theorem exists_lift {n k : ℕ} (hn : n ≤ top) (hk : k ≤ n) (ω : SmoothCose
     (C : Finset (Fin (2 ^ top))) (β : K) (hloss : 0 ≤ loss)
     (hfail : ¬ FoldFails inputs loss ω f k (rest.degree d) δ β inject)
     (w : Finset (Fin (2 ^ top)) × Word K (n - k))
-    (hw : (foldedState top d inputs δ loss hk ω inject rest j f C β).holds w) :
+    (hw : (levelState top d inputs δ loss (ω.subdomain k) rest (j + 1)
+      (foldNext hk ω f β (injected inputs (n - k) inject)) C).holds w) :
     ∃ v, Lifts top d inputs δ loss ω inject rest f w v := by
   classical
   obtain ⟨S, u⟩ := w
@@ -263,7 +255,8 @@ theorem exists_lift {n k : ℕ} (hn : n ≤ top) (hk : k ≤ n) (ω : SmoothCose
 theorem levelState_holds_of_lifts {n k : ℕ} (hk : k ≤ n) (ω : SmoothCosetFftDomain n K)
     (inject : Bool) (rest : Schedule (n - k)) (j : ℕ) (f : Word K n)
     (C : Finset (Fin (2 ^ top))) (β : K) (w : Finset (Fin (2 ^ top)) × Word K (n - k))
-    (hw : (foldedState top d inputs δ loss hk ω inject rest j f C β).holds w)
+    (hw : (levelState top d inputs δ loss (ω.subdomain k) rest (j + 1)
+      (foldNext hk ω f β (injected inputs (n - k) inject)) C).holds w)
     (v : Finset (Fin (2 ^ top)) × Word K n) (hv : Lifts top d inputs δ loss ω inject rest f w v) :
     (levelState top d inputs δ loss ω (.fold k hk inject rest) j f C).holds v := by
   obtain ⟨-, hSC, -, hcard, hrest⟩ := hw
@@ -277,48 +270,60 @@ theorem levelState_holds_of_lifts {n k : ℕ} (hk : k ≤ n) (ω : SmoothCosetFf
 
 variable (top d inputs δ loss)
 
-/-- The fold round's witness maps: back through the challenge by `foldBack`, and unchanged
-through the next word, after which the state is the next layer's. -/
-noncomputable def foldRoundExtractor {n k : ℕ} (hk : k ≤ n) (ω : SmoothCosetFftDomain n K)
+/-- The challenge's witness maps at a layer with committed word `f`: back through `β` by
+`foldBack`, after which the state is the next layer's, about the fold of `f` at `β`. -/
+noncomputable def challengeExtractor {n k : ℕ} (hk : k ≤ n) (ω : SmoothCosetFftDomain n K)
     (inject : Bool) (rest : Schedule (n - k)) (j : ℕ) (f : Word K n)
     (C : Finset (Fin (2 ^ top))) :
-    RoundExtractor (foldRound K n k).tree
+    RoundExtractor (.public K fun _ => .done)
       (levelState top d inputs δ loss ω (.fold k hk inject rest) j f C) :=
-  fun β => ⟨foldedState top d inputs δ loss hk ω inject rest j f C β,
-    foldBack top d inputs δ loss ω inject rest f,
-    fun next => ⟨levelState top d inputs δ loss (ω.subdomain k) rest (j + 1) next
-      (foldConsistent top hk ω f β (injected inputs (n - k) inject) next C), id, PUnit.unit⟩⟩
+  fun β => ⟨levelState top d inputs δ loss (ω.subdomain k) rest (j + 1)
+      (foldNext hk ω f β (injected inputs (n - k) inject)) C,
+    foldBack top d inputs δ loss ω inject rest f, PUnit.unit⟩
+
+/-- The fold round's witness maps at a layer where the verifier's word is `v`: unchanged through
+the prover's word `f`, after which the state is about `f` on the positions where it agrees with
+`v`, then the challenge's. -/
+noncomputable def foldRoundExtractor {n k : ℕ} (hk : k ≤ n) (ω : SmoothCosetFftDomain n K)
+    (inject : Bool) (rest : Schedule (n - k)) (j : ℕ) (v : Word K n)
+    (C : Finset (Fin (2 ^ top))) :
+    RoundExtractor (foldRound K n).tree
+      (levelState top d inputs δ loss ω (.fold k hk inject rest) j v C) :=
+  fun f => ⟨levelState top d inputs δ loss ω (.fold k hk inject rest) j f
+      (commitConsistent top v f C), id,
+    challengeExtractor top d inputs δ loss hk ω inject rest j f (commitConsistent top v f C)⟩
 
 variable {top d inputs δ loss}
 
-/-- After the round, the state is the next layer's, with the next word and the consistent set
-it leaves. -/
+/-- After the round, the state is the next layer's, with the fold of the committed word and the
+positions where the committed word agrees with the verifier's. -/
 theorem terminalState_foldRoundExtractor {n k : ℕ} (hk : k ≤ n) (ω : SmoothCosetFftDomain n K)
-    (inject : Bool) (rest : Schedule (n - k)) (j : ℕ) (f : Word K n)
-    (C : Finset (Fin (2 ^ top))) (path : (foldRound K n k).tree.ExecutionPath) :
-    (foldRoundExtractor top d inputs δ loss hk ω inject rest j f C).terminalState path =
-      levelState top d inputs δ loss (ω.subdomain k) rest (j + 1) path.2.1
-        (foldConsistent top hk ω f path.1 (injected inputs (n - k) inject) path.2.1 C) :=
+    (inject : Bool) (rest : Schedule (n - k)) (j : ℕ) (v : Word K n)
+    (C : Finset (Fin (2 ^ top))) (path : (foldRound K n).tree.ExecutionPath) :
+    (foldRoundExtractor top d inputs δ loss hk ω inject rest j v C).terminalState path =
+      levelState top d inputs δ loss (ω.subdomain k) rest (j + 1)
+        (foldNext hk ω path.1 path.2.1 (injected inputs (n - k) inject))
+        (commitConsistent top v path.1 C) :=
   rfl
 
-/-- The next word cannot create knowledge: it is consistent with the fold on the new
-consistent set. -/
+/-- The prover's word cannot create knowledge: on the positions it keeps, it agrees with the
+verifier's word. -/
 theorem foldRoundExtractor_isProverPreserving {n k : ℕ} (hk : k ≤ n)
     (ω : SmoothCosetFftDomain n K) (inject : Bool) (rest : Schedule (n - k)) (j : ℕ)
-    (f : Word K n) (C : Finset (Fin (2 ^ top))) :
-    (foldRoundExtractor top d inputs δ loss hk ω inject rest j f C).IsProverPreserving
-      (foldRound K n k).roles := by
-  refine And.intro (fun _ h => nomatch h) fun β =>
-    And.intro (fun next w hw => ?_) fun _ => trivial
+    (v : Word K n) (C : Finset (Fin (2 ^ top))) :
+    (foldRoundExtractor top d inputs δ loss hk ω inject rest j v C).IsProverPreserving
+      (foldRound K n).roles := by
+  refine And.intro (fun f w hw => ?_) fun _ =>
+    And.intro (fun _ h => nomatch h) fun _ => trivial
   obtain ⟨hu, hSC, hagree, hcard, hrest⟩ := hw
   exact ⟨hu, hSC.trans (Finset.filter_subset _ _),
     fun x hx => (hagree x hx).trans ((Finset.mem_filter.mp (hSC hx)).2).symm, hcard, hrest⟩
 
 /-- A bad challenge of the fold round is a lossy MCA failure of the fold. -/
-theorem badChallenge_foldRound {n k : ℕ} (hn : n ≤ top) (hk : k ≤ n)
+theorem badChallenge_challengeExtractor {n k : ℕ} (hn : n ≤ top) (hk : k ≤ n)
     (ω : SmoothCosetFftDomain n K) (inject : Bool) (rest : Schedule (n - k)) (j : ℕ)
     (f : Word K n) (C : Finset (Fin (2 ^ top))) (hloss : 0 ≤ loss) (β : K)
-    (hbad : (foldRoundExtractor top d inputs δ loss hk ω inject rest j f C).badChallenge β) :
+    (hbad : (challengeExtractor top d inputs δ loss hk ω inject rest j f C).badChallenge β) :
     FoldFails inputs loss ω f k (rest.degree d) δ β inject := by
   classical
   obtain ⟨w, hnot, hw⟩ := hbad
@@ -330,7 +335,7 @@ theorem badChallenge_foldRound {n k : ℕ} (hn : n ≤ top) (hk : k ≤ n)
   rw [show foldBack top d inputs δ loss ω inject rest f w = hex.choose from dite_eq_left hex]
   exact levelState_holds_of_lifts hk ω inject rest j f C β w hw _ hex.choose_spec
 
-/-- A fold fails with probability at most its lossy MCA error, whatever the current word. -/
+/-- A fold fails with probability at most its lossy MCA error, whatever the committed word. -/
 theorem prob_foldFails_le [Fintype K] [SampleableType K] {n : ℕ} (ω : SmoothCosetFftDomain n K)
     (f : Word K n) (k D : ℕ) (hD : 0 < D) (θ : ℝ) :
     ∀ inject, Pr{let β ←$ᵗ K}[FoldFails inputs loss ω f k D θ β inject] ≤
@@ -341,24 +346,24 @@ theorem prob_foldFails_le [Fintype K] [SampleableType K] {n : ℕ} (ω : SmoothC
 variable (top d inputs δ loss)
 
 /-- **The fold round's knowledge certificate.** The challenge is uniform, and it is bad with
-probability at most the fold's lossy MCA error (`Schedule.roundError`), whatever the earlier
-messages. -/
+probability at most the fold's lossy MCA error (`Schedule.roundError`), whatever the prover's word
+and the earlier messages. -/
 noncomputable def foldRoundCertificate [Fintype K] [SampleableType K] (hd : 0 < d)
     (hloss : 0 ≤ loss) {n k : ℕ} (hn : n ≤ top) (hk : k ≤ n) (ω : SmoothCosetFftDomain n K)
-    (inject : Bool) (rest : Schedule (n - k)) (j : ℕ) (f : Word K n)
+    (inject : Bool) (rest : Schedule (n - k)) (j : ℕ) (v : Word K n)
     (C : Finset (Fin (2 ^ top))) :
-    KnowledgeCertificate (foldRound K n k).tree (foldRound K n k).roles
-      (levelState top d inputs δ loss ω (.fold k hk inject rest) j f C) where
-  extractor := foldRoundExtractor top d inputs δ loss hk ω inject rest j f C
-  challenges := ⟨($ᵗ K, Schedule.roundError ω k (rest.degree d) δ loss inject),
-    fun _ _ => PUnit.unit⟩
-  prover_preserving := foldRoundExtractor_isProverPreserving hk ω inject rest j f C
-  local_bound := by
-    refine ⟨?_, fun _ _ => trivial⟩
+    KnowledgeCertificate (foldRound K n).tree (foldRound K n).roles
+      (levelState top d inputs δ loss ω (.fold k hk inject rest) j v C) where
+  extractor := foldRoundExtractor top d inputs δ loss hk ω inject rest j v C
+  challenges := fun _ => ⟨($ᵗ K, Schedule.roundError ω k (rest.degree d) δ loss inject),
+    fun _ => PUnit.unit⟩
+  prover_preserving := foldRoundExtractor_isProverPreserving hk ω inject rest j v C
+  local_bound := fun f => by
+    refine ⟨?_, fun _ => trivial⟩
     rw [_root_.RoundByRound.GameFamily.isBounded_iff]
     intro _ _
     exact (prEvent_mono _ _ _ fun β hbad =>
-      badChallenge_foldRound hn hk ω inject rest j f C hloss β hbad).trans
+      badChallenge_challengeExtractor hn hk ω inject rest j f _ hloss β hbad).trans
       (prob_foldFails_le ω f k _ (Schedule.degree_pos hd rest) δ inject)
 
 end Fri.Interaction

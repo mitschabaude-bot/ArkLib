@@ -14,20 +14,22 @@ public import ArkLib.Interaction.Oracle.PublicCoin
 # FRI on the interaction layer
 
 FRI as Plonky3 runs it, on a domain `ω` of `2 ^ top` points, along a `Schedule`. The inputs are
-oracles: `inputs m` is the word of log height `m`, read through `inputAccess`; the first fold
-folds `inputs top`. Each fold round is a verifier challenge `β` followed by the prover's oracle
-message, the next word: meant to be the current word folded by `2 ^ k` at `β`, plus
-`β ^ 2 ^ k` times the input of the folded domain's height if the fold injects it. After the folds
-the prover sends the final polynomial's `d` coefficients in the clear, and the verifier samples
-`t` positions of the top domain (`queryPhase`). At each position it checks every fold on the
-fiber the position reduces to, and the last word against the final polynomial.
+oracles: `inputs m` is the word of log height `m`, read through `inputAccess`. The verifier's
+word at the first layer is the tallest input `inputs top`, and after a fold by `2 ^ k` at `β` it
+is the fold of the prover's word there, plus `β ^ 2 ^ k` times the input of the folded domain's
+height if the fold injects it. Each fold round is the prover's oracle message, its word at the
+layer (meant to be the verifier's word), followed by the verifier's challenge `β`; the first
+message is the word Plonky3 commits before its first folding challenge. After the folds the
+prover sends the final polynomial's `d` coefficients in the clear, without a word for the last
+layer, and the verifier samples `t` positions of the top domain (`queryPhase`). At each position
+it checks every committed word against the verifier's word on the point the position reduces to,
+and the verifier's word at the last layer against the final polynomial.
 
 The verifier never sees a word: it reads them through oracle queries. Its local state
-(`Reader`) holds query programs for the inputs, for the current word and for the checks of the
-folds so far at each top position; an oracle message extends the access signature, and the
-programs move to it by `extendAccess`. `honestProver` folds the words it sends.
+(`Reader`) holds query programs for the inputs, for its word at the current layer and for the
+checks so far at each top position; an oracle message extends the access signature, and the
+programs move to it by `extendAccess`. `honestProver` sends the verifier's words.
 -/
-
 @[expose] public section
 
 open Interaction Interaction.Oracle OracleComp OracleSpec Domain
@@ -51,20 +53,20 @@ def inputImpl (inputs : (m : ℕ) → Fin (2 ^ m) → K) :
 def queryPhase (top t : ℕ) : Protocol :=
   .public .receiver (Fin t → Fin (2 ^ top)) fun _ => .done
 
-/-- FRI from a layer of log height `n`: a fold round is the verifier's challenge, then the next
-word as an oracle message; after the folds the prover sends the final polynomial's `d`
-coefficients, then the query phase. -/
+/-- FRI from a layer of log height `n`: a fold round is the prover's word at the layer as an
+oracle message, then the verifier's challenge; after the folds the prover sends the final
+polynomial's `d` coefficients, then the query phase. -/
 def protocol (top d t : ℕ) : {n : ℕ} → Schedule n → Protocol
   | _, .final => .public .sender (Fin d → K) fun _ => queryPhase top t
-  | n, .fold k _ _ rest =>
-      .public .receiver K fun _ => .oracle (Word K (n - k)) (protocol top d t rest)
+  | n, .fold _ _ _ rest =>
+      .oracle (Word K n) (.public .receiver K fun _ => protocol top d t rest)
 
-/-- FRI is public-coin: after each folding challenge comes the next word, and after the final
+/-- FRI is public-coin: after each word comes the folding challenge, and after the final
 polynomial the query positions, whatever the challenge. -/
 def publicCoin [Fintype K] [DecidableEq K] [SampleableType K] (top d t : ℕ) :
     {n : ℕ} → (s : Schedule n) → PublicCoin (protocol K top d t s)
   | _, .final => .sender fun _ => .challenge .done
-  | _, .fold _ _ _ rest => .challenge (.oracle (publicCoin top d t rest))
+  | _, .fold _ _ _ rest => .oracle (.challenge (publicCoin top d t rest))
 
 variable {K}
 
@@ -100,13 +102,13 @@ def injected (inputs : (m : ℕ) → Fin (2 ^ m) → K) (m : ℕ) : Bool → Wor
   | true => inputs m
   | false => 0
 
-/-- The next word of an honest fold: `f` folded by `2 ^ k` at `β`, plus `β ^ 2 ^ k g`. -/
+/-- The verifier's word after a fold: `f` folded by `2 ^ k` at `β`, plus `β ^ 2 ^ k g`. -/
 def foldNext {n k : ℕ} (hk : k ≤ n) (ω : SmoothCosetFftDomain n K) (f : Word K n) (β : K)
     (g : Word K (n - k)) : Word K (n - k) :=
   fun y => foldFiber hk ω y β (fun q => f (fiberPoint hk y q)) + β ^ 2 ^ k * g y
 
-/-- The final polynomial's `d` coefficients of an honest last word: the low coefficients of its
-interpolant. -/
+/-- The final polynomial's `d` coefficients of the word at the last layer: the low coefficients
+of its interpolant. -/
 def finalCoeffs {n : ℕ} (ω : SmoothCosetFftDomain n K) (f : Word K n) (d : ℕ) : Fin d → K :=
   fun i => (CompPoly.CPolynomial.CLagrange.interpolate Finset.univ (fun x => ω x) f).coeff i
 
@@ -134,20 +136,21 @@ def readAll {ι : Type} {spec : OracleSpec ι} {α : Type} :
       return Fin.cons v rest
 
 /-- The verifier's query programs at a layer of log height `n`, over the access signature `A`:
-reading the inputs, reading the current word, and checking the folds so far at a top position. -/
+reading the inputs, reading the verifier's word at the layer, and checking the committed words so
+far at a top position. -/
 structure Reader (top : ℕ) (A : PFunctor) (n : ℕ) where
   /-- Read the input of log height `m`. -/
   input : (m : ℕ) → Fin (2 ^ m) → OracleComp (OracleSpec.ofPFunctor A) K
-  /-- Read the current word. -/
+  /-- Read the verifier's word at the layer. -/
   word : Fin (2 ^ n) → OracleComp (OracleSpec.ofPFunctor A) K
-  /-- Check every fold so far at a top position. -/
+  /-- Check every committed word so far at a top position. -/
   check : Fin (2 ^ top) → OracleComp (OracleSpec.ofPFunctor A) Bool
 
 namespace Reader
 
 variable {top : ℕ}
 
-/-- The reader before any fold: the current word is the input `inputs top`. -/
+/-- The reader before any fold: the verifier's word is the input `inputs top`. -/
 def root (top : ℕ) : Reader (K := K) top (inputAccess K) top where
   input m x := liftM ((OracleSpec.ofPFunctor (inputAccess K)).query ⟨m, x⟩)
   word x := liftM ((OracleSpec.ofPFunctor (inputAccess K)).query ⟨top, x⟩)
@@ -159,24 +162,33 @@ def readInjected {A : PFunctor} {n : ℕ} (r : Reader (K := K) top A n) (m : ℕ
   | true => r.input m y
   | false => pure 0
 
-/-- The reader after a fold by `2 ^ k` at `β` and the next word: the next word is the latest
-message, and the check at a top position adds this fold's check on the fiber it reduces to. -/
-def fold {A : PFunctor} {n : ℕ} (r : Reader (K := K) top A n) (ω : SmoothCosetFftDomain n K)
-    (k : ℕ) (hk : k ≤ n) (inject : Bool) (β : K) :
-    Reader (K := K) top (Access.extend A (OracleInterface.instFunction (α := Fin (2 ^ (n - k)))
-      (β := K))) (n - k) where
+/-- The reader after the prover's word at the layer: the check at a top position adds the
+committed word against the verifier's word at the point the position reduces to, and the word
+read from then on is the committed one. -/
+def commit {A : PFunctor} {n : ℕ} (r : Reader (K := K) top A n) :
+    Reader (K := K) top (Access.extend A (OracleInterface.instFunction (α := Fin (2 ^ n))
+      (β := K))) n where
   input m x := extendAccess _ (r.input m x)
   word y := Access.queryLatest A _ y
   check x := do
     let ok ← extendAccess _ (r.check x)
-    let y := proj (n - k) x
-    let vals ← extendAccess _ (readAll (2 ^ k) fun q => r.word (fiberPoint hk y q))
-    let g ← extendAccess _ (r.readInjected (n - k) y inject)
-    let next : K ← Access.queryLatest A _ y
-    return ok && foldFiber hk ω y β vals + β ^ 2 ^ k * g == next
+    let v ← extendAccess _ (r.word (proj n x))
+    let committed : K ← Access.queryLatest A _ (proj n x)
+    return ok && v == committed
 
-/-- The check at a top position once the final polynomial `c` is known: the folds, and the
-current word against the final polynomial. -/
+/-- The reader after a fold by `2 ^ k` at `β`: the verifier's word at the folded layer is the
+fold of the word on the fiber above each point, plus `β ^ 2 ^ k` times the injected input. -/
+def fold {A : PFunctor} {n : ℕ} (r : Reader (K := K) top A n) (ω : SmoothCosetFftDomain n K)
+    (k : ℕ) (hk : k ≤ n) (inject : Bool) (β : K) : Reader (K := K) top A (n - k) where
+  input := r.input
+  word y := do
+    let vals ← readAll (2 ^ k) fun q => r.word (fiberPoint hk y q)
+    let g ← r.readInjected (n - k) y inject
+    return foldFiber hk ω y β vals + β ^ 2 ^ k * g
+  check := r.check
+
+/-- The check at a top position once the final polynomial `c` is known: the committed words, and
+the verifier's word at the last layer against the final polynomial. -/
 def finalCheck {A : PFunctor} {n d : ℕ} (r : Reader (K := K) top A n)
     (ω : SmoothCosetFftDomain n K) (c : Fin d → K) (x : Fin (2 ^ top)) :
     OracleComp (OracleSpec.ofPFunctor A) Bool := do
@@ -205,10 +217,10 @@ def verifier (sample : OracleComp ambient K)
   | _, ω, _, r, .final => fun c => pure (do
       let xs ← liftComp sampleQueries _
       return ⟨xs, withAmbient ambient (r.checkAll ω c xs)⟩)
-  | _, ω, _, r, .fold k hk inject rest => do
+  | _, ω, _, r, .fold k hk inject rest => pure (do
       let β ← liftComp sample _
-      return ⟨β, pure (verifier sample sampleQueries (ω.subdomain k) _
-        (r.fold ω k hk inject β) rest)⟩
+      return ⟨β, verifier sample sampleQueries (ω.subdomain k) _
+        (r.commit.fold ω k hk inject β) rest⟩)
 
 omit [Field K] [DecidableEq K] in
 set_option backward.isDefEq.respectTransparency false in
@@ -244,7 +256,7 @@ theorem executeStrategies_final {n : ℕ} (A : PFunctor)
 
 omit [Field K] [DecidableEq K] in
 set_option backward.isDefEq.respectTransparency false in
-/-- Executing a fold round: the verifier's challenge, the prover's next word, and the rest. -/
+/-- Executing a fold round: the prover's word, the verifier's challenge, and the rest. -/
 theorem executeStrategies_fold {n k : ℕ} (hk : k ≤ n) (inject : Bool) (rest : Schedule (n - k))
     (A : PFunctor) (impl : QueryImpl (OracleSpec.ofPFunctor A) Id)
     {OutP : (protocol K top d t (.fold k hk inject rest)).tree.ExecutionPath → Type}
@@ -257,37 +269,44 @@ theorem executeStrategies_fold {n k : ℕ} (hk : k ≤ n) (inject : Bool) (rest 
     executeStrategies ambient (protocol K top d t (.fold k hk inject rest)).tree
       (protocol K top d t (.fold k hk inject rest)).roles
       (protocol K top d t (.fold k hk inject rest)).oracles A impl prover verifier = (do
-        let chosen ← simulateQ (Verifier.liftAccessImpl ambient A impl) verifier
-        let next ← prover chosen.1
-        let sent ← next
-        let after ← simulateQ (Verifier.liftAccessImpl ambient
-          (Access.extend A (OracleInterface.instFunction (α := Fin (2 ^ (n - k))) (β := K)))
-          (Access.extendImpl A _ impl sent.1)) chosen.2
+        let sent ← prover
+        let next ← simulateQ (Verifier.liftAccessImpl ambient
+          (Access.extend A (OracleInterface.instFunction (α := Fin (2 ^ n)) (β := K)))
+          (Access.extendImpl A _ impl sent.1)) verifier
+        let chosen ← simulateQ (Verifier.liftAccessImpl ambient
+          (Access.extend A (OracleInterface.instFunction (α := Fin (2 ^ n)) (β := K)))
+          (Access.extendImpl A _ impl sent.1)) next
+        let after ← sent.2 chosen.1
         let result ← executeStrategies ambient (protocol K top d t rest).tree
           (protocol K top d t rest).roles (protocol K top d t rest).oracles
-          (Access.extend A (OracleInterface.instFunction (α := Fin (2 ^ (n - k))) (β := K)))
+          (Access.extend A (OracleInterface.instFunction (α := Fin (2 ^ n)) (β := K)))
           (Access.extendImpl A _ impl sent.1)
-          (OutP := fun path => OutP ⟨chosen.1, sent.1, path⟩)
-          (OutV := fun path => OutV ⟨chosen.1, PUnit.unit, path⟩) sent.2 after
-        return ⟨⟨chosen.1, sent.1, result.1⟩, result.2.1, result.2.2⟩) := by
-  refine (executeStrategies_public_receiver ambient (Moves := K)
-    (rest := fun _ => TypeTree.oracle (Word K (n - k)) fun _ => (protocol K top d t rest).tree)
+          (OutP := fun path => OutP ⟨sent.1, chosen.1, path⟩)
+          (OutV := fun path => OutV ⟨PUnit.unit, chosen.1, path⟩) after chosen.2
+        return ⟨⟨sent.1, chosen.1, result.1⟩, result.2.1, result.2.2⟩) := by
+  refine (executeStrategies_oracle ambient (Messages := Word K n)
+    (rest := fun _ => TypeTree.public K fun _ => (protocol K top d t rest).tree)
     _ _ A impl prover verifier).trans ?_
-  simp only [executeStrategies_oracle, bind_assoc, pure_bind]
+  refine bind_congr fun sent => bind_congr fun next => ?_
+  refine (congrArg (· >>= _) (executeStrategies_public_receiver ambient (Moves := K)
+    (rest := fun _ => (protocol K top d t rest).tree) _ _ _ _
+    (OutP := fun path => OutP ⟨sent.1, path⟩) (OutV := fun path => OutV ⟨PUnit.unit, path⟩)
+    sent.2 next)).trans ?_
+  simp only [bind_assoc, pure_bind]
   rfl
 
 /-! ### The honest prover -/
 
-/-- The honest prover from a layer of log height `n` with current word `f`: it sends each fold of
-the current word, injecting the inputs the schedule injects, and the final word's coefficients. -/
+/-- The honest prover from a layer of log height `n` where the verifier's word is `f`: it sends
+`f`, continues at the folded layer with the fold of `f` at the challenge, injecting the inputs the
+schedule injects, and at the last layer sends the word's coefficients. -/
 def honestProver (inputs : (m : ℕ) → Fin (2 ^ m) → K) :
     {n : ℕ} → SmoothCosetFftDomain n K → Word K n → (s : Schedule n) →
       Prover.Strategy ambient (protocol K top d t s).tree (protocol K top d t s).roles
         (fun _ => Unit)
   | _, ω, f, .final => pure ⟨finalCoeffs ω f d, fun _ => pure ()⟩
-  | _, ω, f, .fold k hk inject rest => fun β =>
-      let next := foldNext hk ω f β (injected inputs _ inject)
-      pure (f := OracleComp ambient) (pure (f := OracleComp ambient)
-        ⟨next, honestProver inputs (ω.subdomain k) next rest⟩)
+  | _, ω, f, .fold k hk inject rest =>
+      pure ⟨f, fun β => pure (f := OracleComp ambient)
+        (honestProver inputs (ω.subdomain k) (foldNext hk ω f β (injected inputs _ inject)) rest)⟩
 
 end Fri.Interaction

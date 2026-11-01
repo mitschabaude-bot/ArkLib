@@ -46,7 +46,7 @@ def terminal : {n : ℕ} → (ω : SmoothCosetFftDomain n K) → (A : PFunctor) 
         (protocol K top d t s).oracles A p)) Bool
   | _, ω, _, r, .final, p => r.checkAll ω p.1 p.2.1
   | _, ω, _, r, .fold k hk inject rest, p =>
-      terminal (ω.subdomain k) _ (r.fold ω k hk inject p.1) rest p.2.2
+      terminal (ω.subdomain k) _ (r.commit.fold ω k hk inject p.2.1) rest p.2.2
 
 variable (inputs : (m : ℕ) → Fin (2 ^ m) → K) (δ loss : ℝ)
 
@@ -75,13 +75,14 @@ theorem terminal_holds_of_eval (hd : 0 < d) (hloss : 0 ≤ loss) :
     exact Finset.mem_filter.mpr hi
   | @fold m k hk inject rest ih =>
     intro hn ω A impl r j f C hr hcheck path hacc
-    obtain ⟨β, next, path⟩ := path
-    exact ih ((Nat.sub_le m k).trans hn) (ω.subdomain k) _ _ _ (j + 1) next
-      (foldConsistent top hk ω f β (injected inputs (m - k) inject) next C)
-      (Reader.reads_fold impl inputs hr ω k hk inject β next)
+    obtain ⟨word, β, path⟩ := path
+    exact ih ((Nat.sub_le m k).trans hn) (ω.subdomain k) _ _ _ (j + 1) _
+      (commitConsistent top f word C)
+      (Reader.reads_fold _ inputs (Reader.reads_commit impl inputs hr word) ω k hk inject β)
       (fun x => by
-        rw [Reader.simulateQ_fold_check impl inputs hr, hcheck, Bool.eq_iff_iff]
-        simp [foldConsistent, Finset.mem_filter])
+        rw [Reader.fold_check, Reader.simulateQ_commit_check impl inputs hr, hcheck,
+          Bool.eq_iff_iff]
+        simp [commitConsistent, Finset.mem_filter])
       path hacc
 
 /-- The node errors of FRI's public-coin presentation from a layer of log height `n`, `j` folds
@@ -91,8 +92,8 @@ noncomputable def nodeErrors : {n : ℕ} → (ω : SmoothCosetFftDomain n K) →
   | _, _, .final, j => fun _ => ENNReal.ofReal (threshold δ loss j) ^ t
   | n, ω, .fold k _ inject rest, j => fun node =>
       Sum.elim (fun _ => Schedule.roundError ω k (rest.degree d) δ loss inject)
-        (fun node => nodeErrors (ω.subdomain k) rest (j + 1) node.2.2)
-        (node : PUnit ⊕ (PUnit × (Word K (n - k) × Prefix PUnit (publicCoin K top d t rest))))
+        (fun node => nodeErrors (ω.subdomain k) rest (j + 1) node.2)
+        (node : Word K n × (PUnit ⊕ (PUnit × Prefix PUnit (publicCoin K top d t rest)))).2
 
 /-- The certificate's error at each node of the public-coin presentation is the node error. -/
 theorem supErrors_certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
@@ -106,13 +107,12 @@ theorem supErrors_certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
     · rfl
     · exact node.elim
   | n, hn, ω, .fold k hk inject rest, j, f, C, node => by
-    obtain _ | ⟨_, word, node⟩ :=
-      (node : PUnit ⊕ (PUnit × (Word K (n - k) × Prefix PUnit (publicCoin K top d t rest))))
+    obtain ⟨word, _ | ⟨_, node⟩⟩ :=
+      (node : Word K n × (PUnit ⊕ (PUnit × Prefix PUnit (publicCoin K top d t rest))))
     · rfl
     · exact (iSup_congr fun β => supErrors_certificate hd hloss ((Nat.sub_le n k).trans hn)
-        (ω.subdomain k) rest (j + 1) word
-        (foldConsistent top hk ω f β (injected inputs (n - k) inject) word C) node).trans
-          iSup_const
+        (ω.subdomain k) rest (j + 1) (foldNext hk ω word β (injected inputs (n - k) inject))
+        (commitConsistent top f word C) node).trans iSup_const
 
 /-- The path sum of the node errors is FRI's error at the proximity loss: the folds' errors and
 the query error. -/
@@ -124,8 +124,8 @@ theorem pathError_nodeErrors :
     change (⨆ _ : Fin d → K, ENNReal.ofReal (threshold δ loss j) ^ t + 0) = _
     simp [Schedule.foldError, Schedule.numFolds]
   | n, ω, .fold k hk inject rest, j => by
-    change Schedule.roundError ω k (rest.degree d) δ loss inject +
-      (⨆ _ : Word K (n - k), pathError (publicCoin K top d t rest)
+    change (⨆ _ : Word K n, Schedule.roundError ω k (rest.degree d) δ loss inject +
+      pathError (publicCoin K top d t rest)
         (nodeErrors top d t δ loss (ω.subdomain k) rest (j + 1))) = _
     rw [iSup_const, pathError_nodeErrors (ω.subdomain k) rest (j + 1), Schedule.foldError,
       Schedule.numFolds, add_assoc, Nat.add_comm 1 rest.numFolds]

@@ -39,9 +39,9 @@ namespace Fri.Interaction
 variable {K : Type} [Field K] [Fintype K] [DecidableEq K] [SampleableType K]
 variable (top d t : ℕ) (inputs : (m : ℕ) → Fin (2 ^ m) → K) (δ loss : ℝ)
 
-/-- **FRI's knowledge certificate** from a layer of log height `n ≤ top`, after `j` folds with
-current word `f` and consistent set `C`: each fold round's certificate, then the final message
-and the query phase, appended. -/
+/-- **FRI's knowledge certificate** from a layer of log height `n ≤ top`, after `j` folds, where
+the verifier's word is `f` and the consistent set is `C`: each fold round's certificate, then the
+final message and the query phase, appended. -/
 noncomputable def certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
     {n : ℕ} → n ≤ top → (ω : SmoothCosetFftDomain n K) → (s : Schedule n) → (j : ℕ) →
       (f : Word K n) → (C : Finset (Fin (2 ^ top))) →
@@ -52,8 +52,9 @@ noncomputable def certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
       (foldRoundCertificate top d inputs δ loss hd hloss hn hk ω inject rest j f C).append
         (fun _ => (protocol K top d t rest).tree) (fun _ => (protocol K top d t rest).roles)
         fun path => certificate hd hloss (n := n - k) ((Nat.sub_le n k).trans hn)
-          (ω.subdomain k) rest (j + 1) path.2.1
-          (foldConsistent top hk ω f path.1 (injected inputs (n - k) inject) path.2.1 C)
+          (ω.subdomain k) rest (j + 1)
+          (foldNext hk ω path.1 path.2.1 (injected inputs (n - k) inject))
+          (commitConsistent top f path.1 C)
 
 /-- The certificate's largest path error is the folds' errors and the query term. -/
 theorem maxError_certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
@@ -67,14 +68,14 @@ theorem maxError_certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
     change ENNReal.ofReal (threshold δ loss j) ^ t + ⨆ _ : Fin t → Fin (2 ^ top), (0 : ENNReal) ≤ _
     simp [Schedule.foldError, Schedule.numFolds]
   | n, hn, ω, .fold k hk inject rest, j, f, C => by
-    change Schedule.roundError ω k (rest.degree d) δ loss inject +
-        (⨆ β : K, ⨆ next : Word K (n - k), (certificate top d t inputs δ loss hd hloss
-          ((Nat.sub_le n k).trans hn) (ω.subdomain k) rest (j + 1) next
-          (foldConsistent top hk ω f β (injected inputs (n - k) inject) next C)).challenges.maxError
+    change (⨆ word : Word K n, Schedule.roundError ω k (rest.degree d) δ loss inject +
+        ⨆ β : K, (certificate top d t inputs δ loss hd hloss ((Nat.sub_le n k).trans hn)
+          (ω.subdomain k) rest (j + 1) (foldNext hk ω word β (injected inputs (n - k) inject))
+          (commitConsistent top f word C)).challenges.maxError
           (protocol K top d t rest).roles) ≤ _
     rw [Schedule.foldError, Schedule.numFolds, add_assoc]
-    refine add_le_add le_rfl (iSup_le fun β => iSup_le fun next => ?_)
-    refine (maxError_certificate hd hloss _ _ rest (j + 1) next _).trans (le_of_eq ?_)
+    refine iSup_le fun word => add_le_add le_rfl (iSup_le fun β => ?_)
+    refine (maxError_certificate hd hloss _ _ rest (j + 1) _ _).trans (le_of_eq ?_)
     rw [show j + 1 + rest.numFolds = j + (rest.numFolds + 1) by omega]
 
 /-- FRI's certificate samples every challenge uniformly, so state restoration and Fiat–Shamir
@@ -85,9 +86,10 @@ theorem uniformChallenges_certificate (hd : 0 < d) (hloss : 0 ≤ loss) :
       StateRestoration.UniformChallenges (publicCoin (K := K) top d t s)
         (certificate top d t inputs δ loss hd hloss hn ω s j f C).challenges
   | _, _, _, .final, _, _, _ => fun _ => ⟨rfl, fun _ => trivial⟩
-  | n, hn, ω, .fold k hk inject rest, j, f, C => ⟨rfl, fun β next =>
+  | n, hn, ω, .fold k hk inject rest, j, f, C => fun word => ⟨rfl, fun β =>
       uniformChallenges_certificate hd hloss ((Nat.sub_le n k).trans hn) (ω.subdomain k) rest
-        (j + 1) next (foldConsistent top hk ω f β (injected inputs (n - k) inject) next C)⟩
+        (j + 1) (foldNext hk ω word β (injected inputs (n - k) inject))
+        (commitConsistent top f word C)⟩
 
 omit [Fintype K] [DecidableEq K] [SampleableType K] in
 /-- At the first layer, the state holds only if the inputs are close to their codes. -/
@@ -163,26 +165,26 @@ theorem terminal_holds_of_accepts (hd : 0 < d) (hloss : 0 ≤ loss)
   | @fold m k hk inject rest ih =>
     intro hn ω A impl r j f C OutP prover hr hcheck result hresult hacc
     rw [executeStrategies_fold] at hresult
+    obtain ⟨sent, -, hresult⟩ := support_bind_exists hresult
+    obtain ⟨next, hnext, hresult⟩ := support_bind_exists hresult
+    rw [verifier, simulateQ_pure, mem_support_pure_iff] at hnext
+    subst hnext
     obtain ⟨chosen, hchosen, hresult⟩ := support_bind_exists hresult
-    rw [verifier, simulateQ_bind] at hchosen
+    rw [simulateQ_bind] at hchosen
     obtain ⟨β, -, hchosen⟩ := support_bind_exists hchosen
     rw [simulateQ_pure, mem_support_pure_iff] at hchosen
     subst hchosen
-    obtain ⟨next, -, hresult⟩ := support_bind_exists hresult
-    obtain ⟨sent, -, hresult⟩ := support_bind_exists hresult
-    obtain ⟨after, hafter, hresult⟩ := support_bind_exists hresult
-    rw [simulateQ_pure, mem_support_pure_iff] at hafter
-    subst hafter
+    obtain ⟨after, -, hresult⟩ := support_bind_exists hresult
     obtain ⟨res, hres, hresult⟩ := support_bind_exists hresult
     rw [mem_support_pure_iff] at hresult
     subst hresult
-    exact ih (OutP := fun path => OutP ⟨β, sent.1, path⟩) ((Nat.sub_le m k).trans hn)
-      (ω.subdomain k) _ _ _ (j + 1) sent.1
-      (foldConsistent top hk ω f β (injected inputs (m - k) inject) sent.1 C) sent.2
-      (Reader.reads_fold impl inputs hr ω k hk inject β sent.1)
+    exact ih (OutP := fun path => OutP ⟨sent.1, β, path⟩) ((Nat.sub_le m k).trans hn)
+      (ω.subdomain k) _ _ _ (j + 1) _ (commitConsistent top f sent.1 C) after
+      (Reader.reads_fold _ inputs (Reader.reads_commit impl inputs hr sent.1) ω k hk inject β)
       (fun x => by
-        rw [Reader.simulateQ_fold_check impl inputs hr, hcheck, Bool.eq_iff_iff]
-        simp [foldConsistent, Finset.mem_filter])
+        rw [Reader.fold_check, Reader.simulateQ_commit_check impl inputs hr, hcheck,
+          Bool.eq_iff_iff]
+        simp [commitConsistent, Finset.mem_filter])
       res hres hacc
 
 set_option backward.isDefEq.respectTransparency false in
@@ -207,22 +209,21 @@ theorem samplesChallenges_verifier (hd : 0 < d) (hloss : 0 ≤ loss) :
     rw [bind_pure_comp, prEvent_map]
     rfl
   | @fold m k hk inject rest ih =>
-    intro hn ω A impl r j f C
+    intro hn ω A impl r j f C word after hafter
+    rw [simulateQ_id', verifier, simulateQ_pure, mem_support_pure_iff] at hafter
+    subst hafter
     refine ⟨fun event => ?_, fun chosen hchosen => ?_⟩
-    · simp only [simulateQ_id', verifier, simulateQ_bind, simulateQ_liftAccessImpl_liftComp,
+    · simp only [simulateQ_id', simulateQ_bind, simulateQ_liftAccessImpl_liftComp,
         simulateQ_pure]
       rw [bind_pure_comp, prEvent_map]
       rfl
-    · simp only [simulateQ_id', verifier, simulateQ_bind, simulateQ_liftAccessImpl_liftComp,
+    · simp only [simulateQ_id', simulateQ_bind, simulateQ_liftAccessImpl_liftComp,
         simulateQ_pure] at hchosen
       obtain ⟨β, -, hchosen⟩ := support_bind_exists hchosen
       rw [mem_support_pure_iff] at hchosen
       subst hchosen
-      intro message after hafter
-      rw [simulateQ_id', simulateQ_pure, mem_support_pure_iff] at hafter
-      subst hafter
-      exact ih ((Nat.sub_le m k).trans hn) (ω.subdomain k) _ _ _ (j + 1) message
-        (foldConsistent top hk ω f β (injected inputs (m - k) inject) message C)
+      exact ih ((Nat.sub_le m k).trans hn) (ω.subdomain k) _ _ _ (j + 1)
+        (foldNext hk ω word β (injected inputs (m - k) inject)) (commitConsistent top f word C)
 
 /-- **FRI is knowledge sound.** Against any prover, the verifier accepts the inputs `inputs` with
 probability at most `error ω s d t δ` unless the tallest input is `δ`-close to the code before
