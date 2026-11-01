@@ -51,7 +51,8 @@ may depend on the prover's public moves before it. -/
 variable {C : Type}
 
 /-- The decoded presentation: the protocol with coins of `C` at every challenge node. -/
-@[reducible] def decodedProtocol (C : Type) : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) →
+@[reducible] def decodedProtocol (C : Type) : {protocol : Protocol.{0}} →
+    (coin : PublicCoin protocol) →
     Decoder C coin → Protocol.{0}
   | _, .done, _ => .done
   | _, @sender Moves _ _ next, dec => .public .sender Moves fun move =>
@@ -157,11 +158,13 @@ noncomputable def decodeSchedule [SampleableType C] (ratio : ENNReal) : {protoco
   | _, @PublicCoin.oracle _ _ _ _ next, dec, schedule => fun message =>
       decodeSchedule ratio next dec (schedule message)
   | _, @PublicCoin.challenge _ _ _ next, dec, schedule =>
-      ⟨($ᵗ C, ratio * schedule.1.2), fun c => decodeSchedule ratio next dec.2 (schedule.2 (dec.1 c))⟩
+      ⟨($ᵗ C, ratio * schedule.1.2), fun c =>
+        decodeSchedule ratio next dec.2 (schedule.2 (dec.1 c))⟩
 
 /-- The pulled-back witness maps are locally bounded by the decoders' ratio times the protocol's
 errors, when the protocol's challenges are uniform. -/
-theorem isLocallyBounded_decodeExtractor [SampleableType C] (ratio : ENNReal) : {protocol : Protocol.{0}} → (coin : PublicCoin protocol) → (dec : Decoder C coin) →
+theorem isLocallyBounded_decodeExtractor [SampleableType C] (ratio : ENNReal) :
+    {protocol : Protocol.{0}} → (coin : PublicCoin protocol) → (dec : Decoder C coin) →
     Decoder.Bounded ratio coin dec → {state : KnowledgeState} →
     (extractor : RoundExtractor protocol.tree state) →
     (schedule : RoundExtractor.ChallengeSchedule protocol.tree protocol.roles) →
@@ -231,7 +234,8 @@ def decodedCommon [SampleableType C] {Input Salt : Type} {protocol : Input → P
   challengeEquiv key := Equiv.cast (challenge_decoded (coin key.1) (dec key.1) key.2)
 
 /-- The prefix of the protocol a prefix of the decoded presentation stands for. -/
-@[reducible] noncomputable def Prefix.undecode [SampleableType C] {Salt : Type} {protocol : Protocol.{0}}
+@[reducible] noncomputable def Prefix.undecode [SampleableType C] {Salt : Type}
+    {protocol : Protocol.{0}}
     (coin : PublicCoin protocol) :
     (dec : Decoder C coin) → Prefix Salt (decoded C coin dec) → Prefix Salt coin :=
   PublicCoin.rec (motive := fun _ coin =>

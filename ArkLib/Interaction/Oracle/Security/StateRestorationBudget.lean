@@ -102,13 +102,15 @@ theorem pathError_mono : {protocol : Protocol} → (coin : PublicCoin protocol) 
 
 /-- The largest node error is monotone in the node errors. -/
 theorem maxError_mono {coin : (z : Input) → PublicCoin (protocol z)}
-    {errors errors' : (z : Input) → Errors (coin z)} (h : ∀ z node, errors z node ≤ errors' z node) :
+    {errors errors' : (z : Input) → Errors (coin z)}
+    (h : ∀ z node, errors z node ≤ errors' z node) :
     maxError errors ≤ maxError errors' :=
   iSup_mono fun z => iSup_mono fun node => h z node
 
 /-- The largest path sum over all inputs is monotone in the node errors. -/
 theorem sumError_mono {coin : (z : Input) → PublicCoin (protocol z)}
-    {errors errors' : (z : Input) → Errors (coin z)} (h : ∀ z node, errors z node ≤ errors' z node) :
+    {errors errors' : (z : Input) → Errors (coin z)}
+    (h : ∀ z node, errors z node ≤ errors' z node) :
     sumError errors ≤ sumError errors' :=
   iSup_mono fun z => pathError_mono (coin z) (h z)
 

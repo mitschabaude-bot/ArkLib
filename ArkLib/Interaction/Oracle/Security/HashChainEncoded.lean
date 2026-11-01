@@ -348,7 +348,8 @@ from `s₀`, and read the challenge off the answer. -/
 def chainCompletionQueries (s₀ : S) (common : CommonChallenge Input Salt (S × O) coin)
     (codec : ChainCodec (Key Input Salt coin) I) :
     QueryImpl (oracleSpec Input Salt coin) (OracleComp (unifSpec + (chainSpec S I O + []ₒ))) :=
-  fun key => (common.challengeEquiv key).symm <$> absorb s₀ (codec.encode key).1 (codec.encode key).2
+  fun key => (common.challengeEquiv key).symm <$>
+    absorb s₀ (codec.encode key).1 (codec.encode key).2
 
 /-- Complete a selected transcript while its guards pass, each challenge from the chain. -/
 def chainCompletionAfter (s₀ : S) (coin : (z : Input) → PublicCoin (protocol z))
@@ -391,7 +392,9 @@ theorem log_length_le_of_mem_support {α : Type} (P : OracleComp (unifSpec + ofF
     (hz : z ∈ support (randomOracleLoggedRun P c)) : z.1.2.length ≤ q := by
   induction P using OracleComp.inductionOn generalizing c q z with
   | pure a =>
-    simp [randomOracleLoggedRun] at hz
+    simp only [randomOracleLoggedRun, QueryImpl.passthrough_add, simulateQ_pure,
+      WriterT.run_pure, List.empty_eq, StateT.run_pure, MonadAttach.support_pure,
+      Set.mem_singleton_iff] at hz
     rw [hz]
     simp
   | query_bind t k ih =>
@@ -483,9 +486,8 @@ theorem replay_simulateQ_of_forall {κ ι₁ ι₂ : Type} {native : OracleSpec 
       rw [h t u hu]
       exact ih u hP
 
-variable [DecidableEq Input]
 
-omit [SampleableType S] [SampleableType O] [DecidableEq Input] in
+omit [SampleableType S] [SampleableType O] in
 /-- Off a collision, replaying the verifier's chain completion through `view` succeeds as replaying
 the encoded completion on the prefix oracle's cache. -/
 theorem replay_encodedCompletion (s₀ : S) (coin : (z : Input) → PublicCoin (protocol z))
@@ -595,7 +597,8 @@ theorem chainStopped_knowledge_soundness (s₀ : S) (coin : (z : Input) → Publ
     exact replay_of_mem_support_run _ (isQueryBoundP_chainCompletionAfter s₀ coin common codec
       guards w.1) w.2 y hy
   -- Off a collision, it is the replay of the encoded completion in the simulated run.
-  have h2 := (dominatedUntilBad (I := I) (O := O) (extra := []ₒ) s₀).prEvent_simulateQ_run_le_map_or_bad
+  have h2 :=
+    (dominatedUntilBad (I := I) (O := O) (extra := []ₒ) s₀).prEvent_simulateQ_run_le_map_or_bad
     (preservesInv_inv s₀) (preservesInv_bad s₀) Aplus (SimState.init, ∅) inv_init
     (fun z => replay z.2 (cc z.1.1) = some z.1.2 ∧ E z.1.2)
   rw [view_init] at h2
@@ -686,7 +689,8 @@ theorem KnowledgeCertificate.chainStopped_knowledge_soundness (s₀ : S)
     (uniform : ∀ z, UniformChallenges (coin z) (certificate z).challenges)
     (adversary : OracleComp (unifSpec + (chainSpec S I O + []ₒ))
       (Option (Selection Input Salt W fun z => decoded (S × O) (coin z) (dec z))))
-    {q : ℕ} (hq : IsQueryBoundP (chainStoppedExecution s₀ (fun z => decoded (S × O) (coin z) (dec z))
+    {q : ℕ} (hq : IsQueryBoundP
+      (chainStoppedExecution s₀ (fun z => decoded (S × O) (coin z) (dec z))
       (decodedCommon coin dec) codec guards adversary) (fun t => isChain t = true) q)
     (Rout : (z : Input) →
       (path : (decodedProtocol (S × O) (coin z) (dec z)).tree.ExecutionPath) → W → Prop)
@@ -701,8 +705,10 @@ theorem KnowledgeCertificate.chainStopped_knowledge_soundness (s₀ : S)
           (decodedCommon coin dec) codec guards adversary)).run' ∅}[
       badStoppedRelation state (fun z => decodeExtractor (coin z) (dec z) (certificate z).extractor)
         (fun z => (state z).holds) Rout terminalWitness Set.univ result] ≤
-      chainError S q + ratio * (maxError (fun z => supErrors (coin z) (certificate z).challenges) * q +
+      chainError S q +
+        ratio * (maxError (fun z => supErrors (coin z) (certificate z).challenges) * q +
         sumError (fun z => supErrors (coin z) (certificate z).challenges)) := by
+  classical
   let errors : (z : Input) → Errors (decoded (S × O) (coin z) (dec z)) := fun z node =>
     ratio * supErrors (coin z) (certificate z).challenges (Prefix.undecode (coin z) (dec z) node)
   have h := HashChain.chainStopped_knowledge_soundness
