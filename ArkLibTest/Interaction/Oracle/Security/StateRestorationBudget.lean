@@ -263,7 +263,7 @@ theorem actual_nonuniform_game_bound :
     inputLaw outputLaw adversary 2 queryBound
   calc
     _ ≤ 2 * Finset.univ.sup errors + ∑ j, errors j :=
-      general.trans (add_le_add (mul_le_mul_left' (maxError_roundErrors_le rounds errors) _)
+      general.trans (add_le_add (mul_le_mul' le_rfl (maxError_roundErrors_le rounds errors))
         (sumError_roundErrors_le rounds errors))
     _ = 7 / 16 := by
       rw [max_errors, sum_errors]
