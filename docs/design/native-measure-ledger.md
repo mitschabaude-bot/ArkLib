@@ -199,16 +199,16 @@ No retired-probability baseline is introduced, and no warning exclusions are add
 
 This is a complete sweep of every theorem and lemma whose proof body is longer than at merge base
 `8b03d40a56ec827d223b78ccca0ce164a9231f6c`. Proof bodies are counted from the final `:= by`
-line. The sweep started with 42 grown rows. Two are now at or below their merge-base size:
+line. The sweep started with 41 grown rows. Two are now at or below their merge-base size:
 `BCHKS25.rs_Lambda_le_card_of_epsCa_lt` (431 → 424), whose bounds are now stated on
 `Pr{let z ← $ᵗ F}[Pevent z]` through `prEvent_uniformSample_eq_ofReal`; and the RbrGame convex
 bound, covered in phase 1. `DG25/MainResults.interleaved_affine_gaps_imply_tensor_gaps` drops from
 +9 to +2 because `Fin.snocEquiv` supplies the bijectivity proof.
 
-None of the 40 remaining rows is a probability argument that got longer. Each grows by one to
+None of the 39 remaining rows is a probability argument that got longer. Each grows by one to
 three lines, and they have three causes, none of which is R1–R4.
 
-**D1: instance search after the native sampler import (26 rows).** Converting `$ᵖ` to `$ᵗ` makes
+**D1: instance search after the native sampler import (25 rows).** Converting `$ᵖ` to `$ᵗ` makes
 these files import `VCVio.OracleComp.OracleSpec`. Because `Domain` is reducible, its instance
 `[spec.DecidableEq] → DecidableEq spec.Domain` (`OracleSpec.lean:77`) is indexed as
 `DecidableEq ι` with `spec` undetermined, so it matches every `DecidableEq α` goal. With the
@@ -230,7 +230,6 @@ multi-let files, and every one fails with a 20000-heartbeat typeclass timeout. T
 `Entropy/Counting.rsCode_disjoint_supported_of_small`, `JohnsonLower.rs_monomial_agreement_card_le_two_mul`,
 `Powers/Incidence.powers_coefficients_eq_of_agree_on_distinct_seeds`,
 `Subfield/Algebra.subfield_ca_interpolant_unique`,
-`UniqueDecoding/Internal.rs_exists_oversized_bivariate_ab_of_dimension`,
 `Errors.exists_forall_notMem_of_card_le`, `LineDecoding.affine_collision_injective`,
 `LineDecoding.exists_outside_finite_union_submodules`,
 `PolynomialGenerator.isMCAGenerator_of_isPolynomialGeneratorOf` (+2 each), and

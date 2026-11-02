@@ -13,7 +13,8 @@ public import ArkLib.Data.CodingTheory.ProximityGap.Errors
 
 This module proves the BCHKS25 correlated-agreement bound for lines below the finite-length
 half-distance boundary, as the case `M = 1` of the bound for curves
-(`UniqueDecoding.card_goodCoeffs_le`, `UniqueDecoding/Curves.lean`).
+(`UniqueDecoding.card_goodCoeffs_le`, `UniqueDecoding/Curves.lean`) at a positive radius; at
+radius `0` a line of words not jointly close has at most one point in the code.
 
 ## Main result
 
@@ -36,13 +37,49 @@ section ReedSolomon
 variable {ι : Type} [Fintype ι] [Nonempty ι] [DecidableEq ι]
 variable {F : Type} [Field F] [Fintype F] [SampleableType F] [DecidableEq F]
 
+omit [DecidableEq ι] [SampleableType F] in
+/-- At radius `0`, a line of words not jointly `δ_int`-close to the code has at most one point in
+the code: two would put both words in it. -/
+private theorem card_goodCoeffs_zero_le_one (domain : ι ↪ F) (k : ℕ) (δ_int : ℝ≥0)
+    (u : Fin 2 → ι → F)
+    (hjoint : ¬ Code.jointProximity
+      (C := (ReedSolomon.code domain k : Set (ι → F))) (u := u) δ_int) :
+    (UniqueDecoding.goodCoeffs domain k u 0).card ≤ 1 := by
+  classical
+  have hline : ∀ z : F, Curve.polynomialCurveEval u z = u 0 + z • u 1 := fun z => by
+    simp only [Curve.polynomialCurveEval, Fin.sum_univ_two, Fin.val_zero, Fin.val_one, pow_zero,
+      pow_one, one_smul]
+  have hmem : ∀ z ∈ UniqueDecoding.goodCoeffs domain k u 0,
+      u 0 + z • u 1 ∈ ReedSolomon.code domain k := fun z hz => by
+    obtain ⟨v, hv, hd⟩ := UniqueDecoding.exists_close_codeword domain k (Finset.mem_filter.mp hz).2
+    rw [zero_mul, Nat.floor_zero, Nat.le_zero, hammingDist_eq_zero] at hd
+    rwa [← hline, hd]
+  refine Finset.card_le_one.mpr fun z₁ hz₁ z₂ hz₂ => ?_
+  by_contra hne
+  have h₁ := hmem z₁ hz₁
+  have h₂ := hmem z₂ hz₂
+  have hu₁ : u 1 ∈ ReedSolomon.code domain k := by
+    have := Submodule.smul_mem _ (z₁ - z₂)⁻¹ (Submodule.sub_mem _ h₁ h₂)
+    rwa [add_sub_add_left_eq_sub, ← sub_smul, smul_smul, inv_mul_cancel₀ (sub_ne_zero.mpr hne),
+      one_smul] at this
+  have hu₀ : u 0 ∈ ReedSolomon.code domain k := by
+    have := Submodule.sub_mem _ h₁ (Submodule.smul_mem _ z₁ hu₁)
+    rwa [add_sub_cancel_right] at this
+  refine hjoint (UniqueDecoding.jointProximity_of_disagree_card_le _ u u δ_int
+    (fun j => ?_) ?_)
+  · fin_cases j
+    · exact hu₀
+    · exact hu₁
+  · simp only [UniqueDecoding.disagree, ne_eq, not_true_eq_false, exists_false,
+      Finset.filter_false, Finset.card_empty, zero_le]
+
 open scoped NNReal ProbabilityTheory in
 omit [DecidableEq ι] in
 private theorem rs_fold_probability_le_bound_of_not_joint_proximity
     (domain : ι ↪ F) (k : ℕ) (δ_fld δ_int : ℝ≥0)
     (h_ud : (δ_fld : ℝ) ≤
       (1 - (k : ℝ) / Fintype.card ι) / 2 - 1 / Fintype.card ι)
-    (h_pos : 0 < δ_fld) (h_lt : δ_fld < δ_int)
+    (h_lt : δ_fld < δ_int)
     (u : Fin 2 → ι → F)
     (hjoint : ¬ Code.jointProximity
       (C := (ReedSolomon.code domain k : Set (ι → F))) (u := u) δ_int) :
@@ -64,8 +101,16 @@ private theorem rs_fold_probability_le_bound_of_not_joint_proximity
         (1 - (k : ℝ) / Fintype.card ι - 2 * (δ_fld : ℝ)))
   let T₂ : ℝ := (δ_int : ℝ) / ((δ_int : ℝ) - (δ_fld : ℝ))
   have hcard : (good.card : ℝ) ≤ max T₁ T₂ := by
-    have := UniqueDecoding.card_goodCoeffs_le domain k 1 u δ_fld δ_int h_ud h_pos h_lt hjoint
-    rwa [Nat.cast_one, one_mul] at this
+    rcases (zero_le (a := δ_fld)).eq_or_lt with h0 | h_pos
+    · have hint : (δ_int : ℝ) ≠ 0 := by
+        rw [← h0] at h_lt
+        exact_mod_cast h_lt.ne'
+      have hT₂ : T₂ = 1 := by simp only [T₂, ← h0, NNReal.coe_zero, sub_zero, div_self hint]
+      have h1 := card_goodCoeffs_zero_le_one domain k δ_int u hjoint
+      rw [h0] at h1
+      exact le_max_of_le_right (hT₂ ▸ (by exact_mod_cast h1))
+    · have := UniqueDecoding.card_goodCoeffs_le domain k 1 u δ_fld δ_int h_ud h_pos h_lt hjoint
+      rwa [Nat.cast_one, one_mul] at this
   have hline : ∀ z : F, Curve.polynomialCurveEval u z = u 0 + z • u 1 := fun z => by
     simp only [Curve.polynomialCurveEval, Fin.sum_univ_two, Fin.val_zero, Fin.val_one, pow_zero,
       pow_one, one_smul]
@@ -108,11 +153,11 @@ open scoped NNReal in
 open scoped ProbabilityTheory in
 omit [DecidableEq ι] in
 /-- Bounds Reed--Solomon CA error when `δ_fld` lies in the finite-length unique-decoding range
-`0 < δ_fld ≤ (1 - ρ) / 2 - 1 / n`, and `δ_fld < δ_int`. -/
+`δ_fld ≤ (1 - ρ) / 2 - 1 / n`, and `δ_fld < δ_int`. -/
 theorem rs_epsCa_le_in_unique_decoding_range
     (domain : ι ↪ F) (k : ℕ) (δ_fld δ_int : ℝ≥0)
     (_h_ud : (δ_fld : ℝ) ≤ (1 - (k : ℝ) / Fintype.card ι) / 2 - 1 / Fintype.card ι)
-    (_h_pos : 0 < δ_fld) (_h_lt : δ_fld < δ_int) :
+    (_h_lt : δ_fld < δ_int) :
     let n : ℝ := Fintype.card ι
     let ρ : ℝ := k / n
     let bound : ℝ :=
@@ -130,7 +175,7 @@ theorem rs_epsCa_le_in_unique_decoding_range
     exact zero_le
   · rw [ite_eq_right hj]
     exact rs_fold_probability_le_bound_of_not_joint_proximity
-      domain k δ_fld δ_int _h_ud _h_pos _h_lt u hj
+      domain k δ_fld δ_int _h_ud _h_lt u hj
 
 end ReedSolomon
 

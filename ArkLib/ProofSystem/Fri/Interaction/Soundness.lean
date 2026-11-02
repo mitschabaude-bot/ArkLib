@@ -25,8 +25,7 @@ positions from `L` (`samplesChallenges_verifier`), and when it accepts, the term
 (`terminal_holds_of_accepts`), its checks computing the consistent sets of the knowledge states.
 `KnowledgeCertificate.executeStrategies_extraction_le` then bounds acceptance of far inputs by a
 verifier with uniform positions: `acceptance_le`, at most `error ω s d t δ`, the folds' errors and
-the query term minimized over the proximity loss. That is CompStark's `FriGame.error`, the error
-of `friErrorWith`, on the schedule's shape.
+the query term minimized over the proximity loss.
 -/
 
 @[expose] public section

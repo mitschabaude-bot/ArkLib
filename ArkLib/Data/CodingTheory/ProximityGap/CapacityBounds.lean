@@ -128,7 +128,7 @@ radii. This theorem is proved from that identity and `rs_epsCa_le_in_unique_deco
 theorem rs_epsCa_le_of_no_radius_level_crossing
     (domain : ι ↪ F) (k : ℕ) (δ_fld : ℝ≥0) (γ : ℝ≥0)
     (_h_ud : (δ_fld : ℝ) ≤ (1 - (k : ℝ) / Fintype.card ι) / 2 - 1 / Fintype.card ι)
-    (_h_pos : 0 < δ_fld) (_hγ_pos : 0 < γ) (_hγ_lt : (γ : ℝ) < 1)
+    (_hγ_pos : 0 < γ) (_hγ_lt : (γ : ℝ) < 1)
     (_h_no_cross :
         Nat.floor ((δ_fld + γ / (Fintype.card ι : ℝ≥0)) * (Fintype.card ι : ℝ≥0))
           = Nat.floor ((δ_fld : ℝ≥0) * (Fintype.card ι : ℝ≥0))) :
@@ -159,7 +159,7 @@ theorem rs_epsCa_le_of_no_radius_level_crossing
   rw [hcollapse]
   -- Apply T4.9.2 at `δ_int`.
   have hT492 :=
-    rs_epsCa_le_in_unique_decoding_range (F := F) domain k δ_fld δ_int _h_ud _h_pos hlt
+    rs_epsCa_le_in_unique_decoding_range (F := F) domain k δ_fld δ_int _h_ud hlt
   simp only at hT492
   refine le_trans hT492 ?_
   -- Reduce to real-number equality of the two `max` bounds and monotonicity of `ENNReal.ofReal`.
