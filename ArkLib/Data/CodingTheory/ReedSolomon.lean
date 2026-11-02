@@ -286,6 +286,32 @@ theorem dim_eq_min_deg_card {ι : Type*} [Fintype ι] {F : Type*} [Field F]
   · rw [dim_eq_deg_of_le hle, min_eq_left hle]
   · rw [dim_eq_card_of_lt hlt, min_eq_right hlt.le]
 
+/-- Scaling the evaluation points by a nonzero `c` keeps the Reed–Solomon code: a polynomial `p`
+on `α` is `p (c⁻¹ X)`, of no larger degree, on `α'` with `α' i = c * α i`. -/
+lemma code_le_of_eq_mul {deg : ℕ} {α α' : ι ↪ F} {c : F} (hc : c ≠ 0)
+    (h : ∀ i, α' i = c * α i) : code α deg ≤ code α' deg := by
+  intro v hv
+  obtain ⟨p, hp, rfl⟩ := Submodule.mem_map.mp hv
+  refine Submodule.mem_map.mpr ⟨p.comp (Polynomial.C c⁻¹ * Polynomial.X), ?_, funext fun i ↦ ?_⟩
+  · rw [Polynomial.mem_degreeLT] at hp ⊢
+    by_cases hp0 : p = 0
+    · simp only [hp0, Polynomial.zero_comp, Polynomial.degree_zero]
+      exact WithBot.bot_lt_coe deg
+    have hlin : (Polynomial.C c⁻¹ * Polynomial.X).natDegree ≤ 1 :=
+      (Polynomial.natDegree_C_mul_le _ _).trans Polynomial.natDegree_X_le
+    have hq : (p.comp (Polynomial.C c⁻¹ * Polynomial.X)).natDegree ≤ p.natDegree :=
+      Polynomial.natDegree_comp_le.trans ((Nat.mul_le_mul_left _ hlin).trans (Nat.mul_one _).le)
+    refine lt_of_le_of_lt (Polynomial.degree_le_natDegree.trans (WithBot.coe_le_coe.mpr hq)) ?_
+    rwa [Polynomial.degree_eq_natDegree hp0] at hp
+  · simp only [evalOnPoints, LinearMap.coe_mk, AddHom.coe_mk, Polynomial.eval_comp,
+      Polynomial.eval_mul, Polynomial.eval_C, Polynomial.eval_X, h, inv_mul_cancel_left₀ hc]
+
+/-- Scaling the evaluation points by a nonzero `c` keeps the Reed–Solomon code. -/
+theorem code_eq_of_eq_mul {deg : ℕ} {α α' : ι ↪ F} {c : F} (hc : c ≠ 0)
+    (h : ∀ i, α' i = c * α i) : code α' deg = code α deg :=
+  le_antisymm (code_le_of_eq_mul (inv_ne_zero hc) fun i ↦ by rw [h, inv_mul_cancel_left₀ hc])
+    (code_le_of_eq_mul hc h)
+
 @[simp]
 lemma length_eq_domain_card [Fintype ι] {deg : ℕ} {α : ι ↪ F} :
     length (ReedSolomon.code α deg) = Fintype.card ι := rfl

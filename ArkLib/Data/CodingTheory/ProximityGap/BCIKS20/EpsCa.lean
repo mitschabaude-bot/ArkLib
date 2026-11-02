@@ -28,7 +28,7 @@ This module transports the former onto the latter, so the proven [BCIKS20] bound
 ## Relation to [BCHKS25] Theorem 1.3
 
 `CodingTheory.rs_epsCa_le_in_unique_decoding_range` states [BCHKS25] Theorem 1.3 on the same
-carrier and overlapping hypotheses, and is an external admit. It is **not** implied by the theorem
+carrier and overlapping hypotheses. It is **not** implied by the theorem
 below, and the theorem below is not implied by it: [BCHKS25]'s own comparison (their Table 1)
 records that [BCI+20] needs `a > n` exceptional coefficients where [BCHKS25] needs `a = O(1)`, so
 the bound here carries a factor `n` that Theorem 1.3 removes. Concretely, at `ρ = 1/2` and
@@ -36,8 +36,7 @@ the bound here carries a factor `n` that Theorem 1.3 removes. Concretely, at `ρ
 [BCHKS25] bound is roughly `12/|F|` at the bottom of its radius range against `1024/|F|` here, and
 the ratio grows linearly in `n`.
 
-The two are therefore complementary: this one is proved in-tree and axiom-clean, Theorem 1.3 is
-sharper and still admitted.
+The two are therefore complementary: Theorem 1.3 is sharper in the range where both apply.
 
 ## References
 

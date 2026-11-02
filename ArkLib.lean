@@ -312,7 +312,8 @@ public import ArkLib.Data.CodingTheory.ProximityGap.CapacityBounds.Subfield.Alge
 public import ArkLib.Data.CodingTheory.ProximityGap.CapacityBounds.Subfield.Moments
 public import ArkLib.Data.CodingTheory.ProximityGap.CapacityBounds.SubspaceDesign
 public import ArkLib.Data.CodingTheory.ProximityGap.CapacityBounds.UniqueDecoding
-public import ArkLib.Data.CodingTheory.ProximityGap.CapacityBounds.UniqueDecoding.Internal
+public import ArkLib.Data.CodingTheory.ProximityGap.CapacityBounds.UniqueDecoding.Curves
+public import ArkLib.Data.CodingTheory.ProximityGap.CapacityBounds.UniqueDecoding.LossyCurves
 public import ArkLib.Data.CodingTheory.ProximityGap.DG25.Basic
 public import ArkLib.Data.CodingTheory.ProximityGap.DG25.MainResults
 public import ArkLib.Data.CodingTheory.ProximityGap.DG25.ReedSolomon

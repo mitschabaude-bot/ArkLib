@@ -42,6 +42,21 @@ def numFolds : {n : ℕ} → Schedule n → ℕ
   | _, .final => 0
   | _, .fold _ _ _ rest => rest.numFolds + 1
 
+/-- The folds as data, in order: each fold's log arity, the log height of the domain it folds
+onto, and whether it injects the input there. -/
+def folds : {n : ℕ} → Schedule n → List (ℕ × ℕ × Bool)
+  | _, .final => []
+  | n, .fold k _ inject rest => (k, n - k, inject) :: rest.folds
+
+/-- The words a fold of `folds` combines by the powers of its challenge besides the first: the
+other `2 ^ k - 1` coefficient words of a fold by `2 ^ k`, and the input it injects, if any. -/
+def foldWords (f : ℕ × ℕ × Bool) : ℕ := 2 ^ f.1 - 1 + if f.2.2 then 1 else 0
+
+/-- One entry of `folds` per fold. -/
+theorem length_folds : ∀ {n : ℕ} (s : Schedule n), s.folds.length = s.numFolds
+  | _, .final => rfl
+  | _, .fold _ _ _ rest => congrArg (· + 1) (length_folds rest)
+
 /-- The degree bound of the code before the folds, for a final degree bound `d`. -/
 def degree (d : ℕ) : {n : ℕ} → Schedule n → ℕ
   | _, .final => d

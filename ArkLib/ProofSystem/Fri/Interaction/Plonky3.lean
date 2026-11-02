@@ -242,6 +242,153 @@ theorem inputsInCode_plonky3 {maxLogArity logFinal : ℕ} (ha : 0 < maxLogArity)
         exact inputsInCode_plonky3 ha inputs d P hP fuel _ _ _ (by omega) (by omega)
           (fits_cons_of_ne hfit h3 hm) (hP ω _ hω) hin
 
+/-- Every fold of the schedule from height `n`, for fitting heights, is by `1` to `maxLogArity`
+bits onto a height from `logFinal` to below `n`. -/
+theorem mem_folds_plonky3 {maxLogArity logFinal : ℕ} (ha : 0 < maxLogArity) :
+    ∀ (fuel n : ℕ) (heights : List ℕ), Fits logFinal n heights →
+      ∀ f ∈ (plonky3 maxLogArity logFinal fuel n heights).folds,
+        1 ≤ f.1 ∧ f.1 ≤ maxLogArity ∧ logFinal ≤ f.2.1 ∧ f.2.1 < n
+  | 0, _, _, _, f, hf => absurd hf List.not_mem_nil
+  | fuel + 1, n, heights, hfit, f, hf => by
+    by_cases hfin : n ≤ logFinal
+    · rw [plonky3, ite_eq_left hfin] at hf
+      exact absurd hf List.not_mem_nil
+    have h1 := one_le_logArity ha (by omega) hfit
+    have h2 := logArity_le maxLogArity logFinal n heights
+    have h3 : logArity maxLogArity logFinal n heights ≤ maxLogArity := min_le_right _ _
+    have hhead : 1 ≤ logArity maxLogArity logFinal n heights ∧
+        logArity maxLogArity logFinal n heights ≤ maxLogArity ∧
+        logFinal ≤ n - logArity maxLogArity logFinal n heights ∧
+        n - logArity maxLogArity logFinal n heights < n := ⟨h1, h3, by omega, by omega⟩
+    have hrest : ∀ heights', Fits logFinal (n - logArity maxLogArity logFinal n heights) heights' →
+        ∀ f ∈ (plonky3 maxLogArity logFinal fuel (n - logArity maxLogArity logFinal n heights)
+          heights').folds, 1 ≤ f.1 ∧ f.1 ≤ maxLogArity ∧ logFinal ≤ f.2.1 ∧ f.2.1 < n :=
+      fun heights' hfit' f hf ↦ by
+        have := mem_folds_plonky3 ha fuel _ heights' hfit' f hf
+        omega
+    rw [plonky3, ite_eq_right hfin] at hf
+    match heights, hfit, hhead, hrest, hf with
+    | [], _, hhead, hrest, hf =>
+      rcases List.mem_cons.mp hf with rfl | hf
+      · exact hhead
+      · exact hrest [] (fits_nil _ _) f hf
+    | m :: rest, hfit, hhead, hrest, hf =>
+      have h4 := logArity_le_cons maxLogArity logFinal n m rest
+      by_cases hm : m = n - logArity maxLogArity logFinal n (m :: rest)
+      · dsimp only at hf
+        rw [ite_eq_left hm] at hf
+        rcases List.mem_cons.mp hf with rfl | hf
+        · exact hhead
+        · exact hrest rest (fits_of_eq hfit hm) f hf
+      · dsimp only at hf
+        rw [ite_eq_right hm] at hf
+        rcases List.mem_cons.mp hf with rfl | hf
+        · exact hhead
+        · exact hrest _ (fits_cons_of_ne hfit h4 hm) f hf
+
+/-- The schedule from height `n` has at most `n - logFinal` folds, for fitting heights. -/
+theorem numFolds_plonky3_le {maxLogArity logFinal : ℕ} (ha : 0 < maxLogArity) :
+    ∀ (fuel n : ℕ) (heights : List ℕ), Fits logFinal n heights →
+      (plonky3 maxLogArity logFinal fuel n heights).numFolds ≤ n - logFinal
+  | 0, _, _, _ => Nat.zero_le _
+  | fuel + 1, n, heights, hfit => by
+    by_cases hfin : n ≤ logFinal
+    · rw [plonky3, ite_eq_left hfin, numFolds]
+      exact Nat.zero_le _
+    have h1 := one_le_logArity ha (by omega) hfit
+    have h2 := logArity_le maxLogArity logFinal n heights
+    rw [plonky3, ite_eq_right hfin]
+    match heights, hfit, h1, h2 with
+    | [], _, h1, h2 =>
+      have := numFolds_plonky3_le (logFinal := logFinal) ha fuel
+        (n - logArity maxLogArity logFinal n []) [] (fits_nil _ _)
+      simp only [numFolds]
+      omega
+    | m :: rest, hfit, h1, h2 =>
+      have h4 := logArity_le_cons maxLogArity logFinal n m rest
+      by_cases hm : m = n - logArity maxLogArity logFinal n (m :: rest)
+      · have := numFolds_plonky3_le ha fuel _ rest (fits_of_eq hfit hm)
+        simp only [ite_eq_left hm, numFolds]
+        omega
+      · have := numFolds_plonky3_le ha fuel _ _ (fits_cons_of_ne hfit h4 hm)
+        simp only [ite_eq_right hm, numFolds]
+        omega
+
+/-- The schedule does not depend on its fuel once the fuel covers the folds, for fitting
+heights. -/
+theorem plonky3_fuel {maxLogArity logFinal : ℕ} (ha : 0 < maxLogArity) :
+    ∀ (fuel fuel' n : ℕ) (heights : List ℕ), Fits logFinal n heights → n - logFinal ≤ fuel →
+      n - logFinal ≤ fuel' →
+      plonky3 maxLogArity logFinal fuel n heights = plonky3 maxLogArity logFinal fuel' n heights
+  | 0, 0, _, _, _, _, _ => rfl
+  | 0, _ + 1, n, _, _, h, _ => by
+    simp only [plonky3, ite_eq_left (show n ≤ logFinal by omega)]
+  | _ + 1, 0, n, _, _, _, h => by
+    simp only [plonky3, ite_eq_left (show n ≤ logFinal by omega)]
+  | fuel + 1, fuel' + 1, n, heights, hfit, h, h' => by
+    by_cases hfin : n ≤ logFinal
+    · simp only [plonky3, ite_eq_left hfin]
+    have h1 := one_le_logArity ha (by omega) hfit
+    have h2 := logArity_le maxLogArity logFinal n heights
+    simp only [plonky3, ite_eq_right hfin]
+    match heights, hfit, h1, h2 with
+    | [], _, h1, h2 =>
+      rw [plonky3_fuel ha fuel fuel' _ [] (fits_nil _ _) (by omega) (by omega)]
+    | m :: rest, hfit, h1, h2 =>
+      have h4 := logArity_le_cons maxLogArity logFinal n m rest
+      by_cases hm : m = n - logArity maxLogArity logFinal n (m :: rest)
+      · simp only [ite_eq_left hm]
+        rw [plonky3_fuel ha fuel fuel' _ rest (fits_of_eq hfit hm) (by omega) (by omega)]
+      · simp only [ite_eq_right hm]
+        rw [plonky3_fuel ha fuel fuel' _ _ (fits_cons_of_ne hfit h4 hm) (by omega) (by omega)]
+
+/-- **The folds up to the next input.** From a height `a` above the next input's height `x`, the
+schedule folds as the schedule without inputs does down to a height `a'` at most `maxLogArity`
+above `x`, then onto `x`, injecting the input there, and goes on from `x`. -/
+theorem folds_plonky3_cons_split {maxLogArity logFinal : ℕ} (ha : 0 < maxLogArity) :
+    ∀ (a x : ℕ) (rest : List ℕ), Fits logFinal a (x :: rest) →
+      ∃ (P : List (ℕ × ℕ × Bool)) (a' : ℕ), x < a' ∧ a' - x ≤ maxLogArity ∧
+        (plonky3 maxLogArity logFinal a a (x :: rest)).folds =
+          P ++ (a' - x, x, true) :: (plonky3 maxLogArity logFinal x x rest).folds ∧
+        (plonky3 maxLogArity logFinal a a []).folds =
+          P ++ (plonky3 maxLogArity logFinal a' a' []).folds := by
+  intro a
+  induction a using Nat.strong_induction_on with
+  | _ a ih =>
+  intro x rest hfit
+  have hx := hfit.2 x List.mem_cons_self
+  obtain ⟨a₀, rfl⟩ : ∃ a₀, a = a₀ + 1 := ⟨a - 1, by omega⟩
+  have hfin : ¬ a₀ + 1 ≤ logFinal := by omega
+  by_cases hle : a₀ + 1 - x ≤ maxLogArity
+  · have hla : logArity maxLogArity logFinal (a₀ + 1) (x :: rest) = a₀ + 1 - x := by
+      simp only [logArity, List.headD_cons]
+      omega
+    have hm : x = a₀ + 1 - logArity maxLogArity logFinal (a₀ + 1) (x :: rest) := by omega
+    refine ⟨[], a₀ + 1, hx.2, hle, ?_, rfl⟩
+    have hfit' := fits_of_eq hfit hm
+    simp only [plonky3, ite_eq_right hfin, ite_eq_left hm, List.nil_append, folds]
+    rw [hla, show a₀ + 1 - (a₀ + 1 - x) = x by omega,
+      plonky3_fuel ha a₀ x x rest (by rwa [hla, show a₀ + 1 - (a₀ + 1 - x) = x by omega] at hfit')
+        (by omega) (by omega)]
+  · have hla : logArity maxLogArity logFinal (a₀ + 1) (x :: rest) = maxLogArity := by
+      simp only [logArity, List.headD_cons]
+      omega
+    have hla' : logArity maxLogArity logFinal (a₀ + 1) [] = maxLogArity := by
+      simp only [logArity, List.headD_nil]
+      omega
+    have hm : ¬ x = a₀ + 1 - logArity maxLogArity logFinal (a₀ + 1) (x :: rest) := by omega
+    have hfit' := fits_cons_of_ne hfit (logArity_le_cons _ _ _ _ _) hm
+    rw [hla] at hfit'
+    obtain ⟨P, a', h1, h2, h3, h4⟩ := ih (a₀ + 1 - maxLogArity) (by omega) x rest hfit'
+    refine ⟨(maxLogArity, a₀ + 1 - maxLogArity, false) :: P, a', h1, h2, ?_, ?_⟩
+    · simp only [plonky3, ite_eq_right hfin]
+      rw [ite_eq_right hm, folds, hla,
+        plonky3_fuel ha a₀ (a₀ + 1 - maxLogArity) _ _ hfit' (by omega) (by omega), h3,
+        List.cons_append]
+    · simp only [plonky3, ite_eq_right hfin]
+      rw [folds, hla', plonky3_fuel ha a₀ (a₀ + 1 - maxLogArity) _ [] (fits_nil _ _) (by omega)
+        (by omega), h4, List.cons_append]
+
 end Schedule
 
 end Fri.Interaction
