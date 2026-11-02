@@ -18,7 +18,7 @@ linter.style.header = false
 [[require]]
 name = "VCVio"
 git = "https://github.com/mitschabaude-bot/VCVio.git"
-rev = "d8cfe466f594510465d56e06f65075861e32fedc"
+rev = "b46db1d8226410dd2e6b66ce2f982027f1c26fba"
 
 [[require]]
 name = "«doc-gen4»"
