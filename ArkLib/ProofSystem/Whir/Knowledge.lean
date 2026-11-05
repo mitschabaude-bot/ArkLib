@@ -73,7 +73,15 @@ theorem initialExtractor_holds {K E : Type} [Semiring K] [Semiring E]
     (claims : List (Claim E (lanes + vars)))
     (exists_witness : ∃ f, (initialState enc ι γ word claims).holds f) :
     (initialState enc ι γ word claims).holds (initialExtractor decoder ι word claims) := by
-  sorry
+  obtain ⟨f, hf, hclaims⟩ := exists_witness
+  unfold initialExtractor
+  split
+  · rename_i g hg
+    exact ⟨(correct.mem_iff word g).mp (List.mem_of_find?_eq_some hg),
+      by simpa only [List.all_eq_true, decide_eq_true_eq] using List.find?_some hg⟩
+  · rename_i hn
+    have absent := List.find?_eq_none.mp hn f ((correct.mem_iff word f).mpr hf)
+    exact (absent (by simpa only [List.all_eq_true, decide_eq_true_eq] using hclaims)).elim
 
 /-- At a round boundary, a decoded current message is close and satisfies the running claims. -/
 def candidateState {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]

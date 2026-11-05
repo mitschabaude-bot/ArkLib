@@ -140,7 +140,15 @@ theorem fold_interleave {K E : Type} [Semiring K] [CommRing E] {vars lanes : ℕ
     (enc : Encoding K vars) (ι : K →+* E) (f : Table E (lanes + vars))
     (r : Fin lanes → E) :
     foldWord (enc.interleave ι f) r = enc.encode ι (restrict f r) := by
-  sorry
+  funext x
+  simp only [foldWord, mle, Encoding.interleave, Encoding.encode, restrict]
+  simp_rw [Finset.mul_sum]
+  rw [Finset.sum_comm]
+  apply Finset.sum_congr rfl
+  intro v _
+  apply Finset.sum_congr rfl
+  intro u _
+  ring
 
 /-- One Boolean sumcheck message, sent as its three coefficients. -/
 abbrev Quadratic (E : Type) := Fin 3 → E
