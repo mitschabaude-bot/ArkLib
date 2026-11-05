@@ -767,6 +767,7 @@ public import ArkLib.Interaction.Oracle.Security.KnowledgeResources
 public import ArkLib.Interaction.Oracle.Security.KnowledgeSoundness
 public import ArkLib.Interaction.Oracle.Security.RoundByRound
 public import ArkLib.Interaction.Oracle.Security.Soundness
+public import ArkLib.Interaction.Oracle.Security.StandardBcs
 public import ArkLib.Interaction.Oracle.Security.StateRestoration
 public import ArkLib.Interaction.Oracle.Security.StateRestorationBudget
 public import ArkLib.Interaction.Oracle.Security.StateRestorationCoins
