@@ -117,6 +117,7 @@ home_page/            site assets and assembled website root
 - `ArkLib/Data/`, `ArkLib/ToMathlib/`, and `ArkLib/ToCompPoly/` support the
   core with reusable definitions and lemmas.
 - `ArkLib/Commitments/` and `ArkLib/ProofSystem/` build on top of those foundations.
+- `ProofSystem/Whir/` specifies the binary additive-domain WHIR/Ligerito opening tree, weighted claims, an explicit list-decoder contract, total initial witness selection, and Annex B's local error schedule. `LocalBounds.lean` states list-relation escape bounds. `Knowledge.lean` distinguishes these from `OpeningCertificateGoal`, which requires identity retention of the original message and terminal acceptance transfer. The OOD invariant includes a collision-pair branch, and fold-list lifting supplies some preimage rather than every original preimage; these obligations must be resolved before asserting a retained-witness knowledge certificate. The positive-reduced-rate MCA interface requires a nonconstant code; the dimension-one case needs a separate bound.
 - When changing a protocol subtree, read the local subtree plus one layer of imports toward
   `Data/` or `OracleReduction/` before making architectural edits.
 

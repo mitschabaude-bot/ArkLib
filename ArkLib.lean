@@ -1128,6 +1128,11 @@ public import ArkLib.ProofSystem.ToyProblem.Spec.ErasureDecoder
 public import ArkLib.ProofSystem.ToyProblem.Spec.General
 public import ArkLib.ProofSystem.ToyProblem.Spec.KnowledgeSoundness
 public import ArkLib.ProofSystem.ToyProblem.Spec.SimplifiedIOR
+public import ArkLib.ProofSystem.Whir.Basic
+public import ArkLib.ProofSystem.Whir.Errors
+public import ArkLib.ProofSystem.Whir.Knowledge
+public import ArkLib.ProofSystem.Whir.LocalBounds
+public import ArkLib.ProofSystem.Whir.Protocol
 public import ArkLib.ToCompPoly.Multilinear.Basic
 public import ArkLib.ToCompPoly.Multilinear.NestedEvaluationTree
 public import ArkLib.ToCompPoly.Multivariate.Eval
