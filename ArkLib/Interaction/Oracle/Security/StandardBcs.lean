@@ -154,7 +154,19 @@ theorem escapeAt_iff_pathEscapeAt {Com : Type} [DecidableEq Com] {protocol : Pro
     (consistent : Consistent (compiledCoin Com coin) table path) (r : ℕ) :
     escapeAt coin extractor path messages table r ↔
       pathEscapeAt coin extractor (extractedPath coin path messages) r := by
-  sorry
+  induction coin generalizing state r with
+  | done => exact Iff.rfl
+  | sender next ih =>
+      exact ih path.1 (extractor path.1).2.2 path.2 messages _ consistent r
+  | oracle next ih =>
+      exact ih (extractor (messages (.inl ()))).2.2 path.2
+        (fun index => messages (.inr index)) _ consistent r
+  | challenge next ih =>
+      cases r with
+      | zero => exact and_iff_right consistent.1
+      | succ r =>
+          exact (and_iff_right consistent.1).trans
+            (ih (extractor path.1).2.2 path.2 messages _ consistent.2 r)
 
 /-- At a selected rank, table dependence is confined to strict ancestors and the target answer.
 The compiled key, path, extracted words and witness maps are held fixed in this comparison.
@@ -172,13 +184,92 @@ theorem escapeAt_congr {Com : Type} [DecidableEq Com] {protocol : Protocol}
     (answer : table pre = other pre) :
     escapeAt coin extractor path messages table r ↔
       escapeAt coin extractor path messages other r := by
-  sorry
+  induction coin generalizing state r with
+  | done => exact pre.elim
+  | sender next ih =>
+      simp only [compiledCoin, erasePath, prefixKeys] at selected
+      erw [List.getElem?_map, Option.map_eq_some_iff] at selected
+      obtain ⟨pre, selected, rfl⟩ := selected
+      exact ih path.1 (extractor path.1).2.2 path.2 messages _ _ r pre selected
+        (fun ancestor member => ancestors ⟨path.1, ancestor⟩
+          (List.mem_map.mpr ⟨ancestor, member, rfl⟩)) answer
+  | oracle next ih =>
+      simp only [compiledCoin, erasePath, prefixKeys] at selected
+      erw [List.getElem?_map, Option.map_eq_some_iff] at selected
+      obtain ⟨pre, selected, rfl⟩ := selected
+      exact ih (extractor (messages (.inl ()))).2.2 path.2
+        (fun index => messages (.inr index)) _ _ r pre selected
+        (fun ancestor member => ancestors ⟨path.1, ancestor⟩
+          (List.mem_map.mpr ⟨ancestor, member, rfl⟩)) answer
+  | challenge next ih =>
+      cases r with
+      | zero =>
+          simp only [compiledCoin, erasePath, prefixKeys] at selected
+          erw [List.getElem?_cons_zero, Option.some.injEq] at selected
+          subst pre
+          simp only [escapeAt, answer]
+      | succ r =>
+          simp only [compiledCoin, erasePath, prefixKeys] at selected
+          erw [List.getElem?_cons_succ, List.getElem?_map, Option.map_eq_some_iff] at selected
+          obtain ⟨pre, selected, rfl⟩ := selected
+          have head := ancestors (.inl PUnit.unit) List.mem_cons_self
+          exact and_congr (congrArg (fun value => path.1 = value) head).to_iff
+            (ih (extractor path.1).2.2 path.2 messages _ _ r pre selected
+              (fun ancestor member => ancestors (.inr ⟨PUnit.unit, ancestor⟩)
+                (List.mem_cons_of_mem _ (List.mem_map.mpr ⟨ancestor, member, rfl⟩))) answer)
 
 /-- The compiled strict-ancestor relation is well founded by the number of earlier challenges. -/
 theorem strictAncestors_wellFounded {Com : Type} [DecidableEq Com] {protocol : Protocol}
     (coin : PublicCoin protocol) :
-    WellFounded (fun ancestor pre => ancestor ∈ strictAncestors (compiledCoin Com coin) pre) := by
-  sorry
+    WellFounded (fun ancestor pre => ancestor ∈ strictAncestors (compiledCoin Com coin) pre) :=
+  CorrelationIntractable.strictAncestors_wellFounded (compiledCoin Com coin)
+
+/-- A bad challenge with its actual suffix-extracted witness gives an existential local escape
+at some challenge rank on the same IOP path. -/
+theorem badChallengeOnPath_implies_exists_pathEscapeAt {protocol : Protocol}
+    (coin : PublicCoin protocol) {state : KnowledgeState}
+    (extractor : RoundExtractor protocol.tree state) (path : protocol.tree.ExecutionPath)
+    (witness : (extractor.terminalState path).Witness)
+    (bad : extractor.BadChallengeOnPath protocol.roles path witness) :
+    ∃ r, pathEscapeAt coin extractor path r := by
+  induction coin generalizing state with
+  | done => exact bad.elim
+  | sender next ih =>
+      rcases bad with ⟨impossible, _, _⟩ | bad
+      · cases impossible
+      · exact ih path.1 (extractor path.1).2.2 path.2 witness bad
+  | oracle next ih =>
+      exact ih (extractor path.1).2.2 path.2 witness bad
+  | challenge next ih =>
+      rcases bad with ⟨_, before, after⟩ | bad
+      · exact ⟨0, ⟨_, before, after⟩⟩
+      · obtain ⟨r, escape⟩ := ih (extractor path.1).2.2 path.2 witness bad
+        exact ⟨r + 1, escape⟩
+
+/-- An extracted path's escape rank is smaller than its compiled path's challenge-key count. -/
+theorem pathEscapeAt_rank_lt {Com : Type} [DecidableEq Com] {protocol : Protocol}
+    (coin : PublicCoin protocol) {state : KnowledgeState}
+    (extractor : RoundExtractor protocol.tree state)
+    (path : (compile Com coin).tree.ExecutionPath) (messages : ExtractedMessages coin path)
+    (r : ℕ) (escape : pathEscapeAt coin extractor (extractedPath coin path messages) r) :
+    r < (prefixKeys (compiledCoin Com coin)
+      (erasePath (compiledCoin Com coin) path)).length := by
+  induction coin generalizing state r with
+  | done => exact escape.elim
+  | sender next ih =>
+      simpa only [compiledCoin, erasePath, prefixKeys, List.length_map] using
+        ih path.1 (extractor path.1).2.2 path.2 messages r escape
+  | oracle next ih =>
+      simpa only [compiledCoin, erasePath, prefixKeys, List.length_map] using
+        ih (extractor (messages (.inl ()))).2.2 path.2
+          (fun index => messages (.inr index)) r escape
+  | challenge next ih =>
+      cases r with
+      | zero =>
+          exact Nat.zero_lt_succ _
+      | succ r =>
+          simpa only [compiledCoin, erasePath, prefixKeys, List.length_cons, List.length_map]
+            using Nat.succ_lt_succ (ih (extractor path.1).2.2 path.2 messages r escape)
 
 /-- A valid terminal witness whose backward extraction fails produces a rank-local escape.
 The rank is the zero-based position of a challenge in the compiled path's key list. -/
@@ -196,7 +287,13 @@ theorem extraction_failure_implies_escapeAt {Com : Type} [DecidableEq Com]
     ∃ r < (prefixKeys (compiledCoin Com coin)
       (erasePath (compiledCoin Com coin) path)).length,
       escapeAt coin certificate.extractor path messages table r := by
-  sorry
+  have bad := certificate.extractor.extraction_failure_implies_bad_challenge protocol.roles
+    certificate.prover_preserving (extractedPath coin path messages) witness terminal failure
+  obtain ⟨r, escape⟩ := badChallengeOnPath_implies_exists_pathEscapeAt coin
+    certificate.extractor (extractedPath coin path messages) witness bad
+  exact ⟨r, pathEscapeAt_rank_lt coin certificate.extractor path messages r escape,
+    (escapeAt_iff_pathEscapeAt coin certificate.extractor path messages table consistent r).mpr
+      escape⟩
 
 /-- The compiled protocol has at most `count` challenges along every complete path.
 Ranks are key-list positions, so no separately normalized rank function is required. -/
@@ -228,24 +325,16 @@ def compositeExtractor
   let path := extractedPath (coin proof.1) proof.2.1 messages
   (certificate proof.1).extractor.extractWitness path (terminalWitness c)
 
-/-- The per-round CI assumption relative to the message extractor: the probability over explicit
-adversary coins that its extracted IOP path has a rank-`r` knowledge escape. The relation is fixed
-by the IOP certificate, and the full oracle words come from `ext`. On accepted proofs the challenge
-is `h` of the compiled key. The existential later witness is inside the event. -/
-noncomputable def ciRel [SampleableType Coins] (r : ℕ) : ℝ≥0∞ :=
+/-- The per-round CI game relative to the message extractor: the compiled path is consistent
+with `h` through rank `r`, and the challenge `h` of its compiled key escapes on the extracted
+prefix. The relation is fixed by the IOP certificate, and the full oracle words come from `ext`.
+The existential later witness is inside the event. -/
+noncomputable def ciRel [DecidableEq Com] [SampleableType Coins]
+    (h : Table Statement PUnit (fun statement => compiledCoin Com (coin statement)))
+    (r : ℕ) : ℝ≥0∞ :=
   Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
-    pathEscapeAt (coin (A c).1) (certificate (A c).1).extractor
-      (extractedPath (coin (A c).1) (A c).2.1 (ext c)) r]
-
-/-- The local table event implies the corresponding extracted-path CI event, even when the
-compiled path has inconsistent challenges after the target rank. -/
-theorem escapeAt_implies_pathEscapeAt [DecidableEq Com] (c : Coins)
-    (table : PrefixTable PUnit (compiledCoin Com (coin (A c).1))) (r : ℕ)
-    (escape : escapeAt (coin (A c).1) (certificate (A c).1).extractor
-      (A c).2.1 (ext c) table r) :
-    pathEscapeAt (coin (A c).1) (certificate (A c).1).extractor
-      (extractedPath (coin (A c).1) (A c).2.1 (ext c)) r := by
-  sorry
+    escapeAt (coin (A c).1) (certificate (A c).1).extractor
+      (A c).2.1 (ext c) (Table.fibre h (A c).1) r]
 
 /-- Accepted extraction failure is contained in disagreement or a bounded-rank CI escape.
 The transfer hypothesis asserts the certificate's terminal relation for the supplied witness. -/
@@ -263,9 +352,16 @@ theorem failure_implies_disagree_or_escape [DecidableEq Com]
     (failure : ¬ (state (A c).1).holds
       (compositeExtractor coin state certificate A ext terminalWitness c)) :
     Disagree c ∨ ∃ r ∈ Finset.range count,
-      pathEscapeAt (coin (A c).1) (certificate (A c).1).extractor
-        (extractedPath (coin (A c).1) (A c).2.1 (ext c)) r := by
-  sorry
+      escapeAt (coin (A c).1) (certificate (A c).1).extractor
+        (A c).2.1 (ext c) (Table.fibre h (A c).1) r := by
+  by_cases disagree : Disagree c
+  · exact Or.inl disagree
+  · obtain ⟨r, bounded, escape⟩ := extraction_failure_implies_escapeAt
+      (coin (A c).1) (certificate (A c).1) (A c).2.1 (ext c)
+      (Table.fibre h (A c).1) accepted.1 (terminalWitness c)
+      (transfer c accepted disagree) failure
+    exact Or.inr ⟨r, Finset.mem_range.mpr (bounded.trans_le (bound (A c).1 (A c).2.1)),
+      escape⟩
 
 /-- Standard-model BCS knowledge soundness: binding disagreement plus the sum of extractor-relative
 CI escape probabilities bounds acceptance with an invalid composite-extracted input witness.
@@ -284,8 +380,20 @@ theorem knowledgeSoundness [DecidableEq Com] [SampleableType Coins]
       verify coin h accept (A c) ∧ ¬ (state (A c).1).holds
         (compositeExtractor coin state certificate A ext terminalWitness c)] ≤
       Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[Disagree c] +
-        ∑ r ∈ Finset.range count, ciRel coin state certificate A ext r := by
-  sorry
+        ∑ r ∈ Finset.range count, ciRel coin state certificate A ext h r := by
+  let escape := fun r c => escapeAt (coin (A c).1) (certificate (A c).1).extractor
+    (A c).2.1 (ext c) (Table.fibre h (A c).1) r
+  calc
+    _ ≤ Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
+        Disagree c ∨ ∃ r ∈ Finset.range count, escape r c] :=
+      prEvent_mono _ _ _ (fun c bad => failure_implies_disagree_or_escape
+        coin state certificate A ext h accept terminalWitness Disagree transfer count bound
+        c bad.1 bad.2)
+    _ ≤ Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[Disagree c] +
+        Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[∃ r ∈ Finset.range count, escape r c] :=
+      prEvent_or_le _ _ _
+    _ ≤ _ := add_le_add le_rfl
+      (prEvent_exists_finset_le (Finset.range count) ($ᵗ Coins : ProbComp Coins) escape)
 
 end Extraction
 
