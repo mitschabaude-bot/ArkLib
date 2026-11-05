@@ -742,6 +742,7 @@ public import ArkLib.Interaction.Oracle.Security.BcsFill
 public import ArkLib.Interaction.Oracle.Security.BcsKnowledge
 public import ArkLib.Interaction.Oracle.Security.BcsProtocol
 public import ArkLib.Interaction.Oracle.Security.BcsSimulation
+public import ArkLib.Interaction.Oracle.Security.CorrelationIntractable
 public import ArkLib.Interaction.Oracle.Security.DecodedChallenges
 public import ArkLib.Interaction.Oracle.Security.EncodedChallengeCost
 public import ArkLib.Interaction.Oracle.Security.EncodedChallengeCoupling
