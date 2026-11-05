@@ -92,6 +92,7 @@ home_page/            site assets and assembled website root
   commitments (`KnowledgeCertificate.bcs_knowledge_soundness`), with the opened path's messages
   read at the snapshots and the same error as the hash-chain theorem, the verifier's queries
   counted twice.
+  `Recursion.lean` defines explicit-coins `KnowledgeBound`, recursive witness trees and `Deep`, the derived adversaries at child-index paths, and the sum-of-path-errors composition statement. Its `KnowledgeBound.of_standardBcs` adapter takes BCS extraction and transfer data uniformly over adversaries and coin types.
 - `ProofSystem/Fri/Interaction/` is FRI on the interaction layer, with Plonky3's folds and injected
   inputs: `Protocol.lean` defines the tree, the query-reading verifier and the honest prover,
   `Completeness.lean` proves probability-one completeness, `RoundKnowledge.lean` and

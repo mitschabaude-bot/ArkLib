@@ -765,6 +765,7 @@ public import ArkLib.Interaction.Oracle.Security.KnowledgeAppend
 public import ArkLib.Interaction.Oracle.Security.KnowledgeComposition
 public import ArkLib.Interaction.Oracle.Security.KnowledgeResources
 public import ArkLib.Interaction.Oracle.Security.KnowledgeSoundness
+public import ArkLib.Interaction.Oracle.Security.Recursion
 public import ArkLib.Interaction.Oracle.Security.RoundByRound
 public import ArkLib.Interaction.Oracle.Security.Soundness
 public import ArkLib.Interaction.Oracle.Security.StandardBcs
