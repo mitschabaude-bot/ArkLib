@@ -64,7 +64,16 @@ def protocol (ops : MessageOps F M) : ℕ → Protocol
 theorem protocol_tree_eq_native (ops : MessageOps F M) (count : ℕ) :
     (protocol ops count).tree =
       (Native.Core.protocol F M (fun q => ops.evaluate 0 q) count).tree := by
-  sorry
+  induction count with
+  | zero => rfl
+  | succ count ih =>
+    apply congrArg (Oracle.TypeTree.oracle M)
+    funext _
+    apply congrArg (Oracle.TypeTree.public (Option F))
+    funext choice
+    cases choice with
+    | none => rfl
+    | some r => exact ih
 
 /-- Native Sumcheck and claim-aware messages have the same tree and public ownership. -/
 theorem protocol_tree_roles_eq_native (ops : MessageOps F M) (count : ℕ) :
@@ -72,7 +81,29 @@ theorem protocol_tree_roles_eq_native (ops : MessageOps F M) (count : ℕ) :
       (tree : Oracle.TypeTree) × tree.RoleDecoration) =
     ⟨(Native.Core.protocol F M (fun q => ops.evaluate 0 q) count).tree,
       (Native.Core.protocol F M (fun q => ops.evaluate 0 q) count).roles⟩ := by
-  sorry
+  induction count with
+  | zero => rfl
+  | succ count ih =>
+    have branches :
+        (fun choice : Option F =>
+          let rest := match choice with
+            | none => Protocol.done
+            | some _ => protocol ops count
+          (⟨rest.tree, rest.roles⟩ : (tree : Oracle.TypeTree) × tree.RoleDecoration)) =
+        (fun choice : Option F =>
+          let rest := match choice with
+            | none => Protocol.done
+            | some _ => Native.Core.protocol F M (fun q => ops.evaluate 0 q) count
+          (⟨rest.tree, rest.roles⟩ : (tree : Oracle.TypeTree) × tree.RoleDecoration)) := by
+      funext choice
+      cases choice with
+      | none => rfl
+      | some r => exact ih
+    let step (rest : Option F → (tree : Oracle.TypeTree) × tree.RoleDecoration) :
+        (tree : Oracle.TypeTree) × tree.RoleDecoration :=
+      ⟨.oracle M (fun _ => .public (Option F) fun choice => (rest choice).1),
+        ⟨PUnit.unit, fun _ => ⟨.receiver, fun choice => (rest choice).2⟩⟩⟩
+    exact congrArg step branches
 
 /-- A retained witness satisfies the current reduced sum claim after all preceding checks. -/
 def claimState {m : ℕ} (D : Fin m ↪ F) (valid : W → Prop)
@@ -82,7 +113,8 @@ def claimState {m : ℕ} (D : Fin m ↪ F) (valid : W → Prop)
   holds w := active = true ∧ valid w ∧ closedRelation F n deg D i
     ⟨stmt, (polynomialFamily F n deg).behaviorOfRealizations (fun _ => summand w)⟩
 
-/-- Admissible witnesses must share a polynomial fixed before the fresh verifier challenge. -/
+/-- The summand is fixed by data committed before Sumcheck; `valid` means prefix consistency.
+Without binding, `gₐ(X) = X + a` over `F₂`, with zero claim/message, gives error `1 > 1/2`. -/
 def BindsSummand (valid : W → Prop) (summand : W → Spec.OracleStatement F n deg ())
     (p : Spec.OracleStatement F n deg ()) : Prop :=
   ∀ w, valid w → summand w = p
@@ -111,15 +143,58 @@ def roundExtractor (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
                 ⟨ops.evaluate stmt.target q r, Fin.snoc stmt.challenges r⟩
                 (active && ops.accept stmt.target q)⟩⟩
 
+/-- Every backward map of an extractor is bijective, at every concrete branch. -/
+def mapsBijective : {tree : Oracle.TypeTree} → {state : KnowledgeState} →
+    RoundExtractor tree state → Prop
+  | .done, _, _ => True
+  | .public _ _, _, extractor => ∀ move,
+      Function.Bijective (extractor move).2.1 ∧ mapsBijective (extractor move).2.2
+  | .oracle _ _, _, extractor => ∀ message,
+      Function.Bijective (extractor message).2.1 ∧ mapsBijective (extractor message).2.2
+
+/-- Bijective backward maps give a bijection along each concrete prefix spine. -/
+theorem extractPrefix_bijective {tree residual : Oracle.TypeTree} {state : KnowledgeState}
+    (extractor : RoundExtractor tree state) (bijective : mapsBijective extractor)
+    (spine : PFunctor.FreeM.Cursor.Spine tree residual) (messages : PrefixMessages.Along spine) :
+    Function.Bijective (extractor.extractPrefix spine messages) := by
+  induction spine generalizing state with
+  | root => exact Function.bijective_id
+  | @down position next residual answer tail ih =>
+    cases position with
+    | «public» =>
+      exact (bijective answer).1.comp
+        (ih (extractor answer).2.2 (bijective answer).2 messages)
+    | «oracle» =>
+      exact (bijective messages.1).1.comp
+        (ih (extractor messages.1).2.2 (bijective messages.1).2 messages.2)
+
+/-- Sumcheck's identity maps are bijective on every branch, including public abort. -/
+theorem roundExtractor_mapsBijective (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
+    (valid : W → Prop) (summand : W → Spec.OracleStatement F n deg ())
+    (count start : ℕ) (finish : start + count = n)
+    (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (active : Bool) :
+    mapsBijective (roundExtractor ops D valid summand count start finish stmt active) := by
+  induction count generalizing start active with
+  | zero => trivial
+  | succ count ih =>
+    intro q
+    refine ⟨Function.bijective_id, ?_⟩
+    intro choice
+    cases choice with
+    | none => exact ⟨Function.bijective_id, trivial⟩
+    | some r => exact ⟨Function.bijective_id, ih (start + 1) (by omega) _ _⟩
+
 /-- The carrier at every concrete authored prefix is the retained witness carrier. -/
-def prefixWitnessEquiv (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
+noncomputable def prefixWitnessEquiv (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
     (valid : W → Prop) (summand : W → Spec.OracleStatement F n deg ())
     (count start : ℕ) (finish : start + count = n)
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (active : Bool)
     (pfx : ExecutionPrefix (protocol ops count).tree) :
     ((roundExtractor ops D valid summand count start finish stmt active).knowledgeState pfx).Witness
-      ≃ W := by
-  sorry
+      ≃ W :=
+  Equiv.ofBijective _ (extractPrefix_bijective _
+    (roundExtractor_mapsBijective ops D valid summand count start finish stmt active)
+    pfx.cursor.spine pfx.messages)
 
 /-- Backward extraction through any actual prefix returns the supplied witness unchanged. -/
 theorem extractPrefixWitness_eq (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
@@ -130,8 +205,7 @@ theorem extractPrefixWitness_eq (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ 
     (w : ((roundExtractor ops D valid summand count start finish stmt active).knowledgeState
       pfx).Witness) :
     (roundExtractor ops D valid summand count start finish stmt active).extractPrefixWitness pfx w =
-      prefixWitnessEquiv ops D valid summand count start finish stmt active pfx w := by
-  sorry
+      prefixWitnessEquiv ops D valid summand count start finish stmt active pfx w := rfl
 
 /-- Oracle messages preserve the current knowledge predicate under their identity maps. -/
 theorem roundExtractor_proverPreserving (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
@@ -140,7 +214,20 @@ theorem roundExtractor_proverPreserving (ops : MessageOps F M) {m : ℕ} (D : Fi
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (active : Bool) :
     (roundExtractor ops D valid summand count start finish stmt active).IsProverPreserving
       (protocol ops count).roles := by
-  sorry
+  induction count generalizing start active with
+  | zero => trivial
+  | succ count ih =>
+    constructor
+    · intro q w good
+      exact good
+    · intro q
+      constructor
+      · intro choice impossible
+        cases impossible
+      · intro choice
+        cases choice with
+        | none => trivial
+        | some r => exact ih (start + 1) (by omega) _ _
 
 /-- Parse the output evaluation claim from actual messages, rejecting failed checks and aborts. -/
 def outputClaim (ops : MessageOps F M) :
@@ -170,7 +257,7 @@ def evaluationProblem (valid : W → Prop)
   rel _ claim w := match claim with
     | none => False
     | some stmt => valid w ∧ (summand w).val.eval stmt.challenges = stmt.target
-  rel_admissible := by sorry
+  rel_admissible := by intros; trivial
 
 /-- The extractor's endpoint relation is exactly the optional output evaluation claim. -/
 def terminalRelation (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
@@ -180,7 +267,34 @@ def terminalRelation (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
     TerminalRelation (roundExtractor ops D valid summand count start finish stmt active)
       (evaluationProblem valid summand) (fun _ => ())
       (outputClaim ops count start finish stmt active) := by
-  sorry
+  induction count generalizing start active with
+  | zero =>
+    have hn : n = start := by omega
+    subst n
+    refine ⟨fun _ => Equiv.refl W, ?_⟩
+    intro path w
+    cases active with
+    | false =>
+      change (false = true ∧ _) ↔ False
+      simp only [Bool.false_eq_true, false_and]
+    | true =>
+      change (true = true ∧ valid w ∧ _) ↔
+        (valid w ∧ (summand w).val.eval stmt.challenges = stmt.target)
+      simp only [true_and]
+      apply and_congr_right
+      intro _
+      exact closedRelation_last_iff F start deg D
+        ⟨stmt, (polynomialFamily F start deg).behaviorOfRealizations (fun _ => summand w)⟩
+  | succ count ih =>
+    refine ⟨?_, ?_⟩
+    · rintro ⟨q, choice, rest⟩
+      cases choice with
+      | none => exact Equiv.refl W
+      | some r => exact (ih (start + 1) (by omega) _ _).witnessEquiv rest
+    · rintro ⟨q, choice, rest⟩ w
+      cases choice with
+      | none => exact Iff.rfl
+      | some r => exact (ih (start + 1) (by omega) _ _).knowledge_iff rest w
 
 end Algebra
 
@@ -204,7 +318,22 @@ theorem badChallenge_implies_successor (ops : MessageOps F M) {m : ℕ} (D : Fin
     ∃ r, choice = some r ∧ closedRelation F n deg D ⟨start + 1, by omega⟩
       ⟨⟨(model.interpret stmt.target q).val.eval r, Fin.snoc stmt.challenges r⟩,
         (polynomialFamily F n deg).behaviorOfRealizations (fun _ => p)⟩ := by
-  sorry
+  cases choice with
+  | none =>
+    obtain ⟨w, _, good⟩ := bad
+    exact good.elim
+  | some r =>
+    obtain ⟨w, notGood, good⟩ := bad
+    change (active && ops.accept stmt.target q) = true ∧ valid w ∧ _ at good
+    obtain ⟨activeGood, acceptGood⟩ := Bool.and_eq_true_iff.mp good.1
+    have bound := binding w good.2.1
+    refine ⟨?_, acceptGood, r, rfl, ?_⟩
+    · intro related
+      apply notGood
+      change active = true ∧ valid w ∧ closedRelation F n deg D ⟨start, by omega⟩
+        ⟨stmt, (polynomialFamily F n deg).behaviorOfRealizations (fun _ => summand w)⟩
+      exact ⟨activeGood, good.2.1, by simpa only [bound] using related⟩
+    · simpa only [bound, model.evaluate_eq] using good.2.2
 
 end MessageModel
 
@@ -238,7 +367,35 @@ theorem local_badChallenge_le (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
       RoundExtractor.badChallenge
         ((roundExtractor ops D valid summand (count + 1) start finish stmt active q).2.2)
         choice] ≤ (deg : ENNReal) / Fintype.card F := by
-  sorry
+  classical
+  let extractor :=
+    (roundExtractor ops D valid summand (count + 1) start finish stmt active q).2.2
+  change Pr{let choice ← nextChallenge ops stmt.target q}[
+    RoundExtractor.badChallenge extractor choice] ≤ _
+  have inclusion := badChallenge_implies_successor ops D model valid summand p binding
+    count start finish stmt active q
+  by_cases hcheck : ops.accept stmt.target q = true
+  · simp only [nextChallenge, hcheck, ↓reduceIte, prEvent_map]
+    by_cases hfalse : ¬ closedRelation F n deg D ⟨start, by omega⟩
+        ⟨stmt, (polynomialFamily F n deg).behaviorOfRealizations (fun _ => p)⟩
+    · have bound := uniform_successor_soundness n deg F D ⟨start, by omega⟩ stmt p
+        (model.interpret stmt.target q) hfalse (by
+          rw [Finset.sum_map_toList]
+          exact (model.accept_iff _ _).mp hcheck)
+      refine (prEvent_mono ($ᵗ F) _ _ ?_).trans bound
+      intro r bad
+      obtain ⟨_, _, r', same, good⟩ := inclusion (some r) bad
+      cases Option.some.inj same
+      exact good
+    · have empty : ∀ r, ¬ RoundExtractor.badChallenge extractor (some r) := by
+        intro r bad
+        exact hfalse (inclusion (some r) bad).1
+      refine (prEvent_mono ($ᵗ F) _ (fun _ => False) (fun r bad => empty r bad)).trans ?_
+      simp only [prEvent_false, zero_le]
+  · have empty : ¬ RoundExtractor.badChallenge extractor none := by
+      intro bad
+      exact hcheck (inclusion none bad).2.1
+    simp [nextChallenge, hcheck, empty]
 
 /-- Every authored prefix, including unreachable prefixes, satisfies the same local error bound. -/
 theorem roundExtractor_locallyBounded (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
@@ -249,7 +406,19 @@ theorem roundExtractor_locallyBounded (ops : MessageOps F M) {m : ℕ} (D : Fin 
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (active : Bool) :
     (roundExtractor ops D valid summand count start finish stmt active).IsLocallyBounded
       (protocol ops count).roles (challenges ops deg count stmt.target) := by
-  sorry
+  induction count generalizing start active with
+  | zero => trivial
+  | succ count ih =>
+    intro q
+    refine ⟨?_, ?_⟩
+    · rw [_root_.RoundByRound.GameFamily.isBounded_iff]
+      intro _ _
+      exact local_badChallenge_le ops D model valid summand p binding
+        count start finish stmt active q
+    · intro choice
+      cases choice with
+      | none => trivial
+      | some r => exact ih (start + 1) (by omega) _ _
 
 /-- The witness-retaining Sumcheck certificate, conditional on semantic binding of the summand. -/
 noncomputable def certificate (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
@@ -262,8 +431,10 @@ noncomputable def certificate (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
       (claimState D valid summand ⟨start, by omega⟩ stmt active) where
   extractor := roundExtractor ops D valid summand count start finish stmt active
   challenges := challenges ops deg count stmt.target
-  prover_preserving := by sorry
-  local_bound := by sorry
+  prover_preserving := roundExtractor_proverPreserving ops D valid summand
+    count start finish stmt active
+  local_bound := roundExtractor_locallyBounded ops D model valid summand p binding
+    count start finish stmt active
 
 /-- The summand polynomial itself is retained as the witness for a fixed input polynomial. -/
 noncomputable def polynomialCertificate (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
@@ -273,7 +444,7 @@ noncomputable def polynomialCertificate (ops : MessageOps F M) {m : ℕ} (D : Fi
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (active : Bool) :
     KnowledgeCertificate (protocol ops count).tree (protocol ops count).roles
       (claimState D (fun w => w = p) id ⟨start, by omega⟩ stmt active) :=
-  certificate ops D model (fun w => w = p) id p (by sorry)
+  certificate ops D model (fun w => w = p) id p (fun _ h => h)
     count start finish stmt active
 
 /-- The retained-witness certificate on the existing mathematical Sumcheck protocol. -/
