@@ -85,7 +85,35 @@ def paths (fanout : ℕ) : ℕ → Finset (List ℕ)
 /-- Path membership means length at most the depth and every child index below the fanout. -/
 theorem mem_paths (fanout depth : ℕ) (p : List ℕ) :
     p ∈ paths fanout depth ↔ p.length ≤ depth ∧ ∀ i ∈ p, i < fanout := by
-  sorry
+  induction depth generalizing p with
+  | zero => cases p <;> simp [paths]
+  | succ depth ih =>
+      cases p with
+      | nil => simp [paths]
+      | cons i p =>
+          simp [paths, ih, and_assoc, and_left_comm]
+
+/-- The empty path names the root at every extraction depth. -/
+theorem nil_mem_paths (fanout depth : ℕ) : [] ∈ paths fanout depth := by
+  cases depth with
+  | zero => exact Finset.mem_singleton_self _
+  | succ depth => exact Finset.mem_insert_self _ _
+
+/-- Prefixing a bounded child index extends a bounded path by one level. -/
+theorem cons_mem_paths {fanout depth i : ℕ} {p : List ℕ} (index : i < fanout)
+    (member : p ∈ paths fanout depth) : i :: p ∈ paths fanout (depth + 1) := by
+  exact Finset.mem_insert_of_mem (Finset.mem_biUnion.mpr
+    ⟨i, Finset.mem_range.mpr index, Finset.mem_image.mpr ⟨p, member, rfl⟩⟩)
+
+/-- Pairing a list with a mapped indexed copy checks the relation at each indexed element. -/
+private theorem forall₂_zipIdx_map {α : Type u} {β : Type v} (R : α → β → Prop)
+    (xs : List α) (f : α × ℕ → β) :
+    List.Forall₂ R xs (xs.zipIdx.map f) ↔ ∀ x ∈ xs.zipIdx, R x.1 (f x) := by
+  calc
+    _ ↔ List.Forall₂ R (xs.zipIdx.map Prod.fst) (xs.zipIdx.map f) := by
+      rw [List.zipIdx_map_fst]
+    _ ↔ _ := by
+      rw [List.forall₂_map_left_iff, List.forall₂_map_right_iff, List.forall₂_same]
 
 section Extraction
 
@@ -108,14 +136,16 @@ def derivedAdversary (K : KnowledgeBound argument) (fallback : S × Proof) :
 /-- The empty path denotes the root adversary. -/
 theorem derivedAdversary_nil (K : KnowledgeBound argument) (fallback : S × Proof)
     (A : Coins → S × Proof) : derivedAdversary K fallback A [] = A := by
-  sorry
+  rfl
 
 /-- Appending one index extracts the adversary at the prefix and selects its indexed child. -/
 theorem derivedAdversary_append (K : KnowledgeBound argument) (fallback : S × Proof)
     (A : Coins → S × Proof) (p : List ℕ) (i : ℕ) :
     derivedAdversary K fallback A (p ++ [i]) =
       childAdversary K fallback (derivedAdversary K fallback A p) i := by
-  sorry
+  induction p generalizing A with
+  | nil => rfl
+  | cons j p ih => exact ih (childAdversary K fallback A j)
 
 /-- Extract every actual child recursively, retaining its statement and original list position.
 The final level contains a step witness but no subtrees. No additional coins are sampled. -/
@@ -130,7 +160,25 @@ def treeExtractor (K : KnowledgeBound argument) (fallback : S × Proof) :
 theorem treeExtractor_rootWitness (K : KnowledgeBound argument) (fallback : S × Proof)
     (depth : ℕ) (A : Coins → S × Proof) (c : Coins) :
     (treeExtractor K fallback depth A c).rootWitness = K.ext A c := by
-  sorry
+  cases depth <;> rfl
+
+/-- An indexed child carried by the extracted witness is the selected adversary output. -/
+theorem childAdversary_of_mem_zipIdx (K : KnowledgeBound argument) (fallback : S × Proof)
+    (A : Coins → S × Proof) (c : Coins) (child : (S × Proof) × ℕ)
+    (member : child ∈ (argument.children (K.ext A c)).zipIdx) :
+    childAdversary K fallback A child.2 c = child.1 := by
+  simp only [childAdversary, List.mem_zipIdx_iff_getElem?.mp member, Option.getD_some]
+
+/-- Deep validity of an extracted successor tree is root validity and deep validity of each
+actual indexed child subtree, with the child statement read from the root witness. -/
+theorem deep_succ_treeExtractor (K : KnowledgeBound argument) (fallback : S × Proof)
+    (depth : ℕ) (A : Coins → S × Proof) (c : Coins) :
+    Deep argument (depth + 1) (A c).1 (treeExtractor K fallback (depth + 1) A c) ↔
+      argument.Relation (A c).1 (K.ext A c) ∧
+        ∀ child ∈ (argument.children (K.ext A c)).zipIdx,
+          Deep argument depth child.1.1
+            (treeExtractor K fallback depth (childAdversary K fallback A child.2) c) := by
+  simp only [treeExtractor, Deep, forall₂_zipIdx_map, true_and]
 
 /-- Acceptance with a failed one-level extraction at a fixed explicit coin. -/
 def Bad (K : KnowledgeBound argument) (A : Coins → S × Proof) (c : Coins) : Prop :=
@@ -141,31 +189,66 @@ theorem deep_zero_treeExtractor (K : KnowledgeBound argument) (fallback : S × P
     (A : Coins → S × Proof) (c : Coins) :
     Deep argument 0 (A c).1 (treeExtractor K fallback 0 A c) ↔
       argument.Relation (A c).1 (K.ext A c) := by
-  sorry
+  rfl
 
 /-- A failed deep extraction from an accepting root has a bounded path whose proof verifies
-but whose one-level extraction fails. The fanout bound is pointwise at the same root coins. -/
+but whose one-level extraction fails. Only valid parent relations need satisfy the fanout bound. -/
 theorem failure_implies_badNode (K : KnowledgeBound argument) (fallback : S × Proof)
     (A : Coins → S × Proof) (depth fanout : ℕ) (c : Coins)
-    (bounded : ∀ p ∈ paths fanout depth,
-      (argument.children (K.ext (derivedAdversary K fallback A p) c)).length ≤ fanout)
+    (fanoutBound : ∀ s w, argument.Relation s w →
+      (argument.children w).length ≤ fanout)
     (accepted : argument.verify (A c).1 (A c).2)
     (failure : ¬ Deep argument depth (A c).1 (treeExtractor K fallback depth A c)) :
     ∃ p ∈ paths fanout depth, Bad K (derivedAdversary K fallback A p) c := by
-  sorry
+  classical
+  induction depth generalizing A with
+  | zero =>
+      exact ⟨[], nil_mem_paths fanout 0, accepted, failure⟩
+  | succ depth ih =>
+      by_cases valid : argument.Relation (A c).1 (K.ext A c)
+      · have childFailure : ∃ child ∈ (argument.children (K.ext A c)).zipIdx,
+            ¬ Deep argument depth child.1.1
+              (treeExtractor K fallback depth (childAdversary K fallback A child.2) c) := by
+          by_contra noFailure
+          apply failure
+          apply (deep_succ_treeExtractor K fallback depth A c).mpr
+          exact ⟨valid, fun child member => Classical.byContradiction
+            (fun bad => noFailure ⟨child, member, bad⟩)⟩
+        obtain ⟨child, member, childFailure⟩ := childFailure
+        have selected := childAdversary_of_mem_zipIdx K fallback A c child member
+        have childAccepted : argument.verify (childAdversary K fallback A child.2 c).1
+            (childAdversary K fallback A child.2 c).2 := by
+          rw [selected]
+          exact valid.2 child.1 (List.fst_mem_of_mem_zipIdx member)
+        rw [← selected] at childFailure
+        obtain ⟨p, pathMember, bad⟩ := ih (childAdversary K fallback A child.2)
+          childAccepted childFailure
+        have indexBound : child.2 < fanout :=
+          (List.snd_lt_of_mem_zipIdx member).trans_le (fanoutBound _ _ valid)
+        exact ⟨child.2 :: p, cons_mem_paths indexBound pathMember, bad⟩
+      · exact ⟨[], nil_mem_paths fanout (depth + 1), accepted, valid⟩
 
 /-- Recursive knowledge soundness through any depth: sum the one-level errors at every bounded
-path, including the root. The fanout bound covers every indexed extracted witness at every coin;
+path, including the root. The recursion relation bounds the children of valid witnesses;
 no independence between nodes, adversaries, or extraction events is assumed. -/
 theorem knowledgeSoundness (K : KnowledgeBound argument) (fallback : S × Proof)
     (A : Coins → S × Proof) (depth fanout : ℕ)
-    (bounded : ∀ p ∈ paths fanout depth, ∀ c,
-      (argument.children (K.ext (derivedAdversary K fallback A p) c)).length ≤ fanout) :
+    (fanoutBound : ∀ s w, argument.Relation s w →
+      (argument.children w).length ≤ fanout) :
     Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
       argument.verify (A c).1 (A c).2 ∧
         ¬ Deep argument depth (A c).1 (treeExtractor K fallback depth A c)] ≤
       ∑ p ∈ paths fanout depth, K.err (derivedAdversary K fallback A p) := by
-  sorry
+  calc
+    _ ≤ Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
+        ∃ p ∈ paths fanout depth, Bad K (derivedAdversary K fallback A p) c] :=
+      prEvent_mono _ _ _ (fun c bad => failure_implies_badNode K fallback A depth fanout c
+        fanoutBound bad.1 bad.2)
+    _ ≤ ∑ p ∈ paths fanout depth,
+        Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
+          Bad K (derivedAdversary K fallback A p) c] :=
+      prEvent_exists_finset_le (paths fanout depth) ($ᵗ Coins : ProbComp Coins) _
+    _ ≤ _ := Finset.sum_le_sum fun p _ => K.sound (derivedAdversary K fallback A p)
 
 end Extraction
 
@@ -212,7 +295,21 @@ noncomputable def KnowledgeBound.of_standardBcs (argument : RecursiveRelation S 
   err A := Pr{let c ← ($ᵗ _ : ProbComp _)}[Disagree A c] +
     ∑ r ∈ Finset.range count, StandardBcs.ciRel coin argument.knowledgeState certificate
       (fun c => toProof (A c)) (messages A) h r
-  sound := by sorry
+  sound := by
+    intro Coins _ A
+    have singleLevel := StandardBcs.knowledgeSoundness coin argument.knowledgeState certificate
+      (fun c => toProof (A c)) (messages A) h accept (terminalWitness A) (Disagree A)
+      (transfer A) count bound
+    calc
+      _ = Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
+          StandardBcs.verify coin h accept (toProof (A c)) ∧
+            ¬ (argument.knowledgeState (toProof (A c)).1).holds
+              (StandardBcs.compositeExtractor coin argument.knowledgeState certificate
+                (fun c => toProof (A c)) (messages A) (terminalWitness A) c)] := by
+        apply prEvent_congr
+        intro c
+        simp only [verify_iff, RecursiveRelation.knowledgeState, statement_eq]
+      _ ≤ _ := singleLevel
 
 end StandardBcs
 
