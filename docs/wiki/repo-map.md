@@ -41,6 +41,7 @@ home_page/            site assets and assembled website root
   `MultivariateSoundness.lean` supplies the one-round polynomial projection bound.
   `ProtocolCompleteness.lean` defines the honest strategy and proves support-level and
   probability-one completeness.
+  `ProofSystem/Sumcheck/Interaction/Knowledge.lean` specifies retained-witness knowledge states and identity backward maps, with an evaluation claim as the terminal relation. Its certificate interface requires all admissible witnesses to determine one polynomial fixed before the challenge; the existential local bad-witness event cannot use the fixed-polynomial soundness bound without this binding premise. `ProofSystem/Sumcheck/Message/Compressed.lean` specifies Boolean messages of every positive degree by omitting the linear coefficient and reconstructing it from the running claim.
 - `Interaction/Oracle/CoreRun.lean` offers `executeStrategiesCore` for ready prover strategies.
   `executeCore` runs reduction setup and delegates to that entry point. Both retain the actual
   input behavior, path and outputs for closing; `executeCore_eq_execute` preserves the existing

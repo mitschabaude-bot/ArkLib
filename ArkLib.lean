@@ -1087,6 +1087,7 @@ public import ArkLib.ProofSystem.Sumcheck.Interaction.Computable
 public import ArkLib.ProofSystem.Sumcheck.Interaction.ComputableCompleteness
 public import ArkLib.ProofSystem.Sumcheck.Interaction.ComputableSoundness
 public import ArkLib.ProofSystem.Sumcheck.Interaction.FiatShamir
+public import ArkLib.ProofSystem.Sumcheck.Interaction.Knowledge
 public import ArkLib.ProofSystem.Sumcheck.Interaction.Legacy
 public import ArkLib.ProofSystem.Sumcheck.Interaction.MultivariateRound
 public import ArkLib.ProofSystem.Sumcheck.Interaction.MultivariateSoundness
@@ -1105,6 +1106,7 @@ public import ArkLib.ProofSystem.Sumcheck.Interaction.StateRestorationSoundness
 public import ArkLib.ProofSystem.Sumcheck.Interaction.StoppedSoundness
 public import ArkLib.ProofSystem.Sumcheck.Message.Basic
 public import ArkLib.ProofSystem.Sumcheck.Message.CompPoly
+public import ArkLib.ProofSystem.Sumcheck.Message.Compressed
 public import ArkLib.ProofSystem.Sumcheck.Message.Quadratic
 public import ArkLib.ProofSystem.Sumcheck.Prover.Basic
 public import ArkLib.ProofSystem.Sumcheck.Prover.Enumeration
