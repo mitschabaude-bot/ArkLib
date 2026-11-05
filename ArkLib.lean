@@ -1129,6 +1129,7 @@ public import ArkLib.ProofSystem.ToyProblem.Spec.General
 public import ArkLib.ProofSystem.ToyProblem.Spec.KnowledgeSoundness
 public import ArkLib.ProofSystem.ToyProblem.Spec.SimplifiedIOR
 public import ArkLib.ProofSystem.Whir.Basic
+public import ArkLib.ProofSystem.Whir.Certificate
 public import ArkLib.ProofSystem.Whir.Errors
 public import ArkLib.ProofSystem.Whir.Knowledge
 public import ArkLib.ProofSystem.Whir.LocalBounds

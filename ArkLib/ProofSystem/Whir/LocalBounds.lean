@@ -8,12 +8,11 @@ module
 public import ArkLib.ProofSystem.Whir.Knowledge
 
 /-!
-# Annex B's list-relation local bounds
+# Annex B local events for list-lifting extraction
 
-These statements bound the actual batching, fold-list, OOD-separation, and query events.
-They do not assert that these events contain `RoundExtractor.badChallenge` for identity
-retention of an original message. That additional implication and terminal witness transfer
-are the unresolved knowledge obligations in `OpeningCertificateGoal`.
+MCA supplies list preimages. A union over the old list bounds false-claim preimages whose
+fold satisfies the reduced claim. OOD separates the new list before its answer fixes the
+candidate tested by queries. These statements supply the six local errors of `certificate`.
 -/
 
 @[expose] public section
@@ -23,20 +22,6 @@ open scoped ProbabilityTheory
 
 namespace Whir
 
-/-- Transport only the Boolean coordinate indices of a message table. -/
-def castTable {E : Type} {n m : ℕ} (h : n = m) (f : Table E n) : Table E m :=
-  fun u => f (u ∘ Fin.cast h)
-
-/-- Restrict the first row coordinate of a message, retaining all remaining row coordinates. -/
-def foldMessageOne {E : Type} [CommRing E] {lanes vars : ℕ}
-    (f : Table E ((lanes + 1) + vars)) (r : E) : Table E (lanes + vars) :=
-  restrict (castTable (by omega) f) (fun _ : Fin 1 => r)
-
-/-- One affine fold over the row alphabet, with an entire column as one code symbol. -/
-def foldRowsOne {E : Type} [CommRing E] {lanes columns : ℕ}
-    (word : Word E (lanes + 1) columns) (r : E) : Word E lanes columns :=
-  fun x u => (1 - r) * word x (Fin.cons false u) + r * word x (Fin.cons true u)
-
 /-- A nearby folded message has no nearby preimage in the previous list. -/
 def ListFoldFailure {K E : Type} [CommRing E] {vars lanes : ℕ} {enc : Encoding K vars}
     (before : ListDecoder (E := E) enc (lanes + 1))
@@ -44,6 +29,38 @@ def ListFoldFailure {K E : Type} [CommRing E] {vars lanes : ℕ} {enc : Encoding
     (word : Word E (lanes + 1) (2 ^ (vars + enc.rate))) (r : E) : Prop :=
   ∃ f ∈ after.decode (foldRowsOne word r),
     ∀ g ∈ before.decode word, foldMessageOne g r ≠ f
+
+/-- A satisfying list preimage is preferred over every preimage violating the old claims. -/
+theorem listLift_of_valid_preimage {E : Type} [Zero E] {n m : ℕ}
+    (candidates : List (Table E n)) (view : Table E n → Table E m)
+    (valid : Table E n → Prop) (successor : Table E m)
+    (exists_valid : ∃ f ∈ candidates, view f = successor ∧ valid f) :
+    listLift candidates view valid successor ∈ candidates ∧
+      view (listLift candidates view valid successor) = successor ∧
+      valid (listLift candidates view valid successor) := by
+  sorry
+
+/-- In the absence of a valid preimage, an existing list preimage is still selected. -/
+theorem listLift_of_preimage {E : Type} [Zero E] {n m : ℕ}
+    (candidates : List (Table E n)) (view : Table E n → Table E m)
+    (valid : Table E n → Prop) (successor : Table E m)
+    (exists_preimage : ∃ f ∈ candidates, view f = successor) :
+    listLift candidates view valid successor ∈ candidates ∧
+      view (listLift candidates view valid successor) = successor := by
+  sorry
+
+/-- Batching's failed backward map is contained in the false-list-member batching event. -/
+theorem batch_lift_failure_subset {K E : Type} [Semiring K] [CommRing E] [DecidableEq E]
+    {vars lanes : ℕ} {enc : Encoding K vars} (ι : K →+* E) (γ L : ℝ)
+    (decoder : ListDecoder (E := E) enc lanes) (correct : decoder.Correct ι γ L)
+    (word : Word E lanes (2 ^ (vars + enc.rate)))
+    (claims : List (Claim E (lanes + vars))) (active : Bool) (r : E)
+    (bad : ∃ f,
+      (candidateState enc ι γ word [batch claims r] active).holds f ∧
+      ¬ (candidateState enc ι γ word claims active).holds
+        (listLift (decoder.decode word) id (fun g => ∀ c ∈ claims, c.Holds g) f)) :
+    ∃ f ∈ decoder.decode word, (∃ c ∈ claims, ¬ c.Holds f) ∧ (batch claims r).Holds f := by
+  sorry
 
 /-- Nearby extension-field codewords of the initial base-field oracle have base-field messages.
 Agreement above the code dimension allows interpolation on base-field points. This connects
@@ -94,8 +111,43 @@ theorem prob_batch_escape_le {K E : Type} [Semiring K] [Field E] [DecidableEq E]
         batchError (E := E) enc sec claims.length := by
   sorry
 
-/-- Each sumcheck fold preserves the false-list invariant outside root collisions and MCA. -/
-theorem prob_fold_escape_le {K E : Type} [Field K] [Field E] [DecidableEq E]
+/-- Only old list members violating the current claim contribute sumcheck root collisions.
+The per-member degree-two bound is the Boolean specialization of Sumcheck's round error. -/
+theorem prob_fold_claimEscape_le {K E : Type} [Semiring K] [Field E] [DecidableEq E]
+    [Fintype E] [SampleableType E] {vars lanes : ℕ} {enc : Encoding K vars}
+    (ι : K →+* E) (sec : LevelSecurity)
+    (before : ListDecoder (E := E) enc (lanes + 1))
+    (correct : before.Correct ι (radius enc sec) (listBound enc sec))
+    (word : Word E (lanes + 1) (2 ^ (vars + enc.rate)))
+    (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E)
+    (check : evalQuadratic q 0 + evalQuadratic q 1 = claim.value) :
+    Pr{let r ←$ᵗ E}[∃ f ∈ before.decode word, ¬ claim.Holds f ∧
+      (⟨foldMessageOne claim.weight r, evalQuadratic q r⟩ : Claim E (lanes + vars)).Holds
+        (foldMessageOne f r)] ≤
+      ENNReal.ofReal (2 * listBound enc sec / Fintype.card E) := by
+  sorry
+
+/-- Fold-list failure or a false old member becoming true contains every failed lift. -/
+theorem fold_lift_failure_subset {K E : Type} [Semiring K] [CommRing E] [DecidableEq E]
+    {vars lanes : ℕ} {enc : Encoding K vars} (ι : K →+* E) (γ L : ℝ)
+    (before : ListDecoder (E := E) enc (lanes + 1))
+    (after : ListDecoder (E := E) enc lanes)
+    (before_correct : before.Correct ι γ L) (after_correct : after.Correct ι γ L)
+    (word : Word E (lanes + 1) (2 ^ (vars + enc.rate)))
+    (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E) (active : Bool) (r : E)
+    (bad : ∃ f,
+      (candidateState enc ι γ (foldRowsOne word r)
+        [⟨foldMessageOne claim.weight r, evalQuadratic q r⟩] active).holds f ∧
+      ¬ (candidateState enc ι γ word [claim] active).holds
+        (listLift (before.decode word) (fun g => foldMessageOne g r) claim.Holds f)) :
+    ListFoldFailure before after word r ∨
+      ∃ f ∈ before.decode word, ¬ claim.Holds f ∧
+        (⟨foldMessageOne claim.weight r, evalQuadratic q r⟩ : Claim E (lanes + vars)).Holds
+          (foldMessageOne f r) := by
+  sorry
+
+/-- The witness-indexed fold failure is bounded by list lifting plus the sumcheck union. -/
+theorem prob_fold_lift_failure_le {K E : Type} [Field K] [Field E] [DecidableEq E]
     [Fintype E] [SampleableType E] {vars lanes : ℕ} {enc : Encoding K vars}
     (ι : K →+* E) (contract : EncodingContract enc ι)
     (sec : LevelSecurity) (valid : sec.Valid enc)
@@ -104,12 +156,23 @@ theorem prob_fold_escape_le {K E : Type} [Field K] [Field E] [DecidableEq E]
     (before_correct : before.Correct ι (radius enc sec) (listBound enc sec))
     (after_correct : after.Correct ι (radius enc sec) (listBound enc sec))
     (word : Word E (lanes + 1) (2 ^ (vars + enc.rate)))
-    (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E)
-    (check : evalQuadratic q 0 + evalQuadratic q 1 = claim.value)
-    (lost : ∀ f ∈ before.decode word, ¬ claim.Holds f) :
-    Pr{let r ←$ᵗ E}[∃ f ∈ after.decode (foldRowsOne word r),
-      (⟨foldMessageOne claim.weight r, evalQuadratic q r⟩ : Claim E (lanes + vars)).Holds f] ≤
-        foldError (E := E) enc sec := by
+    (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E) (active : Bool)
+    (check : evalQuadratic q 0 + evalQuadratic q 1 = claim.value) :
+    Pr{let r ←$ᵗ E}[∃ f,
+      (candidateState enc ι (radius enc sec) (foldRowsOne word r)
+        [⟨foldMessageOne claim.weight r, evalQuadratic q r⟩] active).holds f ∧
+      ¬ (candidateState enc ι (radius enc sec) word [claim] active).holds
+        (listLift (before.decode word) (fun g => foldMessageOne g r) claim.Holds f)] ≤
+      foldError (E := E) enc sec := by
+  sorry
+
+/-- Classical proximity enumeration satisfies the Johnson contract without a row factor. -/
+theorem nearbyDecoder_correct {K E : Type} [Field K] [Field E] [DecidableEq E]
+    [Fintype E] {vars : ℕ} (enc : Encoding K vars) (ι : K →+* E)
+    (contract : EncodingContract enc ι) (sec : LevelSecurity) (valid : sec.Valid enc)
+    (lanes : ℕ) :
+    (nearbyDecoder enc ι (radius enc sec) lanes).Correct ι
+      (radius enc sec) (listBound enc sec) := by
   sorry
 
 /-- OOD collisions are bounded over the new list fixed before the fresh point is sent. -/
@@ -150,6 +213,16 @@ theorem prob_final_batch_escape_le {E : Type} [Field E]
     (lost : ∃ c ∈ claims, ¬ c.Holds candidate) :
     Pr{let r ←$ᵗ E}[(batch claims r).Holds candidate] ≤
       ((claims.length - 1 : ℕ) : ENNReal) / Fintype.card E := by
+  sorry
+
+/-- A fixed plaintext and fixed weight give the degree-two Boolean Sumcheck round error. -/
+theorem prob_closing_escape_le {E : Type} [Field E] [Fintype E] [SampleableType E]
+    {vars : ℕ} (candidate : Table E (vars + 1)) (claim : Claim E (vars + 1))
+    (q : Quadratic E) (check : evalQuadratic q 0 + evalQuadratic q 1 = claim.value)
+    (lost : ¬ claim.Holds candidate) :
+    Pr{let r ←$ᵗ E}[
+      (⟨foldMessageOne (vars := 0) claim.weight r, evalQuadratic q r⟩ : Claim E vars).Holds
+        (foldMessageOne (vars := 0) candidate r)] ≤ (2 : ENNReal) / Fintype.card E := by
   sorry
 
 end Whir

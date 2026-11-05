@@ -144,7 +144,8 @@ def accepts {K E : Type} [Semiring K] [CommRing E] [DecidableEq E] (ι : K →+*
         (⟨fun u => ι (enc.weight (xs q) u), foldWord word round.2.1 (xs q)⟩ : Claim E tail))
       let finalBatch := batch finalClaims round.2.2.2.2.2.1
       let closing := readRounds .done tail finalBatch.value round.2.2.2.2.2.2
-      round.2.2.1 && closing.2.2.1 && decide (mle finalTable closing.2.1 = closing.1)
+      round.2.2.1 && closing.2.2.1 &&
+        decide (mle finalBatch.weight closing.2.1 * mle finalTable closing.2.1 = closing.1)
   | _, .more lanes enc queries rest, word, claims, path =>
       let batched := batch claims path.1
       let round := readRounds (transition E (.more lanes enc queries rest))

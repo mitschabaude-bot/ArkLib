@@ -149,4 +149,18 @@ abbrev Quadratic (E : Type) := Fin 3 → E
 def evalQuadratic {E : Type} [Semiring E] (q : Quadratic E) (r : E) : E :=
   q 0 + q 1 * r + q 2 * r ^ 2
 
+/-- Transport only the Boolean coordinate indices of a message table. -/
+def castTable {E : Type} {n m : ℕ} (h : n = m) (f : Table E n) : Table E m :=
+  fun u => f (u ∘ Fin.cast h)
+
+/-- Restrict the first row coordinate of a message, retaining all remaining row coordinates. -/
+def foldMessageOne {E : Type} [CommRing E] {lanes vars : ℕ}
+    (f : Table E ((lanes + 1) + vars)) (r : E) : Table E (lanes + vars) :=
+  restrict (castTable (by omega) f) (fun _ : Fin 1 => r)
+
+/-- One affine fold over the row alphabet, with an entire column as one code symbol. -/
+def foldRowsOne {E : Type} [CommRing E] {lanes columns : ℕ}
+    (word : Word E (lanes + 1) columns) (r : E) : Word E lanes columns :=
+  fun x u => (1 - r) * word x (Fin.cons false u) + r * word x (Fin.cons true u)
+
 end Whir

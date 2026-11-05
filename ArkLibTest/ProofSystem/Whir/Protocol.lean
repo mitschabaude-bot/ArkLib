@@ -3,7 +3,7 @@ Copyright (c) 2026 ArkLib Contributors. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Gregor Mitscha-Baude
 -/
-import ArkLib.ProofSystem.Whir.Knowledge
+import ArkLib.ProofSystem.Whir.Certificate
 
 /-!
 # WHIR transcript execution fixtures
@@ -54,6 +54,8 @@ private def smoke : IO Unit := do
     (accepts (RingHom.id ℚ) lastSchedule (fun _ _ => 1) [⟨1, 2⟩] (lastPath 1))
   check "last level rejects a wrong plaintext table"
     (!(accepts (RingHom.id ℚ) lastSchedule (fun _ _ => 1) [⟨1, 2⟩] (lastPath 0)))
+  check "closing check includes the residual weight"
+    (!(accepts (RingHom.id ℚ) lastSchedule (fun _ _ => 1) [⟨2, 2⟩] (lastPath 1)))
   check "two levels accept consistent zero messages"
     (accepts (RingHom.id ℚ) twoSchedule (fun _ _ => 0) [⟨0, 0⟩] (twoPath 0))
   check "two levels route the OOD claim into the next sumcheck"
@@ -67,6 +69,7 @@ private def smoke : IO Unit := do
 /--
 info: last level accepts the consistent plaintext table
 last level rejects a wrong plaintext table
+closing check includes the residual weight
 two levels accept consistent zero messages
 two levels route the OOD claim into the next sumcheck
 initial extractor selects the satisfying list member
