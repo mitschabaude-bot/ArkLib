@@ -31,27 +31,23 @@ theorem localGame_bounded {Moves : Type} {next : Moves → Oracle.TypeTree}
   exact fun _ _ => bound
 
 /-- Closing's local bad event is a degree-two collision for its fixed plaintext. -/
-theorem closing_local_bound {E : Type} [Field E] [DecidableEq E]
+theorem closing_local_bound {E : Type} [Field E]
     [Fintype E] [SampleableType E] {n : ℕ} (candidate : Table E (n + 1))
     (claim : Claim E (n + 1)) (active : Bool) (q : Quadratic E) :
     Pr{let r ←$ᵗ E}[∃ _ : PUnit.{1},
       ¬ (plaintextState candidate [claim]
-        (active && decide (evalQuadratic q 0 + evalQuadratic q 1 = claim.value))).holds
+        (active && (Sumcheck.compressedOps 1).accept claim.value q)).holds
           (PUnit.unit : PUnit.{1}) ∧
       (plaintextState (foldMessageOne (vars := 0) candidate r)
-        [⟨foldMessageOne (vars := 0) claim.weight r, evalQuadratic q r⟩]
-        (active && decide (evalQuadratic q 0 + evalQuadratic q 1 = claim.value))).holds
+        [⟨foldMessageOne (vars := 0) claim.weight r, evalQuadratic claim.value q r⟩]
+        (active && (Sumcheck.compressedOps 1).accept claim.value q)).holds
           (PUnit.unit : PUnit.{1})] ≤
       (2 : ENNReal) / Fintype.card E := by
   classical
   by_cases lost : ¬ claim.Holds candidate
-  · by_cases check : evalQuadratic q 0 + evalQuadratic q 1 = claim.value
-    · exact (prEvent_mono ($ᵗ E) _ _ (fun r ⟨_, _, good⟩ =>
-        good.2 _ (List.mem_singleton_self _))).trans
-        (prob_closing_escape_le candidate claim q check lost)
-    · exact (prEvent_eq_zero_of_forall_not ($ᵗ E) _ (by
-        rintro r ⟨_, _, good⟩
-        exact check (of_decide_eq_true (Bool.and_eq_true_iff.mp good.1).2))).le.trans zero_le
+  · exact (prEvent_mono ($ᵗ E) _ _ (fun r ⟨_, _, good⟩ =>
+      good.2 _ (List.mem_singleton_self _))).trans
+      (prob_closing_escape_le candidate claim q lost)
   · exact (prEvent_eq_zero_of_forall_not ($ᵗ E) _ (by
       rintro r ⟨_, bad, good⟩
       exact bad ⟨good.1, by
@@ -108,23 +104,19 @@ theorem fold_local_bound {K E : Type} [Field K] [Field E] [DecidableEq E]
     (claim : Claim E ((lanes + 1) + vars)) (active : Bool) (q : Quadratic E) :
     Pr{let r ←$ᵗ E}[∃ f,
       ¬ (candidateState enc ι (radius enc sec) word [claim]
-        (active && decide (evalQuadratic q 0 + evalQuadratic q 1 = claim.value))).holds
+        (active && (Sumcheck.compressedOps 1).accept claim.value q)).holds
           (listLift ((nearbyDecoder enc ι (radius enc sec) (lanes + 1)).decode word)
             (fun g => foldMessageOne g r) claim.Holds f) ∧
       (candidateState enc ι (radius enc sec) (foldRowsOne word r)
-        [⟨foldMessageOne claim.weight r, evalQuadratic q r⟩]
-        (active && decide (evalQuadratic q 0 + evalQuadratic q 1 = claim.value))).holds f] ≤
+        [⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩]
+        (active && (Sumcheck.compressedOps 1).accept claim.value q)).holds f] ≤
       foldError (E := E) enc sec := by
   classical
-  by_cases check : evalQuadratic q 0 + evalQuadratic q 1 = claim.value
-  · have bound := prob_fold_lift_failure_le ι contract sec valid _ _
-      (nearbyDecoder_correct enc ι contract sec valid (lanes + 1))
-      (nearbyDecoder_correct enc ι contract sec valid lanes) word claim q
-      (active && decide (evalQuadratic q 0 + evalQuadratic q 1 = claim.value)) check
-    exact (prEvent_mono ($ᵗ E) _ _ (fun _ ⟨f, bad, good⟩ => ⟨f, good, bad⟩)).trans bound
-  · exact (prEvent_eq_zero_of_forall_not ($ᵗ E) _ (by
-      rintro r ⟨f, _, good⟩
-      exact check (of_decide_eq_true (Bool.and_eq_true_iff.mp good.1).2))).le.trans zero_le
+  have bound := prob_fold_lift_failure_le ι contract sec valid _ _
+    (nearbyDecoder_correct enc ι contract sec valid (lanes + 1))
+    (nearbyDecoder_correct enc ι contract sec valid lanes) word claim q
+    (active && (Sumcheck.compressedOps 1).accept claim.value q)
+  exact (prEvent_mono ($ᵗ E) _ _ (fun _ ⟨f, bad, good⟩ => ⟨f, good, bad⟩)).trans bound
 
 /-- Encoded folds assemble the same local bound at every authored prefix of a round block. -/
 theorem foldExtractor_bounded {K E : Type} [Field K] [Field E] [DecidableEq E]

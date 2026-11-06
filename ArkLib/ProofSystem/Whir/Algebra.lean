@@ -391,9 +391,10 @@ noncomputable def foldPolynomial {E : Type} [CommRing E] {lanes vars : ℕ}
     (weight f : Table E ((lanes + 1) + vars)) : Polynomial E :=
   ∑ u, affineSlice weight u * affineSlice f u
 
-/-- The three transmitted coefficients interpreted as an ordinary polynomial. -/
-noncomputable def quadraticPolynomial {E : Type} [CommRing E] (q : Quadratic E) : Polynomial E :=
-  Polynomial.C (q 0) + Polynomial.C (q 1) * Polynomial.X + Polynomial.C (q 2) * Polynomial.X ^ 2
+/-- The degree-bounded polynomial decoded from the transmitted pair and running claim. -/
+noncomputable def quadraticPolynomial {E : Type} [CommRing E] (current : E)
+    (q : Quadratic E) : Polynomial E :=
+  (Sumcheck.compressed current q).val
 
 /-- Evaluation of the honest quadratic is the folded weighted inner product. -/
 theorem foldPolynomial_eval {E : Type} [CommRing E] {lanes vars : ℕ}
@@ -414,17 +415,17 @@ theorem foldPolynomial_degree {E : Type} [CommRing E] {lanes vars : ℕ}
   unfold affineSlice
   compute_degree
 
-/-- The transmitted polynomial evaluates to the protocol's explicit quadratic evaluator. -/
-theorem quadraticPolynomial_eval {E : Type} [CommRing E] (q : Quadratic E) (r : E) :
-    (quadraticPolynomial q).eval r = evalQuadratic q r := by
-  simp only [quadraticPolynomial, evalQuadratic, Polynomial.eval_add, Polynomial.eval_mul,
-    Polynomial.eval_C, Polynomial.eval_pow, Polynomial.eval_X]
+/-- The decoded polynomial evaluates to the protocol's compressed message evaluator. -/
+theorem quadraticPolynomial_eval {E : Type} [CommRing E] (current : E)
+    (q : Quadratic E) (r : E) :
+    (quadraticPolynomial current q).eval r = evalQuadratic current q r :=
+  (Sumcheck.compressed_evaluate_eq current q r).symm
 
-/-- The transmitted polynomial has degree at most two. -/
-theorem quadraticPolynomial_degree {E : Type} [CommRing E] (q : Quadratic E) :
-    (quadraticPolynomial q).natDegree ≤ 2 := by
-  unfold quadraticPolynomial
-  compute_degree
+/-- The decoded polynomial has degree at most two. -/
+theorem quadraticPolynomial_degree {E : Type} [CommRing E] (current : E) (q : Quadratic E) :
+    (quadraticPolynomial current q).natDegree ≤ 2 :=
+  Polynomial.natDegree_le_of_degree_le
+    (Polynomial.mem_degreeLE.mp (Sumcheck.compressed current q).property)
 
 /-- A sum is invariant under coordinate transport. -/
 theorem sum_castTable {E : Type} [AddCommMonoid E] {n m : ℕ}
@@ -453,19 +454,26 @@ theorem foldPolynomial_boolean_sum {E : Type} [CommRing E] {lanes vars : ℕ}
 theorem prob_fold_fixed_le {E : Type} [Field E] [Fintype E] [SampleableType E]
     {lanes vars : ℕ} (candidate : Table E ((lanes + 1) + vars))
     (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E)
-    (check : evalQuadratic q 0 + evalQuadratic q 1 = claim.value)
     (lost : ¬ claim.Holds candidate) :
     Pr{let r ←$ᵗ E}[
-      (⟨foldMessageOne claim.weight r, evalQuadratic q r⟩ : Claim E (lanes + vars)).Holds
+      (⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩ :
+        Claim E (lanes + vars)).Holds
         (foldMessageOne candidate r)] ≤ (2 : ENNReal) / Fintype.card E := by
-  have different : foldPolynomial claim.weight candidate ≠ quadraticPolynomial q := by
+  classical
+  let model := Sumcheck.compressedModel (R := E) 1
+  have check : (quadraticPolynomial claim.value q).eval 0 +
+      (quadraticPolynomial claim.value q).eval 1 = claim.value := by
+    simpa only [model, Sumcheck.compressedModel, quadraticPolynomial,
+      Finset.sum_pair (zero_ne_one : (0 : E) ≠ 1)] using
+      (model.accept_iff claim.value q).mp rfl
+  have different : foldPolynomial claim.weight candidate ≠ quadraticPolynomial claim.value q := by
     intro same
     apply lost
     change (∑ u, claim.weight u * candidate u) = claim.value
-    rw [← foldPolynomial_boolean_sum, same, quadraticPolynomial_eval, quadraticPolynomial_eval]
+    rw [← foldPolynomial_boolean_sum, same]
     exact check
   have h := Probability.prob_polynomial_eval_eq_le different
-    (foldPolynomial_degree claim.weight candidate) (quadraticPolynomial_degree q)
+    (foldPolynomial_degree claim.weight candidate) (quadraticPolynomial_degree claim.value q)
   simpa only [foldPolynomial_eval, quadraticPolynomial_eval, Claim.Holds, Nat.cast_ofNat] using h
 
 end Whir

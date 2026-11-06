@@ -6,6 +6,7 @@ Authors: Gregor Mitscha-Baude
 module
 
 public import ArkLib.Data.CodingTheory.ReedSolomon
+public import ArkLib.ProofSystem.Sumcheck.Message.Compressed
 
 /-!
 # Binary WHIR tables, additive encodings, and weighted claims
@@ -150,12 +151,18 @@ theorem fold_interleave {K E : Type} [Semiring K] [CommRing E] {vars lanes : ℕ
   intro u _
   ring
 
-/-- One Boolean sumcheck message, sent as its three coefficients. -/
-abbrev Quadratic (E : Type) := Fin 3 → E
+/-- The transmitted constant and quadratic coefficients of a Boolean sumcheck round. -/
+abbrev Quadratic (E : Type) := Sumcheck.CompressedMessage E 1
 
-/-- Evaluation of a degree-at-most-two sumcheck message. -/
-def evalQuadratic {E : Type} [Semiring E] (q : Quadratic E) (r : E) : E :=
-  q 0 + q 1 * r + q 2 * r ^ 2
+/-- Evaluate the quadratic reconstructed from the running claim and transmitted pair. -/
+def evalQuadratic {E : Type} [CommRing E] (current : E) (q : Quadratic E) (r : E) : E :=
+  (Sumcheck.compressedOps 1).evaluate current q r
+
+/-- Reconstruction enforces the Boolean sum at every running claim. -/
+theorem evalQuadratic_boolean_sum {E : Type} [CommRing E] (current : E) (q : Quadratic E) :
+    evalQuadratic current q 0 + evalQuadratic current q 1 = current := by
+  simpa only [evalQuadratic, Sumcheck.compressed_evaluate_eq] using
+    Sumcheck.compressed_boolean_sum current q
 
 /-- Transport only the Boolean coordinate indices of a message table. -/
 def castTable {E : Type} {n m : ℕ} (h : n = m) (f : Table E n) : Table E m :=

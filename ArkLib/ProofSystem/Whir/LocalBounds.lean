@@ -189,22 +189,22 @@ theorem prob_fold_claimEscape_le {K E : Type} [Semiring K] [Field E] [DecidableE
     (before : ListDecoder (E := E) enc (lanes + 1))
     (correct : before.Correct ι (radius enc sec) (listBound enc sec))
     (word : Word E (lanes + 1) (2 ^ (vars + enc.rate)))
-    (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E)
-    (check : evalQuadratic q 0 + evalQuadratic q 1 = claim.value) :
+    (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E) :
     Pr{let r ←$ᵗ E}[∃ f ∈ before.decode word, ¬ claim.Holds f ∧
-      (⟨foldMessageOne claim.weight r, evalQuadratic q r⟩ : Claim E (lanes + vars)).Holds
+      (⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩ :
+        Claim E (lanes + vars)).Holds
         (foldMessageOne f r)] ≤
       ENNReal.ofReal (2 * listBound enc sec / Fintype.card E) := by
   classical
   let event := fun f r => ¬ claim.Holds f ∧
-    (⟨foldMessageOne claim.weight r, evalQuadratic q r⟩ : Claim E (lanes + vars)).Holds
+    (⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩ : Claim E (lanes + vars)).Holds
       (foldMessageOne f r)
   have hper : ∀ f ∈ before.decode word, Pr{let r ←$ᵗ E}[event f r] ≤
       (2 : ENNReal) / Fintype.card E := by
     intro f _
     by_cases lost : ¬ claim.Holds f
     · exact (prEvent_mono ($ᵗ E) _ _ (fun _ h => h.2)).trans
-        (prob_fold_fixed_le f claim q check lost)
+        (prob_fold_fixed_le f claim q lost)
     · exact (prEvent_eq_zero_of_forall_not ($ᵗ E) _ (fun _ h => lost h.1)).le.trans zero_le
   exact (prob_exists_list_le ($ᵗ E) (before.decode word) event _ hper).trans
     (list_union_error_le (E := E) _ 2 _ (correct.length_le word))
@@ -219,12 +219,13 @@ theorem fold_lift_failure_subset {K E : Type} [Semiring K] [CommRing E] [Decidab
     (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E) (active : Bool) (r : E)
     (bad : ∃ f,
       (candidateState enc ι γ (foldRowsOne word r)
-        [⟨foldMessageOne claim.weight r, evalQuadratic q r⟩] active).holds f ∧
+        [⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩] active).holds f ∧
       ¬ (candidateState enc ι γ word [claim] active).holds
         (listLift (before.decode word) (fun g => foldMessageOne g r) claim.Holds f)) :
     ListFoldFailure before after word r ∨
       ∃ f ∈ before.decode word, ¬ claim.Holds f ∧
-        (⟨foldMessageOne claim.weight r, evalQuadratic q r⟩ : Claim E (lanes + vars)).Holds
+        (⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩ :
+          Claim E (lanes + vars)).Holds
           (foldMessageOne f r) := by
   classical
   obtain ⟨f, ⟨ha, hf, hclaim⟩, hbad⟩ := bad
@@ -255,11 +256,10 @@ theorem prob_fold_lift_failure_le {K E : Type} [Field K] [Field E] [DecidableEq 
     (before_correct : before.Correct ι (radius enc sec) (listBound enc sec))
     (after_correct : after.Correct ι (radius enc sec) (listBound enc sec))
     (word : Word E (lanes + 1) (2 ^ (vars + enc.rate)))
-    (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E) (active : Bool)
-    (check : evalQuadratic q 0 + evalQuadratic q 1 = claim.value) :
+    (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E) (active : Bool) :
     Pr{let r ←$ᵗ E}[∃ f,
       (candidateState enc ι (radius enc sec) (foldRowsOne word r)
-        [⟨foldMessageOne claim.weight r, evalQuadratic q r⟩] active).holds f ∧
+        [⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩] active).holds f ∧
       ¬ (candidateState enc ι (radius enc sec) word [claim] active).holds
         (listLift (before.decode word) (fun g => foldMessageOne g r) claim.Holds f)] ≤
       foldError (E := E) enc sec := by
@@ -270,7 +270,7 @@ theorem prob_fold_lift_failure_le {K E : Type} [Field K] [Field E] [DecidableEq 
   refine inclusion.trans ((prEvent_or_le ($ᵗ E) _ _).trans ?_)
   exact (add_le_add
     (prob_listFoldFailure_le ι contract sec valid before after before_correct after_correct word)
-    (prob_fold_claimEscape_le ι sec before before_correct word claim q check)).trans_eq
+    (prob_fold_claimEscape_le ι sec before before_correct word claim q)).trans_eq
       (add_comm _ _)
 
 /-- OOD collisions are bounded over the new list fixed before the fresh point is sent. -/
@@ -361,11 +361,12 @@ theorem prob_final_batch_escape_le {E : Type} [Field E]
 /-- A fixed plaintext and fixed weight give the degree-two Boolean Sumcheck round error. -/
 theorem prob_closing_escape_le {E : Type} [Field E] [Fintype E] [SampleableType E]
     {vars : ℕ} (candidate : Table E (vars + 1)) (claim : Claim E (vars + 1))
-    (q : Quadratic E) (check : evalQuadratic q 0 + evalQuadratic q 1 = claim.value)
+    (q : Quadratic E)
     (lost : ¬ claim.Holds candidate) :
     Pr{let r ←$ᵗ E}[
-      (⟨foldMessageOne (vars := 0) claim.weight r, evalQuadratic q r⟩ : Claim E vars).Holds
+      (⟨foldMessageOne (vars := 0) claim.weight r, evalQuadratic claim.value q r⟩ :
+        Claim E vars).Holds
         (foldMessageOne (vars := 0) candidate r)] ≤ (2 : ENNReal) / Fintype.card E := by
-  exact prob_fold_fixed_le (vars := 0) candidate claim q check lost
+  exact prob_fold_fixed_le (vars := 0) candidate claim q lost
 
 end Whir

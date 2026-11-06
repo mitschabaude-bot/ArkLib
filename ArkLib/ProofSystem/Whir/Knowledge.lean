@@ -19,7 +19,6 @@ supplied executable base-field decoder. Decoder efficiency is a separate obligat
 
 - Dimension-one MCA requires a separate bound.
 - CompPoly's strict `< r` domain hypothesis requires an adapter.
-- The compressed wire format requires a protocol refinement.
 -/
 
 @[expose] public section

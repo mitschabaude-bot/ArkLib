@@ -16,10 +16,10 @@ followed by an OOD point, its answer, and queries to the preceding oracle. The f
 sent before its queries, final batching challenge, and closing sumcheck. `accepts` is the
 concrete transcript predicate; it reads oracle words only at the sampled columns.
 
-The mathematical wire uses all three quadratic coefficients. The compressed two-coefficient
-wire, field codecs, Merkle authentication, and a `Verifier.Strategy` refinement are separate
-obligations. Failed checks are accumulated in the acceptance predicate without changing the
-public-coin tree or sampling conditional challenges.
+Each quadratic message transmits its constant and quadratic coefficients; the running claim
+determines its linear coefficient. Field codecs, Merkle authentication, and a
+`Verifier.Strategy` refinement are separate obligations. The public-coin tree uses fresh
+unconditional challenges.
 -/
 
 @[expose] public section
@@ -37,7 +37,7 @@ inductive Schedule (K : Type) : ℕ → Type
   | more {tail : ℕ} (lanes : ℕ) (encoding : Encoding K tail) (queries : ℕ)
       (rest : Schedule K tail) : Schedule K (lanes + tail)
 
-/-- Sumcheck's prover messages alternate with fresh public challenges. -/
+/-- Compressed quadratic messages alternate with fresh public challenges. -/
 def scalarRounds (E : Type) : ℕ → Protocol → Protocol
   | 0, rest => rest
   | count + 1, rest => .public .sender (Quadratic E) fun _ =>
@@ -108,7 +108,7 @@ def publicCoin {K E : Type} [DecidableEq K] [DecidableEq E] [SampleableType E]
     {n : ℕ} (s : Schedule K n) : PublicCoin (protocol K E s) :=
   .oracle (openingPublicCoin s)
 
-/-- Parse a block of sumcheck rounds and keep its checks, challenges, and concrete suffix. -/
+/-- Decode each compressed round at its running claim, retaining challenges, checks, and suffix. -/
 def readRounds {E : Type} [CommRing E] [DecidableEq E] (rest : Protocol) :
     (count : ℕ) → E → (scalarRounds E count rest).tree.ExecutionPath →
       E × (Fin count → E) × Bool × rest.tree.ExecutionPath
@@ -116,9 +116,9 @@ def readRounds {E : Type} [CommRing E] [DecidableEq E] (rest : Protocol) :
   | count + 1, current, path =>
       let q := path.1
       let r := path.2.1
-      let next := readRounds rest count (evalQuadratic q r) path.2.2
+      let next := readRounds rest count (evalQuadratic current q r) path.2.2
       (next.1, Fin.cons r next.2.1,
-        decide (evalQuadratic q 0 + evalQuadratic q 1 = current) && next.2.2.1,
+        (Sumcheck.compressedOps 1).accept current q && next.2.2.1,
         next.2.2.2)
 
 /-- Add the residual, OOD, and sampled consistency claims in the Annex B order. -/

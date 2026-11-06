@@ -35,7 +35,6 @@ probability bounds.
 
 - Dimension-one MCA requires a separate bound.
 - CompPoly's strict `< r` domain hypothesis requires an adapter.
-- The compressed wire format requires a protocol refinement.
 -/
 
 @[expose] public section
@@ -57,12 +56,12 @@ def closingExtractor {E : Type} [CommRing E] [DecidableEq E] :
         (plaintextState candidate [claim] active)
   | 0, _, _, _ => PUnit.unit
   | count + 1, candidate, claim, active => fun q =>
-      let checked := active && decide (evalQuadratic q 0 + evalQuadratic q 1 = claim.value)
+      let checked := active && (Sumcheck.compressedOps 1).accept claim.value q
       ⟨plaintextState candidate [claim] checked, id, fun r =>
         ⟨plaintextState (foldMessageOne (vars := 0) candidate r)
-          [⟨foldMessageOne (vars := 0) claim.weight r, evalQuadratic q r⟩] checked,
+          [⟨foldMessageOne (vars := 0) claim.weight r, evalQuadratic claim.value q r⟩] checked,
           id, closingExtractor count (foldMessageOne (vars := 0) candidate r)
-            ⟨foldMessageOne (vars := 0) claim.weight r, evalQuadratic q r⟩ checked⟩⟩
+            ⟨foldMessageOne (vars := 0) claim.weight r, evalQuadratic claim.value q r⟩ checked⟩⟩
 
 /-- Final power batching has a fixed candidate, followed by its closing Sumcheck. -/
 def finalBatchExtractor {E : Type} [CommRing E] [DecidableEq E] {n : ℕ}
@@ -85,11 +84,11 @@ noncomputable def foldExtractor {K E : Type} [Semiring K] [CommRing E] [Decidabl
         (candidateState enc ι γ word [claim] active)
   | 0, word, claim, active => finish word claim active
   | lanes + 1, word, claim, active => fun q =>
-      let checked := active && decide (evalQuadratic q 0 + evalQuadratic q 1 = claim.value)
+      let checked := active && (Sumcheck.compressedOps 1).accept claim.value q
       ⟨candidateState enc ι γ word [claim] checked, id, fun r =>
         let word' := foldRowsOne word r
         let claim' : Claim E (lanes + vars) :=
-          ⟨foldMessageOne claim.weight r, evalQuadratic q r⟩
+          ⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩
         ⟨candidateState enc ι γ word' [claim'] checked,
           listLift ((nearbyDecoder enc ι γ (lanes + 1)).decode word)
             (fun f => foldMessageOne f r) claim.Holds,

@@ -39,13 +39,12 @@ theorem closing_terminal_iff {E : Type} [CommRing E] [DecidableEq E]
       let q : Quadratic E := path.1
       let r : E := path.2.1
       change (∃ witness, ((closingExtractor count (foldMessageOne (vars := 0) candidate r)
-        ⟨foldMessageOne (vars := 0) claim.weight r, evalQuadratic q r⟩
-        (active && decide (evalQuadratic q 0 + evalQuadratic q 1 = claim.value))).terminalState
+        ⟨foldMessageOne (vars := 0) claim.weight r, evalQuadratic claim.value q r⟩
+        (active && (Sumcheck.compressedOps 1).accept claim.value q)).terminalState
           path.2.2).holds witness) ↔ _
       rw [ih]
-      simp only [readRounds, Bool.and_eq_true_iff, decide_eq_true_eq]
+      simp only [readRounds, Sumcheck.compressedOps, Bool.and_true, Bool.true_and]
       rw [mle_foldMessageOne, mle_foldMessageOne]
-      tauto
 
 /-- The last-level suffix reaches the closing extractor on its fixed final plaintext. -/
 theorem lastExtractor_terminalState {K E : Type} [Semiring K] [CommRing E]
@@ -113,8 +112,8 @@ theorem foldExtractor_terminalState {K E : Type} [Semiring K] [CommRing E] [Deci
       let q : Quadratic E := path.1
       let r : E := path.2.1
       change (foldExtractor enc ι γ finish lanes (foldRowsOne word r)
-        ⟨foldMessageOne claim.weight r, evalQuadratic q r⟩
-        (active && decide (evalQuadratic q 0 + evalQuadratic q 1 = claim.value))).terminalState
+        ⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩
+        (active && (Sumcheck.compressedOps 1).accept claim.value q)).terminalState
           path.2.2 = _
       rw [ih]
       simp only [readRounds]
