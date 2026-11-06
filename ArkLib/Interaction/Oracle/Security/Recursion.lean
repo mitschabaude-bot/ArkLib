@@ -40,12 +40,13 @@ def RecursiveRelation.Relation {S : Type u} {Proof : Type v} {W : Type w}
   argument.localCheck s witness ∧
     ∀ child ∈ argument.children witness, argument.verify child.1 child.2
 
-/-- A single-level extractor and error for every explicit-coins adversary. Coins live in `Type`,
-while statements, proofs, and witnesses may live in independent universes. -/
+/-- A uniform executable extractor using the adversary's explicit coins. -/
+abbrev ExtractorFamily (S : Type u) (Proof : Type v) (W : Type w) :=
+  {Coins : Type} → (Coins → S × Proof) → Coins → W
+
+/-- Analysis of a separately supplied uniform extractor. -/
 structure KnowledgeBound {S : Type u} {Proof : Type v} {W : Type w}
-    (argument : RecursiveRelation S Proof W) where
-  /-- Extract a step witness from the adversary and the same coins used to run it. -/
-  ext : {Coins : Type} → [SampleableType Coins] → (Coins → S × Proof) → Coins → W
+    (argument : RecursiveRelation S Proof W) (ext : ExtractorFamily S Proof W) where
   /-- The adversary-dependent one-level extraction error. -/
   err : {Coins : Type} → [SampleableType Coins] → (Coins → S × Proof) → ℝ≥0∞
   /-- Acceptance with an invalid extracted step has probability at most the assigned error. -/
@@ -118,110 +119,118 @@ private theorem forall₂_zipIdx_map {α : Type u} {β : Type v} (R : α → β 
 section Extraction
 
 variable {S : Type u} {Proof : Type v} {W : Type w} {Coins : Type}
-    {argument : RecursiveRelation S Proof W} [SampleableType Coins]
+    {argument : RecursiveRelation S Proof W}
 
 /-- Extract one step and return its selected child, or the fixed default if that index is absent.
 This uses the same coins for the adversary and extraction. -/
-def childAdversary (K : KnowledgeBound argument) (fallback : S × Proof)
+def childAdversary (argument : RecursiveRelation S Proof W) (ext : ExtractorFamily S Proof W)
+    (fallback : S × Proof)
     (A : Coins → S × Proof) (i : ℕ) (c : Coins) : S × Proof :=
-  ((argument.children (K.ext A c))[i]?).getD fallback
+  ((argument.children (ext A c))[i]?).getD fallback
 
 /-- Follow child indices from the root in list order. At length `k`, this adversary runs the
 root followed by `k` single-level extractors, all on the same coins. -/
-def derivedAdversary (K : KnowledgeBound argument) (fallback : S × Proof) :
+def derivedAdversary (argument : RecursiveRelation S Proof W) (ext : ExtractorFamily S Proof W)
+    (fallback : S × Proof) :
     (Coins → S × Proof) → List ℕ → Coins → S × Proof
   | A, [] => A
-  | A, i :: p => derivedAdversary K fallback (childAdversary K fallback A i) p
+  | A, i :: p => derivedAdversary argument ext fallback (childAdversary argument ext fallback A i) p
 
 /-- The empty path denotes the root adversary. -/
-theorem derivedAdversary_nil (K : KnowledgeBound argument) (fallback : S × Proof)
-    (A : Coins → S × Proof) : derivedAdversary K fallback A [] = A := by
+theorem derivedAdversary_nil (ext : ExtractorFamily S Proof W) (fallback : S × Proof)
+    (A : Coins → S × Proof) : derivedAdversary argument ext fallback A [] = A := by
   rfl
 
 /-- Appending one index extracts the adversary at the prefix and selects its indexed child. -/
-theorem derivedAdversary_append (K : KnowledgeBound argument) (fallback : S × Proof)
+theorem derivedAdversary_append (ext : ExtractorFamily S Proof W) (fallback : S × Proof)
     (A : Coins → S × Proof) (p : List ℕ) (i : ℕ) :
-    derivedAdversary K fallback A (p ++ [i]) =
-      childAdversary K fallback (derivedAdversary K fallback A p) i := by
+    derivedAdversary argument ext fallback A (p ++ [i]) =
+      childAdversary argument ext fallback (derivedAdversary argument ext fallback A p) i := by
   induction p generalizing A with
   | nil => rfl
-  | cons j p ih => exact ih (childAdversary K fallback A j)
+  | cons j p ih => exact ih (childAdversary argument ext fallback A j)
 
 /-- Extract every actual child recursively, retaining its statement and original list position.
 The final level contains a step witness but no subtrees. No additional coins are sampled. -/
-def treeExtractor (K : KnowledgeBound argument) (fallback : S × Proof) :
+def treeExtractor (argument : RecursiveRelation S Proof W) (ext : ExtractorFamily S Proof W)
+    (fallback : S × Proof) :
     (depth : ℕ) → (Coins → S × Proof) → Coins → WitnessTree S W
-  | 0, A, c => .node (K.ext A c) []
+  | 0, A, c => .node (ext A c) []
   | depth + 1, A, c =>
-      .node (K.ext A c) ((argument.children (K.ext A c)).zipIdx.map fun (child, i) =>
-        (child.1, treeExtractor K fallback depth (childAdversary K fallback A i) c))
+      let witness := ext A c
+      .node witness ((argument.children witness).zipIdx.map fun (child, i) =>
+        (child.1, treeExtractor argument ext fallback depth
+          (childAdversary argument ext fallback A i) c))
 
 /-- The tree extractor places the current adversary's step witness at its root. -/
-theorem treeExtractor_rootWitness (K : KnowledgeBound argument) (fallback : S × Proof)
+theorem treeExtractor_rootWitness (ext : ExtractorFamily S Proof W) (fallback : S × Proof)
     (depth : ℕ) (A : Coins → S × Proof) (c : Coins) :
-    (treeExtractor K fallback depth A c).rootWitness = K.ext A c := by
+    (treeExtractor argument ext fallback depth A c).rootWitness = ext A c := by
   cases depth <;> rfl
 
 /-- An indexed child carried by the extracted witness is the selected adversary output. -/
-theorem childAdversary_of_mem_zipIdx (K : KnowledgeBound argument) (fallback : S × Proof)
+theorem childAdversary_of_mem_zipIdx (ext : ExtractorFamily S Proof W) (fallback : S × Proof)
     (A : Coins → S × Proof) (c : Coins) (child : (S × Proof) × ℕ)
-    (member : child ∈ (argument.children (K.ext A c)).zipIdx) :
-    childAdversary K fallback A child.2 c = child.1 := by
+    (member : child ∈ (argument.children (ext A c)).zipIdx) :
+    childAdversary argument ext fallback A child.2 c = child.1 := by
   simp only [childAdversary, List.mem_zipIdx_iff_getElem?.mp member, Option.getD_some]
 
 /-- Deep validity of an extracted successor tree is root validity and deep validity of each
 actual indexed child subtree, with the child statement read from the root witness. -/
-theorem deep_succ_treeExtractor (K : KnowledgeBound argument) (fallback : S × Proof)
+theorem deep_succ_treeExtractor (ext : ExtractorFamily S Proof W) (fallback : S × Proof)
     (depth : ℕ) (A : Coins → S × Proof) (c : Coins) :
-    Deep argument (depth + 1) (A c).1 (treeExtractor K fallback (depth + 1) A c) ↔
-      argument.Relation (A c).1 (K.ext A c) ∧
-        ∀ child ∈ (argument.children (K.ext A c)).zipIdx,
+    Deep argument (depth + 1) (A c).1 (treeExtractor argument ext fallback (depth + 1) A c) ↔
+      argument.Relation (A c).1 (ext A c) ∧
+        ∀ child ∈ (argument.children (ext A c)).zipIdx,
           Deep argument depth child.1.1
-            (treeExtractor K fallback depth (childAdversary K fallback A child.2) c) := by
+            (treeExtractor argument ext fallback depth (childAdversary argument ext fallback A
+              child.2) c) := by
   simp only [treeExtractor, Deep, forall₂_zipIdx_map, true_and]
 
 /-- Acceptance with a failed one-level extraction at a fixed explicit coin. -/
-def Bad (K : KnowledgeBound argument) (A : Coins → S × Proof) (c : Coins) : Prop :=
-  argument.verify (A c).1 (A c).2 ∧ ¬ argument.Relation (A c).1 (K.ext A c)
+def Bad (ext : ExtractorFamily S Proof W) (A : Coins → S × Proof) (c : Coins) : Prop :=
+  argument.verify (A c).1 (A c).2 ∧ ¬ argument.Relation (A c).1 (ext A c)
 
 /-- Depth zero for the extracted tree is exactly the original one-level relation. -/
-theorem deep_zero_treeExtractor (K : KnowledgeBound argument) (fallback : S × Proof)
+theorem deep_zero_treeExtractor (ext : ExtractorFamily S Proof W) (fallback : S × Proof)
     (A : Coins → S × Proof) (c : Coins) :
-    Deep argument 0 (A c).1 (treeExtractor K fallback 0 A c) ↔
-      argument.Relation (A c).1 (K.ext A c) := by
+    Deep argument 0 (A c).1 (treeExtractor argument ext fallback 0 A c) ↔
+      argument.Relation (A c).1 (ext A c) := by
   rfl
 
 /-- A failed deep extraction from an accepting root has a bounded path whose proof verifies
 but whose one-level extraction fails. Only valid parent relations need satisfy the fanout bound. -/
-theorem failure_implies_badNode (K : KnowledgeBound argument) (fallback : S × Proof)
+theorem failure_implies_badNode (ext : ExtractorFamily S Proof W) (fallback : S × Proof)
     (A : Coins → S × Proof) (depth fanout : ℕ) (c : Coins)
     (fanoutBound : ∀ s w, argument.Relation s w →
       (argument.children w).length ≤ fanout)
     (accepted : argument.verify (A c).1 (A c).2)
-    (failure : ¬ Deep argument depth (A c).1 (treeExtractor K fallback depth A c)) :
-    ∃ p ∈ paths fanout depth, Bad K (derivedAdversary K fallback A p) c := by
+    (failure : ¬ Deep argument depth (A c).1 (treeExtractor argument ext fallback depth A c)) :
+    ∃ p ∈ paths fanout depth, Bad (argument := argument) ext (derivedAdversary argument ext
+      fallback A p) c := by
   classical
   induction depth generalizing A with
   | zero =>
       exact ⟨[], nil_mem_paths fanout 0, accepted, failure⟩
   | succ depth ih =>
-      by_cases valid : argument.Relation (A c).1 (K.ext A c)
-      · have childFailure : ∃ child ∈ (argument.children (K.ext A c)).zipIdx,
+      by_cases valid : argument.Relation (A c).1 (ext A c)
+      · have childFailure : ∃ child ∈ (argument.children (ext A c)).zipIdx,
             ¬ Deep argument depth child.1.1
-              (treeExtractor K fallback depth (childAdversary K fallback A child.2) c) := by
+              (treeExtractor argument ext fallback depth (childAdversary argument ext fallback A
+                child.2) c) := by
           by_contra noFailure
           apply failure
-          apply (deep_succ_treeExtractor K fallback depth A c).mpr
+          apply (deep_succ_treeExtractor ext fallback depth A c).mpr
           exact ⟨valid, fun child member => Classical.byContradiction
             (fun bad => noFailure ⟨child, member, bad⟩)⟩
         obtain ⟨child, member, childFailure⟩ := childFailure
-        have selected := childAdversary_of_mem_zipIdx K fallback A c child member
-        have childAccepted : argument.verify (childAdversary K fallback A child.2 c).1
-            (childAdversary K fallback A child.2 c).2 := by
+        have selected := childAdversary_of_mem_zipIdx ext fallback A c child member
+        have childAccepted : argument.verify (childAdversary argument ext fallback A child.2 c).1
+            (childAdversary argument ext fallback A child.2 c).2 := by
           rw [selected]
           exact valid.2 child.1 (List.fst_mem_of_mem_zipIdx member)
         rw [← selected] at childFailure
-        obtain ⟨p, pathMember, bad⟩ := ih (childAdversary K fallback A child.2)
+        obtain ⟨p, pathMember, bad⟩ := ih (childAdversary argument ext fallback A child.2)
           childAccepted childFailure
         have indexBound : child.2 < fanout :=
           (List.snd_lt_of_mem_zipIdx member).trans_le (fanoutBound _ _ valid)
@@ -231,24 +240,26 @@ theorem failure_implies_badNode (K : KnowledgeBound argument) (fallback : S × P
 /-- Recursive knowledge soundness through any depth: sum the one-level errors at every bounded
 path, including the root. The recursion relation bounds the children of valid witnesses;
 no independence between nodes, adversaries, or extraction events is assumed. -/
-theorem knowledgeSoundness (K : KnowledgeBound argument) (fallback : S × Proof)
+theorem knowledgeSoundness [SampleableType Coins] (ext : ExtractorFamily S Proof W)
+    (K : KnowledgeBound argument ext) (fallback : S × Proof)
     (A : Coins → S × Proof) (depth fanout : ℕ)
     (fanoutBound : ∀ s w, argument.Relation s w →
       (argument.children w).length ≤ fanout) :
     Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
       argument.verify (A c).1 (A c).2 ∧
-        ¬ Deep argument depth (A c).1 (treeExtractor K fallback depth A c)] ≤
-      ∑ p ∈ paths fanout depth, K.err (derivedAdversary K fallback A p) := by
+        ¬ Deep argument depth (A c).1 (treeExtractor argument ext fallback depth A c)] ≤
+      ∑ p ∈ paths fanout depth, K.err (derivedAdversary argument ext fallback A p) := by
   calc
     _ ≤ Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
-        ∃ p ∈ paths fanout depth, Bad K (derivedAdversary K fallback A p) c] :=
-      prEvent_mono _ _ _ (fun c bad => failure_implies_badNode K fallback A depth fanout c
+        ∃ p ∈ paths fanout depth, Bad (argument := argument) ext (derivedAdversary argument ext
+          fallback A p) c] :=
+      prEvent_mono _ _ _ (fun c bad => failure_implies_badNode ext fallback A depth fanout c
         fanoutBound bad.1 bad.2)
     _ ≤ ∑ p ∈ paths fanout depth,
         Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
-          Bad K (derivedAdversary K fallback A p) c] :=
+          Bad (argument := argument) ext (derivedAdversary argument ext fallback A p) c] :=
       prEvent_exists_finset_le (paths fanout depth) ($ᵗ Coins : ProbComp Coins) _
-    _ ≤ _ := Finset.sum_le_sum fun p _ => K.sound (derivedAdversary K fallback A p)
+    _ ≤ _ := Finset.sum_le_sum fun p _ => K.sound (derivedAdversary argument ext fallback A p)
 
 end Extraction
 
@@ -268,6 +279,7 @@ coin type, so the resulting bound can also be applied to derived child adversari
 noncomputable def KnowledgeBound.of_standardBcs (argument : RecursiveRelation S Proof W)
     [DecidableEq Com] {protocol : S → Protocol}
     (coin : (s : S) → PublicCoin (protocol s))
+    (ext : ExtractorFamily S Proof W)
     (certificate : (s : S) →
       KnowledgeCertificate (protocol s).tree (protocol s).roles (argument.knowledgeState s))
     (h : StateRestoration.Table S PUnit (fun s => StandardBcs.compiledCoin Com (coin s)))
@@ -282,6 +294,10 @@ noncomputable def KnowledgeBound.of_standardBcs (argument : RecursiveRelation S 
       ((certificate (toProof (A c)).1).extractor.terminalState
         (StandardBcs.extractedPath (coin (toProof (A c)).1)
           (toProof (A c)).2.1 (messages A c))).Witness)
+    (extractor_eq : ∀ {Coins : Type} [SampleableType Coins] (A : Coins → S × Proof),
+      ext A = StandardBcs.compositeExtractor coin argument.knowledgeState
+        (fun s => (certificate s).extractor) (fun c => toProof (A c))
+        (messages A) (terminalWitness A))
     (Disagree : {Coins : Type} → [SampleableType Coins] → (Coins → S × Proof) → Coins → Prop)
     (transfer : ∀ {Coins : Type} [SampleableType Coins] (A : Coins → S × Proof) (c : Coins),
       StandardBcs.verify coin h accept (toProof (A c)) → ¬ Disagree A c →
@@ -289,14 +305,13 @@ noncomputable def KnowledgeBound.of_standardBcs (argument : RecursiveRelation S 
           (StandardBcs.extractedPath (coin (toProof (A c)).1)
             (toProof (A c)).2.1 (messages A c))).holds (terminalWitness A c))
     (count : ℕ) (bound : StandardBcs.ChallengeBound (Com := Com) coin count) :
-    KnowledgeBound argument where
-  ext A := StandardBcs.compositeExtractor coin argument.knowledgeState certificate
-    (fun c => toProof (A c)) (messages A) (terminalWitness A)
+    KnowledgeBound argument ext where
   err A := Pr{let c ← ($ᵗ _ : ProbComp _)}[Disagree A c] +
     ∑ r ∈ Finset.range count, StandardBcs.ciRel coin argument.knowledgeState certificate
       (fun c => toProof (A c)) (messages A) h r
   sound := by
     intro Coins _ A
+    rw [extractor_eq A]
     have singleLevel := StandardBcs.knowledgeSoundness coin argument.knowledgeState certificate
       (fun c => toProof (A c)) (messages A) h accept (terminalWitness A) (Disagree A)
       (transfer A) count bound
@@ -304,7 +319,8 @@ noncomputable def KnowledgeBound.of_standardBcs (argument : RecursiveRelation S 
       _ = Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
           StandardBcs.verify coin h accept (toProof (A c)) ∧
             ¬ (argument.knowledgeState (toProof (A c)).1).holds
-              (StandardBcs.compositeExtractor coin argument.knowledgeState certificate
+              (StandardBcs.compositeExtractor coin argument.knowledgeState
+                (fun s => (certificate s).extractor)
                 (fun c => toProof (A c)) (messages A) (terminalWitness A) c)] := by
         apply prEvent_congr
         intro c

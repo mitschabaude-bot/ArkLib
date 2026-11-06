@@ -22,23 +22,29 @@ namespace Whir
 
 /-- Terminal knowledge of a level is exactly its initial activity and transcript acceptance. -/
 theorem level_terminal_iff {K E : Type} [Semiring K] [CommRing E]
-    [DecidableEq E] [Fintype E] (ι : K →+* E) {n : ℕ} (s : Schedule K n)
-    (sec : SecurityParameters s) (word : oracleMessage E s) (claims : List (Claim E n))
+    [DecidableEq E] (ι : K →+* E) {n : ℕ} (s : Schedule K n)
+    (sec : SecurityParameters s) (decoders : DecoderFamily (E := E) s) (word : oracleMessage E s)
+      (claims : List (Claim E n))
     (active : Bool) (path : (opening E s).tree.ExecutionPath) :
-    (∃ witness, ((levelExtractor ι s sec word claims active).terminalState path).holds witness) ↔
+    (∃ witness, ((levelExtractor ι s (proximityFamily ι s sec) decoders word claims
+      active).terminalState path).holds witness) ↔
       active = true ∧ accepts ι s word claims path = true := by
   induction s generalizing active with
   | last lanes tail enc queries =>
       unfold accepts
       change LevelSecurity at sec
+      change (lanes : ℕ) → ListDecoder (E := E) enc lanes at decoders
       change Word E lanes (2 ^ (tail + enc.rate)) at word
       change ((_ : E) × (scalarRounds E lanes
         (transition E (.last lanes tail enc queries))).tree.ExecutionPath) at path
-      change (∃ witness, ((foldExtractor enc ι (radius enc sec)
-        (lastExtractor lanes queries enc ι sec) lanes word (batch claims path.1)
+      change (∃ witness, ((foldExtractor enc (fun _ w f => Close (radius enc sec) w
+        (enc.interleave ι f)) decoders
+        (lastExtractor lanes queries enc ι
+      (fun w f => Close (radius enc sec) w (enc.interleave ι f)) (decoders 0)) lanes word (batch
+        claims path.1)
           active).terminalState path.2).holds witness) ↔ _
-      rw [foldExtractor_terminalState]
-      rw [lastExtractor_terminalState]
+      erw [foldExtractor_terminalState]
+      erw [lastExtractor_terminalState]
       let round : E × (Fin lanes → E) × Bool ×
           ((_ : Table E tail) × (_ : Fin queries → enc.Columns) ×
             (_ : E) × (scalarRounds E tail .done).tree.ExecutionPath) :=
@@ -69,14 +75,20 @@ theorem level_terminal_iff {K E : Type} [Semiring K] [CommRing E]
   | more lanes enc queries rest ih =>
       unfold accepts
       change LevelSecurity × SecurityParameters rest at sec
+      change ((lanes : ℕ) → ListDecoder (E := E) enc lanes) ×
+        DecoderFamily (E := E) rest at decoders
       change Word E lanes (2 ^ (_ + enc.rate)) at word
       change ((_ : E) × (scalarRounds E lanes
         (transition E (.more lanes enc queries rest))).tree.ExecutionPath) at path
-      change (∃ witness, ((foldExtractor enc ι (radius enc sec.1)
-        (boundaryExtractor lanes queries enc ι sec.1 rest sec.2 (levelExtractor ι rest sec.2))
+      change (∃ witness, ((foldExtractor enc (fun _ w f => Close (radius enc sec.1) w
+        (enc.interleave ι f)) decoders.1
+        (boundaryExtractor lanes queries enc ι
+          (fun w f => Close (radius enc sec.1) w (enc.interleave ι f))
+          rest (proximityFamily ι rest sec.2) (decoders.1 0) decoders.2
+          (levelExtractor ι rest (proximityFamily ι rest sec.2) decoders.2))
         lanes word (batch claims path.1) active).terminalState path.2).holds witness) ↔ _
-      rw [foldExtractor_terminalState]
-      rw [boundaryExtractor_terminalState]
+      erw [foldExtractor_terminalState]
+      erw [boundaryExtractor_terminalState]
       let round : E × (Fin lanes → E) × Bool ×
           ((_ : oracleMessage E rest) × (_ : Fin _ → E) × (_ : E) ×
             (_ : Fin queries → enc.Columns) × (opening E rest).tree.ExecutionPath) :=
@@ -86,7 +98,8 @@ theorem level_terminal_iff {K E : Type} [Semiring K] [CommRing E]
       let lifted : Claim E _ :=
         ⟨castTable (Nat.zero_add _) (castTable (Nat.zero_add _).symm residual.weight),
           residual.value⟩
-      change (∃ witness, ((levelExtractor ι rest sec.2 round.2.2.2.1
+      change (∃ witness, ((levelExtractor ι rest (proximityFamily ι rest sec.2) decoders.2
+        round.2.2.2.1
         (nextClaims enc ι lifted round.2.2.2.2.1 round.2.2.2.2.2.1 round.2.2.2.2.2.2.1
           (foldWord word round.2.1)) (active && round.2.2.1)).terminalState
             round.2.2.2.2.2.2.2).holds witness) ↔
@@ -102,12 +115,15 @@ theorem level_terminal_iff {K E : Type} [Semiring K] [CommRing E]
 
 /-- Replacing the initial backward map does not change the terminal state. -/
 theorem openingExtractor_terminalState {K E : Type} [Semiring K] [CommRing E]
-    [DecidableEq K] [DecidableEq E] [Fintype E] (ι : K →+* E) {n : ℕ}
-    (s : Schedule K n) (sec : SecurityParameters s) (word : oracleMessage K s)
+    [DecidableEq K] [DecidableEq E] (ι : K →+* E) {n : ℕ}
+    (s : Schedule K n) (sec : SecurityParameters s) (decoders : DecoderFamily (E := E) s) (word :
+      oracleMessage K s)
     (claims : List (Claim E n)) (decoder : InitialDecoder s)
     (path : (opening E s).tree.ExecutionPath) :
-    (openingExtractor ι s sec word claims decoder).terminalState path =
-      (levelExtractor ι s sec (fun x u => ι (word x u)) claims true).terminalState path := by
+    (openingExtractor ι s (proximityFamily ι s sec)
+      (openingState ι s sec word claims).holds decoders word claims decoder).terminalState path =
+      (levelExtractor ι s (proximityFamily ι s sec) decoders (fun x u => ι (word x u)) claims
+        true).terminalState path := by
   cases s <;> rfl
 
 end Whir

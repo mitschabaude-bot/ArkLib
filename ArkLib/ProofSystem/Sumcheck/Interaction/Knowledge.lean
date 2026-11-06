@@ -124,22 +124,36 @@ def rejectedState (W : Type) : KnowledgeState where
   Witness := W
   holds _ := False
 
+/-- Proof-only retained knowledge at each Sumcheck statement and activity bit. -/
+abbrev ClaimPredicate (F : Type) (n : ℕ) (W : Type) :=
+  (i : Fin (n + 1)) → Spec.StatementRound F n i → Bool → W → Prop
+
+/-- A retained carrier whose predicate is supplied independently of executable maps. -/
+def retainedState (claim : ClaimPredicate F n W) (i : Fin (n + 1))
+    (stmt : Spec.StatementRound F n i) (active : Bool) : KnowledgeState where
+  Witness := W
+  holds := claim i stmt active
+
+/-- The mathematical summand is confined to the erased knowledge predicate. -/
+def claimPredicate {m : ℕ} (D : Fin m ↪ F) (valid : W → Prop)
+    (summand : W → Spec.OracleStatement F n deg ()) : ClaimPredicate F n W :=
+  fun i stmt active w => (claimState D valid summand i stmt active).holds w
+
 /-- Total identity maps retain the witness through every message, challenge, and abort branch. -/
-def roundExtractor (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
-    (valid : W → Prop) (summand : W → Spec.OracleStatement F n deg ()) :
+def roundExtractor (ops : MessageOps F M) (claim : ClaimPredicate F n W) :
     (count start : ℕ) → (finish : start + count = n) →
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) → (active : Bool) →
     RoundExtractor (protocol ops count).tree
-      (claimState D valid summand ⟨start, by omega⟩ stmt active)
+      (retainedState claim ⟨start, by omega⟩ stmt active)
   | 0, _, _, _, _ => PUnit.unit
   | count + 1, start, finish, stmt, active => fun q =>
-      ⟨claimState D valid summand ⟨start, by omega⟩ stmt active, id, fun
+      ⟨retainedState claim ⟨start, by omega⟩ stmt active, id, fun
         | none => ⟨rejectedState W, id, PUnit.unit⟩
         | some r =>
-            ⟨claimState D valid summand ⟨start + 1, by omega⟩
+            ⟨retainedState claim ⟨start + 1, by omega⟩
               ⟨ops.evaluate stmt.target q r, Fin.snoc stmt.challenges r⟩
               (active && ops.accept stmt.target q), id,
-              roundExtractor ops D valid summand count (start + 1) (by omega)
+              roundExtractor ops claim count (start + 1) (by omega)
                 ⟨ops.evaluate stmt.target q r, Fin.snoc stmt.challenges r⟩
                 (active && ops.accept stmt.target q)⟩⟩
 
@@ -168,12 +182,12 @@ theorem extractPrefix_bijective {tree residual : Oracle.TypeTree} {state : Knowl
       exact (bijective messages.1).1.comp
         (ih (extractor messages.1).2.2 (bijective messages.1).2 messages.2)
 
+omit [CommSemiring F] in
 /-- Sumcheck's identity maps are bijective on every branch, including public abort. -/
-theorem roundExtractor_mapsBijective (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
-    (valid : W → Prop) (summand : W → Spec.OracleStatement F n deg ())
+theorem roundExtractor_mapsBijective (ops : MessageOps F M) (claim : ClaimPredicate F n W)
     (count start : ℕ) (finish : start + count = n)
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (active : Bool) :
-    mapsBijective (roundExtractor ops D valid summand count start finish stmt active) := by
+    mapsBijective (roundExtractor ops claim count start finish stmt active) := by
   induction count generalizing start active with
   | zero => trivial
   | succ count ih =>
@@ -184,35 +198,50 @@ theorem roundExtractor_mapsBijective (ops : MessageOps F M) {m : ℕ} (D : Fin m
     | none => exact ⟨Function.bijective_id, trivial⟩
     | some r => exact ⟨Function.bijective_id, ih (start + 1) (by omega) _ _⟩
 
+/-- Sumcheck's identity maps supply their own explicit inverses, including on abort. -/
+def roundExtractor_mapEquivalences (ops : MessageOps F M) (claim : ClaimPredicate F n W) :
+    (count start : ℕ) → (finish : start + count = n) →
+    (stmt : Spec.StatementRound F n ⟨start, by omega⟩) → (active : Bool) →
+    RoundExtractor.MapEquivalences (roundExtractor ops claim count start finish stmt
+      active)
+  | 0, _, _, _, _ => PUnit.unit
+  | count + 1, start, _, stmt, active => fun q =>
+      ⟨⟨Equiv.refl W, rfl⟩, fun
+        | none => ⟨⟨Equiv.refl W, rfl⟩, PUnit.unit⟩
+        | some r => ⟨⟨Equiv.refl W, rfl⟩,
+            roundExtractor_mapEquivalences ops claim count (start + 1) (by omega)
+              ⟨ops.evaluate stmt.target q r, Fin.snoc stmt.challenges r⟩
+              (active && ops.accept stmt.target q)⟩⟩
+
 /-- The carrier at every concrete authored prefix is the retained witness carrier. -/
-noncomputable def prefixWitnessEquiv (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
-    (valid : W → Prop) (summand : W → Spec.OracleStatement F n deg ())
+def prefixWitnessEquiv (ops : MessageOps F M) (claim : ClaimPredicate F n W)
     (count start : ℕ) (finish : start + count = n)
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (active : Bool)
     (pfx : ExecutionPrefix (protocol ops count).tree) :
-    ((roundExtractor ops D valid summand count start finish stmt active).knowledgeState pfx).Witness
+    ((roundExtractor ops claim count start finish stmt active).knowledgeState pfx).Witness
       ≃ W :=
-  Equiv.ofBijective _ (extractPrefix_bijective _
-    (roundExtractor_mapsBijective ops D valid summand count start finish stmt active)
-    pfx.cursor.spine pfx.messages)
+  RoundExtractor.extractPrefixEquiv _
+    (roundExtractor_mapEquivalences ops claim count start finish stmt active)
+    pfx.cursor.spine pfx.messages
 
-/-- Backward extraction through any actual prefix returns the supplied witness unchanged. -/
-theorem extractPrefixWitness_eq (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
-    (valid : W → Prop) (summand : W → Spec.OracleStatement F n deg ())
+omit [CommSemiring F] in
+/-- Backward extraction through any actual prefix is the explicit carrier equivalence. -/
+theorem extractPrefixWitness_eq (ops : MessageOps F M) (claim : ClaimPredicate F n W)
     (count start : ℕ) (finish : start + count = n)
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (active : Bool)
     (pfx : ExecutionPrefix (protocol ops count).tree)
-    (w : ((roundExtractor ops D valid summand count start finish stmt active).knowledgeState
+    (w : ((roundExtractor ops claim count start finish stmt active).knowledgeState
       pfx).Witness) :
-    (roundExtractor ops D valid summand count start finish stmt active).extractPrefixWitness pfx w =
-      prefixWitnessEquiv ops D valid summand count start finish stmt active pfx w := rfl
+    (roundExtractor ops claim count start finish stmt active).extractPrefixWitness pfx w =
+      prefixWitnessEquiv ops claim count start finish stmt active pfx w :=
+  (RoundExtractor.extractPrefixEquiv_apply _ _ _ _ _).symm
 
+omit [CommSemiring F] in
 /-- Oracle messages preserve the current knowledge predicate under their identity maps. -/
-theorem roundExtractor_proverPreserving (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
-    (valid : W → Prop) (summand : W → Spec.OracleStatement F n deg ())
+theorem roundExtractor_proverPreserving (ops : MessageOps F M) (claim : ClaimPredicate F n W)
     (count start : ℕ) (finish : start + count = n)
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (active : Bool) :
-    (roundExtractor ops D valid summand count start finish stmt active).IsProverPreserving
+    (roundExtractor ops claim count start finish stmt active).IsProverPreserving
       (protocol ops count).roles := by
   induction count generalizing start active with
   | zero => trivial
@@ -264,7 +293,8 @@ def terminalRelation (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
     (valid : W → Prop) (summand : W → Spec.OracleStatement F n deg ())
     (count start : ℕ) (finish : start + count = n)
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (active : Bool) :
-    TerminalRelation (roundExtractor ops D valid summand count start finish stmt active)
+    TerminalRelation (roundExtractor ops (claimPredicate D valid summand) count start finish stmt
+      active)
       (evaluationProblem valid summand) (fun _ => ())
       (outputClaim ops count start finish stmt active) := by
   induction count generalizing start active with
@@ -311,7 +341,8 @@ theorem badChallenge_implies_successor (ops : MessageOps F M) {m : ℕ} (D : Fin
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (active : Bool) (q : M)
     (choice : Option F)
     (bad : RoundExtractor.badChallenge
-      ((roundExtractor ops D valid summand (count + 1) start finish stmt active q).2.2) choice) :
+      ((roundExtractor ops (claimPredicate D valid summand) (count + 1) start finish stmt active
+        q).2.2) choice) :
     ¬ closedRelation F n deg D ⟨start, by omega⟩
       ⟨stmt, (polynomialFamily F n deg).behaviorOfRealizations (fun _ => p)⟩ ∧
     ops.accept stmt.target q = true ∧
@@ -365,11 +396,12 @@ theorem local_badChallenge_le (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (active : Bool) (q : M) :
     Pr{let choice ← nextChallenge ops stmt.target q}[
       RoundExtractor.badChallenge
-        ((roundExtractor ops D valid summand (count + 1) start finish stmt active q).2.2)
+        ((roundExtractor ops (claimPredicate D valid summand) (count + 1) start finish stmt
+          active q).2.2)
         choice] ≤ (deg : ENNReal) / Fintype.card F := by
   classical
   let extractor :=
-    (roundExtractor ops D valid summand (count + 1) start finish stmt active q).2.2
+    (roundExtractor ops (claimPredicate D valid summand) (count + 1) start finish stmt active q).2.2
   change Pr{let choice ← nextChallenge ops stmt.target q}[
     RoundExtractor.badChallenge extractor choice] ≤ _
   have inclusion := badChallenge_implies_successor ops D model valid summand p binding
@@ -404,7 +436,8 @@ theorem roundExtractor_locallyBounded (ops : MessageOps F M) {m : ℕ} (D : Fin 
     (p : Spec.OracleStatement F n deg ()) (binding : BindsSummand valid summand p)
     (count start : ℕ) (finish : start + count = n)
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (active : Bool) :
-    (roundExtractor ops D valid summand count start finish stmt active).IsLocallyBounded
+    (roundExtractor ops (claimPredicate D valid summand) count start finish stmt
+      active).IsLocallyBounded
       (protocol ops count).roles (challenges ops deg count stmt.target) := by
   induction count generalizing start active with
   | zero => trivial
@@ -429,9 +462,9 @@ noncomputable def certificate (ops : MessageOps F M) {m : ℕ} (D : Fin m ↪ F)
     (stmt : Spec.StatementRound F n ⟨start, by omega⟩) (active : Bool) :
     KnowledgeCertificate (protocol ops count).tree (protocol ops count).roles
       (claimState D valid summand ⟨start, by omega⟩ stmt active) where
-  extractor := roundExtractor ops D valid summand count start finish stmt active
+  extractor := roundExtractor ops (claimPredicate D valid summand) count start finish stmt active
   challenges := challenges ops deg count stmt.target
-  prover_preserving := roundExtractor_proverPreserving ops D valid summand
+  prover_preserving := roundExtractor_proverPreserving ops (claimPredicate D valid summand)
     count start finish stmt active
   local_bound := roundExtractor_locallyBounded ops D model valid summand p binding
     count start finish stmt active

@@ -48,11 +48,14 @@ theorem closing_terminal_iff {E : Type} [CommRing E] [DecidableEq E]
 
 /-- The last-level suffix reaches the closing extractor on its fixed final plaintext. -/
 theorem lastExtractor_terminalState {K E : Type} [Semiring K] [CommRing E]
-    [DecidableEq E] [Fintype E] {tail : ℕ} (lanes queries : ℕ) (enc : Encoding K tail)
-    (ι : K →+* E) (sec : LevelSecurity) (word : Word E 0 (2 ^ (tail + enc.rate)))
+    [DecidableEq E] {tail : ℕ} (lanes queries : ℕ) (enc : Encoding K tail)
+    (ι : K →+* E) (sec : LevelSecurity) (decoder : ListDecoder (E := E) enc 0) (word : Word E 0
+      (2 ^ (tail + enc.rate)))
     (claim : Claim E (0 + tail)) (active : Bool)
     (path : (transition E (.last lanes tail enc queries)).tree.ExecutionPath) :
-    (lastExtractor lanes queries enc ι sec word claim active).terminalState path =
+    (lastExtractor lanes queries enc ι
+      (fun w f => Close (radius enc sec) w (enc.interleave ι f)) decoder word claim
+        active).terminalState path =
       (closingExtractor tail path.1
         (batch (⟨castTable (Nat.zero_add tail) claim.weight, claim.value⟩ ::
           List.ofFn (fun q : Fin queries =>
@@ -62,15 +65,18 @@ theorem lastExtractor_terminalState {K E : Type} [Semiring K] [CommRing E]
 
 /-- The boundary suffix reaches the supplied next-level extractor with all boundary claims. -/
 theorem boundaryExtractor_terminalState {K E : Type} [Semiring K] [CommRing E]
-    [DecidableEq E] [Fintype E] {tail : ℕ} (lanes queries : ℕ) (enc : Encoding K tail)
+    [DecidableEq E] {tail : ℕ} (lanes queries : ℕ) (enc : Encoding K tail)
     (ι : K →+* E) (sec : LevelSecurity) (rest : Schedule K tail)
     (nextSec : SecurityParameters rest)
+    (decoder : ListDecoder (E := E) enc 0) (decoders : DecoderFamily (E := E) rest)
     (suffix : (word : oracleMessage E rest) → (claims : List (Claim E tail)) →
       (active : Bool) → RoundExtractor (opening E rest).tree
         (levelState ι rest nextSec word claims active))
     (word : Word E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail)) (active : Bool)
     (path : (transition E (.more lanes enc queries rest)).tree.ExecutionPath) :
-    (boundaryExtractor lanes queries enc ι sec rest nextSec suffix word claim active).terminalState
+    (boundaryExtractor lanes queries enc ι
+      (fun w f => Close (radius enc sec) w (enc.interleave ι f))
+      rest (proximityFamily ι rest nextSec) decoder decoders suffix word claim active).terminalState
       path =
       (suffix path.1
         (nextClaims enc ι ⟨castTable (Nat.zero_add tail) claim.weight, claim.value⟩
@@ -80,7 +86,8 @@ theorem boundaryExtractor_terminalState {K E : Type} [Semiring K] [CommRing E]
 
 /-- Terminal state after a fold block is the supplied suffix on its fully folded word and claim. -/
 theorem foldExtractor_terminalState {K E : Type} [Semiring K] [CommRing E] [DecidableEq E]
-    [Fintype E] {vars : ℕ} (enc : Encoding K vars) (ι : K →+* E) (γ : ℝ)
+    {vars : ℕ} (enc : Encoding K vars) (ι : K →+* E) (γ : ℝ)
+    (decoders : (lanes : ℕ) → ListDecoder (E := E) enc lanes)
     {rest : Protocol}
     (finish : (word : Word E 0 (2 ^ (vars + enc.rate))) →
       (claim : Claim E (0 + vars)) → (active : Bool) →
@@ -88,7 +95,8 @@ theorem foldExtractor_terminalState {K E : Type} [Semiring K] [CommRing E] [Deci
     (lanes : ℕ) (word : Word E lanes (2 ^ (vars + enc.rate)))
     (claim : Claim E (lanes + vars)) (active : Bool)
     (path : (scalarRounds E lanes rest).tree.ExecutionPath) :
-    (foldExtractor enc ι γ finish lanes word claim active).terminalState path =
+    (foldExtractor enc (fun _ w f => Close γ w (enc.interleave ι f)) decoders finish lanes word
+      claim active).terminalState path =
       (finish
         (fun x _ => foldWord word (readRounds rest lanes claim.value path).2.1 x)
         ⟨castTable (Nat.zero_add vars).symm
@@ -111,7 +119,8 @@ theorem foldExtractor_terminalState {K E : Type} [Semiring K] [CommRing E] [Deci
   | succ lanes ih =>
       let q : Quadratic E := path.1
       let r : E := path.2.1
-      change (foldExtractor enc ι γ finish lanes (foldRowsOne word r)
+      change (foldExtractor enc (fun _ w f => Close γ w (enc.interleave ι f)) decoders finish
+        lanes (foldRowsOne word r)
         ⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩
         (active && (Sumcheck.compressedOps 1).accept claim.value q)).terminalState
           path.2.2 = _

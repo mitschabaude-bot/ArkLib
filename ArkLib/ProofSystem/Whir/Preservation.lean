@@ -44,7 +44,8 @@ theorem finalBatchExtractor_preserving {E : Type} [CommRing E] [DecidableEq E] {
 
 /-- Fold prover checks strengthen the state; the supplied suffix preserves knowledge. -/
 theorem foldExtractor_preserving {K E : Type} [Semiring K] [CommRing E] [DecidableEq E]
-    [Fintype E] {vars : ℕ} (enc : Encoding K vars) (ι : K →+* E) (γ : ℝ)
+    {vars : ℕ} (enc : Encoding K vars) (ι : K →+* E) (γ : ℝ)
+    (decoders : (lanes : ℕ) → ListDecoder (E := E) enc lanes)
     {rest : Protocol}
     (finish : (word : Word E 0 (2 ^ (vars + enc.rate))) →
       (claim : Claim E (0 + vars)) → (active : Bool) →
@@ -52,7 +53,8 @@ theorem foldExtractor_preserving {K E : Type} [Semiring K] [CommRing E] [Decidab
     (preserving : ∀ word claim active, (finish word claim active).IsProverPreserving rest.roles)
     (lanes : ℕ) (word : Word E lanes (2 ^ (vars + enc.rate)))
     (claim : Claim E (lanes + vars)) (active : Bool) :
-    (foldExtractor enc ι γ finish lanes word claim active).IsProverPreserving
+    (foldExtractor enc (fun _ w f => Close γ w (enc.interleave ι f)) decoders finish lanes word
+      claim active).IsProverPreserving
       (scalarRounds E lanes rest).roles := by
   induction lanes generalizing active with
   | zero => exact preserving _ _ _
@@ -65,20 +67,22 @@ theorem foldExtractor_preserving {K E : Type} [Semiring K] [CommRing E] [Decidab
 
 /-- A plaintext's proximity state gives a valid list preimage for its prover backward map. -/
 theorem lastExtractor_preserving {K E : Type} [Field K] [Field E] [DecidableEq E]
-    [Fintype E] {tail : ℕ} (lanes queries : ℕ) (enc : Encoding K tail) (ι : K →+* E)
-    (sec : LevelSecurity) (valid : sec.Valid enc) (contract : EncodingContract enc ι)
+    {tail : ℕ} (lanes queries : ℕ) (enc : Encoding K tail) (ι : K →+* E)
+    (sec : LevelSecurity) (decoder : ListDecoder (E := E) enc 0)
+    (correct : decoder.Correct ι (radius enc sec) (listBound enc sec))
     (word : Word E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail)) (active : Bool) :
-    (lastExtractor lanes queries enc ι sec word claim active).IsProverPreserving
+    (lastExtractor lanes queries enc ι
+      (fun w f => Close (radius enc sec) w (enc.interleave ι f)) decoder word claim
+        active).IsProverPreserving
       (transition E (.last lanes tail enc queries)).roles := by
   refine ⟨?_, fun candidate => ⟨?_, fun xs => finalBatchExtractor_preserving _ _ _⟩⟩
   · intro candidate _ witness good
     change (candidateState enc ι (radius enc sec) word [claim] active).holds
-      (listLift ((nearbyDecoder enc ι (radius enc sec) 0).decode word)
+      (listLift (decoder.decode word)
         (castTable (Nat.zero_add tail)) claim.Holds candidate)
-    have correct := nearbyDecoder_correct enc ι contract sec valid 0
     have hclaim := good.2.2 claim (List.mem_singleton_self _)
     have lift := listLift_of_valid_preimage
-      ((nearbyDecoder enc ι (radius enc sec) 0).decode word)
+      (decoder.decode word)
       (castTable (Nat.zero_add tail)) claim.Holds candidate
       ⟨_, (correct.mem_iff _ _).mpr good.2.1, castTable_inverse _ _, hclaim⟩
     exact ⟨good.1, (correct.mem_iff _ _).mp lift.1,
@@ -88,16 +92,19 @@ theorem lastExtractor_preserving {K E : Type} [Field K] [Field E] [DecidableEq E
 
 /-- New oracle messages and OOD answers retain the old knowledge predicate. -/
 theorem boundaryExtractor_preserving {K E : Type} [Semiring K] [CommRing E]
-    [DecidableEq E] [Fintype E] {tail : ℕ} (lanes queries : ℕ) (enc : Encoding K tail)
+    [DecidableEq E] {tail : ℕ} (lanes queries : ℕ) (enc : Encoding K tail)
     (ι : K →+* E) (sec : LevelSecurity) (rest : Schedule K tail)
     (nextSec : SecurityParameters rest)
+    (decoder : ListDecoder (E := E) enc 0) (decoders : DecoderFamily (E := E) rest)
     (suffix : (word : oracleMessage E rest) → (claims : List (Claim E tail)) →
       (active : Bool) → RoundExtractor (opening E rest).tree
         (levelState ι rest nextSec word claims active))
     (preserving : ∀ word claims active,
       (suffix word claims active).IsProverPreserving (opening E rest).roles)
     (word : Word E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail)) (active : Bool) :
-    (boundaryExtractor lanes queries enc ι sec rest nextSec suffix
+    (boundaryExtractor lanes queries enc ι
+      (fun w f => Close (radius enc sec) w (enc.interleave ι f))
+      rest (proximityFamily ι rest nextSec) decoder decoders suffix
       word claim active).IsProverPreserving
       (transition E (.more lanes enc queries rest)).roles := by
   refine ⟨fun _ _ good => good, fun _ => ⟨?_, fun _ => ⟨?_, fun _ => ⟨?_, ?_⟩⟩⟩⟩
@@ -111,29 +118,35 @@ theorem boundaryExtractor_preserving {K E : Type} [Semiring K] [CommRing E]
 
 /-- All prover messages of an extension-field opening preserve its concrete list witness. -/
 theorem levelExtractor_preserving {K E : Type} [Field K] [Field E]
-    [DecidableEq E] [Fintype E] (ι : K →+* E) {n : ℕ} (s : Schedule K n)
-    (sec : SecurityParameters s) (valid : s.Valid ι sec)
+    [DecidableEq E] (ι : K →+* E) {n : ℕ} (s : Schedule K n)
+    (sec : SecurityParameters s) (decoders : DecoderFamily (E := E) s)
+    (correct : decoders.Correct ι s sec)
     (word : oracleMessage E s) (claims : List (Claim E n)) (active : Bool) :
-    (levelExtractor ι s sec word claims active).IsProverPreserving (opening E s).roles := by
+    (levelExtractor ι s (proximityFamily ι s sec) decoders word claims active).IsProverPreserving
+      (opening E s).roles := by
   induction s generalizing active with
   | last lanes tail enc queries =>
       exact ⟨(fun _ impossible => by cases impossible), fun _ =>
-        foldExtractor_preserving enc ι _ _
-          (lastExtractor_preserving lanes queries enc ι sec valid.2.1 valid.2.2.2) _ _ _ _⟩
+        foldExtractor_preserving enc ι _ decoders _
+          (lastExtractor_preserving lanes queries enc ι sec (decoders 0) (correct 0)) _ _ _ _⟩
   | more lanes enc queries rest ih =>
       exact ⟨(fun _ impossible => by cases impossible), fun _ =>
-        foldExtractor_preserving enc ι _ _
-          (boundaryExtractor_preserving lanes queries enc ι sec.1 rest sec.2 _
-            (ih sec.2 valid.2.2.2.2)) _ _ _ _⟩
+        foldExtractor_preserving enc ι _ decoders.1 _
+          (boundaryExtractor_preserving lanes queries enc ι sec.1 rest sec.2 (decoders.1 0)
+            decoders.2 _
+            (ih sec.2 decoders.2 correct.2)) _ _ _ _⟩
 
 /-- Replacing the verifier root map leaves every prover-preservation obligation unchanged. -/
 theorem openingExtractor_preserving {K E : Type} [Field K] [Field E]
-    [DecidableEq K] [DecidableEq E] [Fintype E] (ι : K →+* E) {n : ℕ}
-    (s : Schedule K n) (sec : SecurityParameters s) (valid : s.Valid ι sec)
+    [DecidableEq K] [DecidableEq E] (ι : K →+* E) {n : ℕ}
+    (s : Schedule K n) (sec : SecurityParameters s) (decoders : DecoderFamily (E := E) s)
+    (correct : decoders.Correct ι s sec)
     (word : oracleMessage K s) (claims : List (Claim E n)) (decoder : InitialDecoder s) :
-    (openingExtractor ι s sec word claims decoder).IsProverPreserving (opening E s).roles := by
+    (openingExtractor ι s (proximityFamily ι s sec)
+      (openingState ι s sec word claims).holds decoders word claims decoder).IsProverPreserving
+        (opening E s).roles := by
   cases s <;>
     exact ⟨(fun _ impossible => by cases impossible),
-      (levelExtractor_preserving ι _ sec valid (fun x u => ι (word x u)) claims true).2⟩
+      (levelExtractor_preserving ι _ sec decoders correct (fun x u => ι (word x u)) claims true).2⟩
 
 end Whir

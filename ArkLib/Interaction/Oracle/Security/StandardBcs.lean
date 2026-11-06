@@ -311,19 +311,22 @@ variable {Statement Com Openings Coins : Type} {protocol : Statement → Protoco
     (state : Statement → KnowledgeState)
     (certificate : (statement : Statement) →
       KnowledgeCertificate (protocol statement).tree (protocol statement).roles (state statement))
+    (extractor : (statement : Statement) →
+      RoundExtractor (protocol statement).tree (state statement))
     (A : Coins → FSProof Statement Com Openings coin)
     (ext : (c : Coins) → ExtractedMessages (coin (A c).1) (A c).2.1)
 
-/-- Run `A` on its explicit coins, then extract each committed message, then run the certificate's
+/-- Run `A` on its explicit coins, then extract each committed message, then run the supplied
+    extractor's
 backward witness maps on that extracted IOP path and the supplied terminal witness. -/
 def compositeExtractor
-    (terminalWitness : (c : Coins) → ((certificate (A c).1).extractor.terminalState
+    (terminalWitness : (c : Coins) → ((extractor (A c).1).terminalState
       (extractedPath (coin (A c).1) (A c).2.1 (ext c))).Witness)
     (c : Coins) : (state (A c).1).Witness :=
   let proof := A c
   let messages := ext c
   let path := extractedPath (coin proof.1) proof.2.1 messages
-  (certificate proof.1).extractor.extractWitness path (terminalWitness c)
+  (extractor proof.1).extractWitness path (terminalWitness c)
 
 /-- The per-round CI game relative to the message extractor: the compiled path is consistent
 with `h` through rank `r`, and the challenge `h` of its compiled key escapes on the extracted
@@ -350,7 +353,8 @@ theorem failure_implies_disagree_or_escape [DecidableEq Com]
     (count : ℕ) (bound : ChallengeBound (Com := Com) coin count)
     (c : Coins) (accepted : verify coin h accept (A c))
     (failure : ¬ (state (A c).1).holds
-      (compositeExtractor coin state certificate A ext terminalWitness c)) :
+      (compositeExtractor coin state (fun s => (certificate s).extractor) A ext terminalWitness
+        c)) :
     Disagree c ∨ ∃ r ∈ Finset.range count,
       escapeAt (coin (A c).1) (certificate (A c).1).extractor
         (A c).2.1 (ext c) (Table.fibre h (A c).1) r := by
@@ -378,7 +382,8 @@ theorem knowledgeSoundness [DecidableEq Com] [SampleableType Coins]
     (count : ℕ) (bound : ChallengeBound (Com := Com) coin count) :
     Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
       verify coin h accept (A c) ∧ ¬ (state (A c).1).holds
-        (compositeExtractor coin state certificate A ext terminalWitness c)] ≤
+        (compositeExtractor coin state (fun s => (certificate s).extractor) A ext terminalWitness
+          c)] ≤
       Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[Disagree c] +
         ∑ r ∈ Finset.range count, ciRel coin state certificate A ext h r := by
   let escape := fun r c => escapeAt (coin (A c).1) (certificate (A c).1).extractor

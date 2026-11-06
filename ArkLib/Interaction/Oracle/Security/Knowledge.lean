@@ -111,6 +111,55 @@ def extractPrefix : {tree residual : Oracle.TypeTree.{u}} → {state : Knowledge
       (extractor messages.1).2.1
         (extractPrefix (extractor messages.1).2.2 tail messages.2 witness)
 
+/-- Explicit equivalences for the backward maps at each concrete branch. -/
+def MapEquivalences : {tree : Oracle.TypeTree.{u}} → {state : KnowledgeState.{w}} →
+    RoundExtractor tree state → Type (max u w)
+  | .done, _, _ => PUnit
+  | .public _ _, state, extractor => ∀ move,
+      {e : (extractor move).1.Witness ≃ state.Witness // e.toFun = (extractor move).2.1} ×
+        MapEquivalences (extractor move).2.2
+  | .oracle _ _, state, extractor => ∀ message,
+      {e : (extractor message).1.Witness ≃ state.Witness // e.toFun = (extractor message).2.1} ×
+        MapEquivalences (extractor message).2.2
+
+/-- Compose the supplied equivalences along the actual prefix, with explicit inverse maps. -/
+def extractPrefixEquiv : {tree residual : Oracle.TypeTree.{u}} → {state : KnowledgeState.{w}} →
+    (extractor : RoundExtractor tree state) → MapEquivalences extractor →
+    (spine : PFunctor.FreeM.Cursor.Spine tree residual) → (messages : PrefixMessages.Along spine) →
+    (extractor.stateAt spine messages).Witness ≃ state.Witness
+  | _, _, _, _, _, .root _, _ => Equiv.refl _
+  | .public _ _, _, _, extractor, equivs, .down move tail, messages =>
+      (extractPrefixEquiv (extractor move).2.2 (equivs move).2 tail messages).trans
+        (equivs move).1.1
+  | .oracle _ _, _, _, extractor, equivs, .down _ tail, messages =>
+      (extractPrefixEquiv (extractor messages.1).2.2 (equivs messages.1).2 tail messages.2).trans
+        (equivs messages.1).1.1
+
+/-- The forward equivalence is exactly the original backward prefix extraction. -/
+theorem extractPrefixEquiv_apply {tree residual : Oracle.TypeTree.{u}} {state : KnowledgeState.{w}}
+    (extractor : RoundExtractor tree state) (equivs : MapEquivalences extractor)
+    (spine : PFunctor.FreeM.Cursor.Spine tree residual) (messages : PrefixMessages.Along spine)
+    (w : (extractor.stateAt spine messages).Witness) :
+    extractPrefixEquiv extractor equivs spine messages w =
+      extractor.extractPrefix spine messages w := by
+  induction spine generalizing state with
+  | root => rfl
+  | @down position next residual answer tail ih =>
+    cases position with
+    | «public» =>
+      change (equivs answer).1.1
+          (extractPrefixEquiv (extractor answer).2.2 (equivs answer).2 tail messages w) =
+        (extractor answer).2.1 ((extractor answer).2.2.extractPrefix tail messages w)
+      exact (congrFun (equivs answer).1.2 _).trans
+        (congrArg (extractor answer).2.1 (ih _ _ _ _))
+    | «oracle» =>
+      cases answer
+      change (equivs messages.1).1.1
+          (extractPrefixEquiv (extractor messages.1).2.2 (equivs messages.1).2 tail messages.2 w) =
+        (extractor messages.1).2.1 ((extractor messages.1).2.2.extractPrefix tail messages.2 w)
+      exact (congrFun (equivs messages.1).1.2 _).trans
+        (congrArg (extractor messages.1).2.1 (ih _ _ _ _))
+
 /-- Spine composition preserves the exact dependent knowledge state. -/
 theorem stateAt_comp {tree middle residual : Oracle.TypeTree.{u}}
     {state : KnowledgeState.{w}} (extractor : RoundExtractor tree state)

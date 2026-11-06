@@ -24,6 +24,14 @@ Column proximity and interleaved Johnson counting use the same block metric.
 
 namespace Whir
 
+/-- Exhaustive classical proximity enumeration; an efficient decoder can refine this list. -/
+noncomputable def nearbyDecoder {K E : Type} [Semiring K] [Semiring E] [Fintype E]
+    [DecidableEq E] {vars : ℕ} (enc : Encoding K vars) (ι : K →+* E) (γ : ℝ)
+    (lanes : ℕ) : ListDecoder (E := E) enc lanes := by
+  classical
+  exact ⟨fun word => (Finset.univ.filter fun f => Close γ word (enc.interleave ι f)).toList⟩
+
+
 /-- Column proximity is the relative Hamming bound on whole columns. -/
 theorem close_iff_relHammingDist {E : Type} [DecidableEq E] {lanes columns : ℕ}
     (hcolumns : 0 < columns) (γ : ℝ) (word codeword : Word E lanes columns) :

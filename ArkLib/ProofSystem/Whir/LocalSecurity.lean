@@ -99,13 +99,16 @@ theorem finalBatchExtractor_bounded {E : Type} [Field E] [DecidableEq E]
 /-- At an encoded fold, a failed checked lift pays only list MCA plus false-claim roots. -/
 theorem fold_local_bound {K E : Type} [Field K] [Field E] [DecidableEq E]
     [Fintype E] [SampleableType E] {vars lanes : ℕ} (enc : Encoding K vars) (ι : K →+* E)
-    (sec : LevelSecurity) (valid : sec.Valid enc) (contract : EncodingContract enc ι)
+    (sec : LevelSecurity)
+    (decoders : (lanes : ℕ) → ListDecoder (E := E) enc lanes)
+    (correct : ∀ lanes, (decoders lanes).Correct ι (radius enc sec) (listBound enc sec))
+    (valid : sec.Valid enc) (contract : EncodingContract enc ι)
     (word : Word E (lanes + 1) (2 ^ (vars + enc.rate)))
     (claim : Claim E ((lanes + 1) + vars)) (active : Bool) (q : Quadratic E) :
     Pr{let r ←$ᵗ E}[∃ f,
       ¬ (candidateState enc ι (radius enc sec) word [claim]
         (active && (Sumcheck.compressedOps 1).accept claim.value q)).holds
-          (listLift ((nearbyDecoder enc ι (radius enc sec) (lanes + 1)).decode word)
+          (listLift ((decoders (lanes + 1)).decode word)
             (fun g => foldMessageOne g r) claim.Holds f) ∧
       (candidateState enc ι (radius enc sec) (foldRowsOne word r)
         [⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩]
@@ -113,15 +116,18 @@ theorem fold_local_bound {K E : Type} [Field K] [Field E] [DecidableEq E]
       foldError (E := E) enc sec := by
   classical
   have bound := prob_fold_lift_failure_le ι contract sec valid _ _
-    (nearbyDecoder_correct enc ι contract sec valid (lanes + 1))
-    (nearbyDecoder_correct enc ι contract sec valid lanes) word claim q
+    (correct (lanes + 1))
+    (correct lanes) word claim q
     (active && (Sumcheck.compressedOps 1).accept claim.value q)
   exact (prEvent_mono ($ᵗ E) _ _ (fun _ ⟨f, bad, good⟩ => ⟨f, good, bad⟩)).trans bound
 
 /-- Encoded folds assemble the same local bound at every authored prefix of a round block. -/
 theorem foldExtractor_bounded {K E : Type} [Field K] [Field E] [DecidableEq E]
     [Fintype E] [SampleableType E] {vars : ℕ} (enc : Encoding K vars) (ι : K →+* E)
-    (sec : LevelSecurity) (valid : sec.Valid enc) (contract : EncodingContract enc ι)
+    (sec : LevelSecurity)
+    (decoders : (lanes : ℕ) → ListDecoder (E := E) enc lanes)
+    (correct : ∀ lanes, (decoders lanes).Correct ι (radius enc sec) (listBound enc sec))
+    (valid : sec.Valid enc) (contract : EncodingContract enc ι)
     {rest : Protocol}
     (finish : (word : Word E 0 (2 ^ (vars + enc.rate))) →
       (claim : Claim E (0 + vars)) → (active : Bool) →
@@ -131,7 +137,8 @@ theorem foldExtractor_bounded {K E : Type} [Field K] [Field E] [DecidableEq E]
       (finish word claim active).IsLocallyBounded rest.roles schedule)
     (lanes : ℕ) (word : Word E lanes (2 ^ (vars + enc.rate)))
     (claim : Claim E (lanes + vars)) (active : Bool) :
-    (foldExtractor enc ι (radius enc sec) finish lanes word claim active).IsLocallyBounded
+    (foldExtractor enc (fun _ w f => Close (radius enc sec) w (enc.interleave ι f)) decoders
+      finish lanes word claim active).IsLocallyBounded
       (scalarRounds E lanes rest).roles
       (scalarChallenges (foldError (E := E) enc sec) schedule lanes) := by
   induction lanes generalizing active with
@@ -139,7 +146,7 @@ theorem foldExtractor_bounded {K E : Type} [Field K] [Field E] [DecidableEq E]
   | succ lanes ih =>
       intro q
       exact ⟨localGame_bounded _ _ _
-        (fold_local_bound enc ι sec valid contract word claim active q),
+        (fold_local_bound enc ι sec decoders correct valid contract word claim active q),
         fun r => ih _ _ _⟩
 
 end Whir

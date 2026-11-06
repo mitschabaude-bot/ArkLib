@@ -34,29 +34,39 @@ def ListFoldFailure {K E : Type} [CommRing E] {vars lanes : ℕ} {enc : Encoding
     ∀ g ∈ before.decode word, foldMessageOne g r ≠ f
 
 /-- A satisfying list preimage is preferred over every preimage violating the old claims. -/
-theorem listLift_of_valid_preimage {E : Type} [Zero E] {n m : ℕ}
+theorem listLift_of_valid_preimage {E : Type} [Zero E] [DecidableEq E] {n m : ℕ}
     (candidates : List (Table E n)) (view : Table E n → Table E m)
-    (valid : Table E n → Prop) (successor : Table E m)
+    (valid : Table E n → Prop) [DecidablePred valid] (successor : Table E m)
     (exists_valid : ∃ f ∈ candidates, view f = successor ∧ valid f) :
     listLift candidates view valid successor ∈ candidates ∧
       view (listLift candidates view valid successor) = successor ∧
       valid (listLift candidates view valid successor) := by
-  classical
-  simp only [listLift, dite_eq_left exists_valid]
-  exact Classical.choose_spec exists_valid
+  unfold listLift
+  split
+  · rename_i f hf
+    exact ⟨List.mem_of_find?_eq_some hf, by simpa using List.find?_some hf⟩
+  · rename_i absent
+    obtain ⟨f, hf, good⟩ := exists_valid
+    exact (List.find?_eq_none.mp absent f hf (by simpa using good)).elim
 
-/-- In the absence of a valid preimage, an existing list preimage is still selected. -/
-theorem listLift_of_preimage {E : Type} [Zero E] {n m : ℕ}
+/-- An existing list preimage is selected even when none satisfies the old claims. -/
+theorem listLift_of_preimage {E : Type} [Zero E] [DecidableEq E] {n m : ℕ}
     (candidates : List (Table E n)) (view : Table E n → Table E m)
-    (valid : Table E n → Prop) (successor : Table E m)
+    (valid : Table E n → Prop) [DecidablePred valid] (successor : Table E m)
     (exists_preimage : ∃ f ∈ candidates, view f = successor) :
     listLift candidates view valid successor ∈ candidates ∧
       view (listLift candidates view valid successor) = successor := by
-  classical
-  by_cases good : ∃ f ∈ candidates, view f = successor ∧ valid f
-  · exact (listLift_of_valid_preimage candidates view valid successor good).imp_right And.left
-  · simp only [listLift, dite_eq_right good, dite_eq_left exists_preimage]
-    exact Classical.choose_spec exists_preimage
+  unfold listLift
+  split
+  · rename_i f hf
+    have good : view f = successor ∧ valid f := by simpa using List.find?_some hf
+    exact ⟨List.mem_of_find?_eq_some hf, good.1⟩
+  · cases found : candidates.find? (fun f => decide (view f = successor)) with
+    | some f =>
+      exact ⟨List.mem_of_find?_eq_some found, by simpa using List.find?_some found⟩
+    | none =>
+      obtain ⟨f, hf, good⟩ := exists_preimage
+      exact (List.find?_eq_none.mp found f hf (by simpa using good)).elim
 
 /-- Batching's failed backward map is contained in the false-list-member batching event. -/
 theorem batch_lift_failure_subset {K E : Type} [Semiring K] [CommRing E] [DecidableEq E]

@@ -12,8 +12,8 @@ public import ArkLib.ProofSystem.Whir.Errors
 
 The witness at an encoded prefix is a polynomial for the current, possibly virtual, word.
 `listLift` prefers a preimage satisfying the current claims, then any list preimage, then zero.
-`nearbyDecoder` is a classical finite enumeration for analysis; `initialExtractor` uses the
-supplied executable base-field decoder. Decoder efficiency is a separate obligation.
+Every level uses a supplied executable decoder, including all intermediate fold row counts.
+Proximity predicates are proof-only inputs; real-valued security data belongs to analysis.
 
 ## Open obligations
 
@@ -91,6 +91,14 @@ def candidateState {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
   holds f := active = true ∧ Close γ word (enc.interleave ι f) ∧
     ∀ c ∈ claims, c.Holds f
 
+/-- A word-to-message relation with active checks and accumulated claims. -/
+def relationState {E : Type} [Semiring E] {vars lanes columns : ℕ}
+    (nearby : Word E lanes columns → Table E (lanes + vars) → Prop)
+    (word : Word E lanes columns) (claims : List (Claim E (lanes + vars)))
+    (active : Bool) : KnowledgeState where
+  Witness := Table E (lanes + vars)
+  holds f := active = true ∧ nearby word f ∧ ∀ c ∈ claims, c.Holds f
+
 /-- The complement of Annex B's post-OOD invariant needs an old candidate or a collision pair.
 The new list is fixed before `z`; the answer and queries have not yet been sent. -/
 def oodState {E : Type} [CommRing E] {n : ℕ} (old : Table E n → Prop)
@@ -123,46 +131,69 @@ def selectInitial {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
   | _, .last _ _ _ _, decoder, word, claims => initialExtractor decoder ι word claims
   | _, .more _ _ _ _, decoder, word, claims => initialExtractor decoder ι word claims
 
-/-- Exhaustive classical proximity enumeration; an efficient decoder can refine this list. -/
-noncomputable def nearbyDecoder {K E : Type} [Semiring K] [Semiring E] [Fintype E]
-    [DecidableEq E] {vars : ℕ} (enc : Encoding K vars) (ι : K →+* E) (γ : ℝ)
-    (lanes : ℕ) : ListDecoder (E := E) enc lanes := by
-  classical
-  exact ⟨fun word => (Finset.univ.filter fun f => Close γ word (enc.interleave ι f)).toList⟩
-
-/-- Prefer a valid list preimage, then any list preimage, then the fixed zero polynomial.
-Classical choice supplies total backward maps without an efficiency assertion. -/
-noncomputable def listLift {E : Type} [Zero E] {n m : ℕ}
+/-- Prefer the first valid list preimage, then the first preimage, then zero. -/
+def listLift {E : Type} [Zero E] [DecidableEq E] {n m : ℕ}
     (candidates : List (Table E n)) (view : Table E n → Table E m)
-    (valid : Table E n → Prop) (successor : Table E m) : Table E n := by
-  classical
-  exact if good : ∃ f ∈ candidates, view f = successor ∧ valid f then
-    Classical.choose good
-  else if preimage : ∃ f ∈ candidates, view f = successor then
-    Classical.choose preimage
-  else 0
+    (valid : Table E n → Prop) [DecidablePred valid] (successor : Table E m) : Table E n :=
+  match candidates.find? (fun f => decide (view f = successor ∧ valid f)) with
+  | some f => f
+  | none => (candidates.find? (fun f => decide (view f = successor))).getD 0
 
-/-- The knowledge predicate for the head encoded level, including accumulated verifier checks. -/
-def levelState {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
-    (ι : K →+* E) {n : ℕ} (s : Schedule K n) (sec : SecurityParameters s)
-    (word : oracleMessage E s) (claims : List (Claim E n)) (active : Bool) :
-    KnowledgeState where
+/-- Executable decoders for every level and every intermediate fold row count. -/
+def DecoderFamily {K E : Type} : {n : ℕ} → Schedule K n → Type
+  | _, .last _ _ enc _ => (lanes : ℕ) → ListDecoder (E := E) enc lanes
+  | _, .more _ enc _ rest =>
+      ((lanes : ℕ) → ListDecoder (E := E) enc lanes) × DecoderFamily (E := E) rest
+
+/-- Proof-only proximity predicates indexed by level and intermediate row count. -/
+abbrev ProximityFamily (K E : Type) := (level : ℕ) → {vars : ℕ} → (enc : Encoding K vars) →
+  (lanes : ℕ) → Word E lanes (2 ^ (vars + enc.rate)) → Table E (lanes + vars) → Prop
+
+/-- The security parameters at a level, with the final level used beyond the schedule. -/
+def securityAt {K : Type} : {n : ℕ} → (s : Schedule K n) → SecurityParameters s →
+    ℕ → LevelSecurity
+  | _, .last _ _ _ _, sec, _ => sec
+  | _, .more _ _ _ _, sec, 0 => sec.1
+  | _, .more _ _ _ rest, sec, level + 1 => securityAt rest sec.2 level
+
+/-- The analytical proximity family; real arithmetic occurs only inside predicates. -/
+def proximityFamily {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
+    (ι : K →+* E) {n : ℕ} (s : Schedule K n) (sec : SecurityParameters s) :
+    ProximityFamily K E :=
+  fun level _ enc _ word f => Close (radius enc (securityAt s sec level)) word (enc.interleave ι f)
+
+/-- The head relation with activity and accumulated claims. -/
+def relationLevelState {K E : Type} [Semiring E] {n : ℕ}
+    (s : Schedule K n) (nearby : ProximityFamily K E) (word : oracleMessage E s)
+    (claims : List (Claim E n)) (active : Bool) : KnowledgeState where
   Witness := Table E n
-  holds := match s, sec, word, claims with
-    | .last _ _ enc _, sec, word, claims =>
-        (candidateState enc ι (radius enc sec) word claims active).holds
-    | .more _ enc _ _, sec, word, claims =>
-        (candidateState enc ι (radius enc sec.1) word claims active).holds
+  holds := match s, word, claims with
+    | .last lanes _ enc _, word, claims =>
+        (relationState (nearby 0 enc lanes) word claims active).holds
+    | .more lanes enc _ _, word, claims =>
+        (relationState (nearby 0 enc lanes) word claims active).holds
 
-/-- The exact head list of a schedule at its analysis radius. -/
-noncomputable def levelList {K E : Type} [Semiring K] [Semiring E]
-    [Fintype E] [DecidableEq E] (ι : K →+* E) :
-    {n : ℕ} → (s : Schedule K n) → SecurityParameters s →
-      oracleMessage E s → List (Table E n)
-  | _, .last lanes _ enc _, sec, word =>
-      (nearbyDecoder enc ι (radius enc sec) lanes).decode word
-  | _, .more lanes enc _ _, sec, word =>
-      (nearbyDecoder enc ι (radius enc sec.1) lanes).decode word
+/-- The analytical head relation with accumulated verifier checks. -/
+abbrev levelState {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
+    (ι : K →+* E) {n : ℕ} (s : Schedule K n) (sec : SecurityParameters s)
+    (word : oracleMessage E s) (claims : List (Claim E n)) (active : Bool) : KnowledgeState :=
+  relationLevelState s (proximityFamily ι s sec) word claims active
+
+/-- Exact coverage and cardinality for each decoder at its level's analysis radius. -/
+def DecoderFamily.Correct {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
+    (ι : K →+* E) : {n : ℕ} → (s : Schedule K n) →
+      DecoderFamily (E := E) s → SecurityParameters s → Prop
+  | _, .last _ _ enc _, decoders, sec =>
+      ∀ lanes, (decoders lanes).Correct ι (radius enc sec) (listBound enc sec)
+  | _, .more _ enc _ rest, decoders, sec =>
+      (∀ lanes, (decoders.1 lanes).Correct ι (radius enc sec.1) (listBound enc sec.1)) ∧
+        DecoderFamily.Correct ι rest decoders.2 sec.2
+
+/-- The supplied head decoder's ordered candidate list. -/
+def levelList {K E : Type} : {n : ℕ} → (s : Schedule K n) →
+    DecoderFamily (E := E) s → oracleMessage E s → List (Table E n)
+  | _, .last lanes _ _ _, decoders, word => (decoders lanes).decode word
+  | _, .more lanes _ _ _, decoders, word => (decoders.1 lanes).decode word
 
 /-- The decoder correctness premise at the actual initial encoding and analysis radius. -/
 def InitialDecoder.Correct {K : Type} [Semiring K] [DecidableEq K] :

@@ -24,16 +24,16 @@ namespace Whir
 /-- Encoded batching pays one power-polynomial error for each current list member. -/
 theorem batch_local_bound {K E : Type} [Field K] [Field E] [DecidableEq E]
     [Fintype E] [SampleableType E] {vars lanes : ℕ} (enc : Encoding K vars) (ι : K →+* E)
-    (sec : LevelSecurity) (valid : sec.Valid enc) (contract : EncodingContract enc ι)
+    (sec : LevelSecurity) (decoder : ListDecoder (E := E) enc lanes)
+    (correct : decoder.Correct ι (radius enc sec) (listBound enc sec))
     (word : Word E lanes (2 ^ (vars + enc.rate)))
     (claims : List (Claim E (lanes + vars))) (active : Bool) :
     Pr{let r ←$ᵗ E}[∃ f,
       ¬ (candidateState enc ι (radius enc sec) word claims active).holds
-        (listLift ((nearbyDecoder enc ι (radius enc sec) lanes).decode word) id
+        (listLift (decoder.decode word) id
           (fun g => ∀ c ∈ claims, c.Holds g) f) ∧
       (candidateState enc ι (radius enc sec) word [batch claims r] active).holds f] ≤
         batchError (E := E) enc sec claims.length := by
-  have correct := nearbyDecoder_correct enc ι contract sec valid lanes
   exact (prEvent_mono ($ᵗ E) _ _ (fun r ⟨f, bad, good⟩ =>
     batch_lift_failure_subset ι _ _ _ correct word claims active r ⟨f, good, bad⟩)).trans
       (prob_batch_escape_le ι sec _ correct word claims)
@@ -41,24 +41,28 @@ theorem batch_local_bound {K E : Type} [Field K] [Field E] [DecidableEq E]
 /-- The extension-field opening satisfies all six rows of its exact challenge schedule. -/
 theorem levelExtractor_bounded {K E : Type} [Field K] [Field E]
     [DecidableEq E] [Fintype E] [SampleableType E] (ι : K →+* E) {n : ℕ}
-    (s : Schedule K n) (sec : SecurityParameters s) (valid : s.Valid ι sec)
+    (s : Schedule K n) (sec : SecurityParameters s) (decoders : DecoderFamily (E := E) s)
+    (familyCorrect : DecoderFamily.Correct ι s decoders sec) (valid : s.Valid ι sec)
     (word : oracleMessage E s) (claims : List (Claim E n)) (active : Bool) :
-    (levelExtractor ι s sec word claims active).IsLocallyBounded (opening E s).roles
+    (levelExtractor ι s (proximityFamily ι s sec) decoders word claims active).IsLocallyBounded
+      (opening E s).roles
       (challenges (E := E) s sec claims.length) := by
   induction s generalizing active with
   | last lanes tail enc queries =>
       refine ⟨localGame_bounded _ _ _
-        (batch_local_bound enc ι sec valid.2.1 valid.2.2.2 word claims active), ?_⟩
+        (batch_local_bound enc ι sec (decoders lanes) (familyCorrect lanes) word claims active), ?_⟩
       intro r
-      exact foldExtractor_bounded enc ι sec valid.2.1 valid.2.2.2 _ _
-        (lastExtractor_bounded lanes queries enc ι sec valid.2.1) lanes word _ active
+      exact foldExtractor_bounded enc ι sec decoders familyCorrect valid.2.1 valid.2.2.2 _ _
+        (lastExtractor_bounded lanes queries enc ι sec (decoders 0) valid.2.1) lanes word _ active
   | more lanes enc queries rest ih =>
       refine ⟨localGame_bounded _ _ _
-        (batch_local_bound enc ι sec.1 valid.2.1 valid.2.2.2.1 word claims active), ?_⟩
+        (batch_local_bound enc ι sec.1 (decoders.1 lanes) (familyCorrect.1 lanes) word claims
+          active), ?_⟩
       intro r
-      exact foldExtractor_bounded enc ι sec.1 valid.2.1 valid.2.2.2.1 _ _
-        (boundaryExtractor_bounded lanes queries enc ι sec.1 valid.2.1 valid.2.2.2.1
-          rest sec.2 valid.2.2.2.2 _ (ih sec.2 valid.2.2.2.2)) lanes word _ active
+      exact foldExtractor_bounded enc ι sec.1 decoders.1 familyCorrect.1 valid.2.1 valid.2.2.2.1 _ _
+        (boundaryExtractor_bounded lanes queries enc ι sec.1 valid.2.1
+          (decoders.1 0) (familyCorrect.1 0) rest sec.2 decoders.2 familyCorrect.2
+          valid.2.2.2.2 _ (ih sec.2 decoders.2 familyCorrect.2 valid.2.2.2.2)) lanes word _ active
 
 /-- A current extension-field witness yields a valid base-field initial selection. -/
 theorem initial_selection_of_current_witness {K E : Type} [Field K] [Field E]
@@ -107,19 +111,24 @@ theorem initial_batch_local_bound {K E : Type} [Field K] [Field E]
 /-- The base-field opening extractor has all Annex B local bounds, including its root map. -/
 theorem openingExtractor_bounded {K E : Type} [Field K] [Field E]
     [DecidableEq K] [DecidableEq E] [Fintype E] [SampleableType E] (ι : K →+* E)
-    {n : ℕ} (s : Schedule K n) (sec : SecurityParameters s) (valid : s.Valid ι sec)
+    {n : ℕ} (s : Schedule K n) (sec : SecurityParameters s) (decoders : DecoderFamily (E := E) s)
+    (familyCorrect : DecoderFamily.Correct ι s decoders sec) (valid : s.Valid ι sec)
     (word : oracleMessage K s) (claims : List (Claim E n)) (decoder : InitialDecoder s)
     (correct : InitialDecoder.Correct decoder sec) :
-    (openingExtractor ι s sec word claims decoder).IsLocallyBounded (opening E s).roles
+    (openingExtractor ι s (proximityFamily ι s sec)
+      (openingState ι s sec word claims).holds decoders word claims decoder).IsLocallyBounded
+        (opening E s).roles
       (challenges (E := E) s sec claims.length) := by
   cases s with
   | last lanes tail enc queries =>
       exact ⟨localGame_bounded _ _ _ (initial_batch_local_bound enc ι
         valid.2.2.1 valid.2.2.2 sec valid.2.1 decoder correct word claims),
-        (levelExtractor_bounded ι _ sec valid (fun x u => ι (word x u)) claims true).2⟩
+        (levelExtractor_bounded ι _ sec decoders familyCorrect valid (fun x u => ι (word x u))
+          claims true).2⟩
   | more lanes enc queries rest =>
       exact ⟨localGame_bounded _ _ _ (initial_batch_local_bound enc ι
         valid.2.2.1 valid.2.2.2.1 sec.1 valid.2.1 decoder correct word claims),
-        (levelExtractor_bounded ι _ sec valid (fun x u => ι (word x u)) claims true).2⟩
+        (levelExtractor_bounded ι _ sec decoders familyCorrect valid (fun x u => ι (word x u))
+          claims true).2⟩
 
 end Whir
