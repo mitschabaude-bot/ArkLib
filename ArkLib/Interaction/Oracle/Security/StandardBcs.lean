@@ -367,9 +367,30 @@ theorem failure_implies_disagree_or_escape [DecidableEq Com]
     exact Or.inr ⟨r, Finset.mem_range.mpr (bounded.trans_le (bound (A c).1 (A c).2.1)),
       escape⟩
 
-/-- Standard-model BCS knowledge soundness: binding disagreement plus the sum of extractor-relative
-CI escape probabilities bounds acceptance with an invalid composite-extracted input witness.
-The table, proof producer and message extractor may be chosen with arbitrary mutual dependence. -/
+/-- A single same-coins game combines disagreement and all compiled CI ranks. -/
+theorem knowledgeSoundness_union [DecidableEq Com] [SampleableType Coins]
+    (h : Table Statement PUnit (fun statement => compiledCoin Com (coin statement)))
+    (accept : FSProof Statement Com Openings coin → Prop)
+    (terminalWitness : (c : Coins) → ((certificate (A c).1).extractor.terminalState
+      (extractedPath (coin (A c).1) (A c).2.1 (ext c))).Witness)
+    (Disagree : Coins → Prop)
+    (transfer : ∀ c, verify coin h accept (A c) → ¬ Disagree c →
+      ((certificate (A c).1).extractor.terminalState
+        (extractedPath (coin (A c).1) (A c).2.1 (ext c))).holds (terminalWitness c))
+    (count : ℕ) (bound : ChallengeBound (Com := Com) coin count) :
+    Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
+      verify coin h accept (A c) ∧ ¬ (state (A c).1).holds
+        (compositeExtractor coin state (fun s => (certificate s).extractor) A ext terminalWitness
+          c)] ≤
+      Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
+        Disagree c ∨ ∃ r ∈ Finset.range count,
+          escapeAt (coin (A c).1) (certificate (A c).1).extractor
+            (A c).2.1 (ext c) (Table.fibre h (A c).1) r] := by
+  exact prEvent_mono _ _ _ (fun c bad => failure_implies_disagree_or_escape
+    coin state certificate A ext h accept terminalWitness Disagree transfer count bound
+    c bad.1 bad.2)
+
+/-- The disagreement and rank sum follows from the same-coins union game. -/
 theorem knowledgeSoundness [DecidableEq Com] [SampleableType Coins]
     (h : Table Statement PUnit (fun statement => compiledCoin Com (coin statement)))
     (accept : FSProof Statement Com Openings coin → Prop)
@@ -391,9 +412,8 @@ theorem knowledgeSoundness [DecidableEq Com] [SampleableType Coins]
   calc
     _ ≤ Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
         Disagree c ∨ ∃ r ∈ Finset.range count, escape r c] :=
-      prEvent_mono _ _ _ (fun c bad => failure_implies_disagree_or_escape
-        coin state certificate A ext h accept terminalWitness Disagree transfer count bound
-        c bad.1 bad.2)
+      knowledgeSoundness_union coin state certificate A ext h accept terminalWitness Disagree
+        transfer count bound
     _ ≤ Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[Disagree c] +
         Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[∃ r ∈ Finset.range count, escape r c] :=
       prEvent_or_le _ _ _

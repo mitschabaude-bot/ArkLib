@@ -13,7 +13,7 @@ public import ArkLib.Interaction.Oracle.Security.StandardBcs
 A recursive witness contains the statements and proofs checked by its step. Extraction follows
 those children using the root adversary's coins throughout. At depth `d`, the extracted tree has
 witnesses at levels `0` through `d`; even its leaves satisfy the one-level relation, including
-verification of their own children. The error sums one-level bounds at all bounded index paths.
+verification of their own children. The tree game uses the same coins at all bounded index paths.
 -/
 
 @[expose] public section
@@ -237,9 +237,22 @@ theorem failure_implies_badNode (ext : ExtractorFamily S Proof W) (fallback : S 
         exact ⟨child.2 :: p, cons_mem_paths indexBound pathMember, bad⟩
       · exact ⟨[], nil_mem_paths fanout (depth + 1), accepted, valid⟩
 
-/-- Recursive knowledge soundness through any depth: sum the one-level errors at every bounded
-path, including the root. The recursion relation bounds the children of valid witnesses;
-no independence between nodes, adversaries, or extraction events is assumed. -/
+/-- One tree game runs the adversary once, with additive extraction cost and shared coins. -/
+theorem knowledgeSoundness_union [SampleableType Coins] (ext : ExtractorFamily S Proof W)
+    (fallback : S × Proof)
+    (A : Coins → S × Proof) (depth fanout : ℕ)
+    (fanoutBound : ∀ s w, argument.Relation s w →
+      (argument.children w).length ≤ fanout) :
+    Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
+      argument.verify (A c).1 (A c).2 ∧
+        ¬ Deep argument depth (A c).1 (treeExtractor argument ext fallback depth A c)] ≤
+      Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
+        ∃ p ∈ paths fanout depth, Bad (argument := argument) ext
+          (derivedAdversary argument ext fallback A p) c] := by
+  exact prEvent_mono _ _ _ (fun c bad => failure_implies_badNode ext fallback A depth fanout c
+    fanoutBound bad.1 bad.2)
+
+/-- The per-path error sum follows from the single tree game by the finite union bound. -/
 theorem knowledgeSoundness [SampleableType Coins] (ext : ExtractorFamily S Proof W)
     (K : KnowledgeBound argument ext) (fallback : S × Proof)
     (A : Coins → S × Proof) (depth fanout : ℕ)
@@ -252,9 +265,7 @@ theorem knowledgeSoundness [SampleableType Coins] (ext : ExtractorFamily S Proof
   calc
     _ ≤ Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
         ∃ p ∈ paths fanout depth, Bad (argument := argument) ext (derivedAdversary argument ext
-          fallback A p) c] :=
-      prEvent_mono _ _ _ (fun c bad => failure_implies_badNode ext fallback A depth fanout c
-        fanoutBound bad.1 bad.2)
+          fallback A p) c] := knowledgeSoundness_union ext fallback A depth fanout fanoutBound
     _ ≤ ∑ p ∈ paths fanout depth,
         Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
           Bad (argument := argument) ext (derivedAdversary argument ext fallback A p) c] :=
