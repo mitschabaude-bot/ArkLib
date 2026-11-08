@@ -47,11 +47,11 @@ theorem foldExtractor_preserving {K E : Type} [Semiring K] [CommRing E] [Decidab
     {vars : ℕ} (enc : Encoding K vars) (ι : K →+* E) (γ : ℝ)
     (decoders : (lanes : ℕ) → ListDecoder (E := E) enc lanes)
     {rest : Protocol}
-    (finish : (word : Word E 0 (2 ^ (vars + enc.rate))) →
+    (finish : (word : MaskedWord E 0 (2 ^ (vars + enc.rate))) →
       (claim : Claim E (0 + vars)) → (active : Bool) →
       RoundExtractor rest.tree (candidateState enc ι γ word [claim] active))
     (preserving : ∀ word claim active, (finish word claim active).IsProverPreserving rest.roles)
-    (lanes : ℕ) (word : Word E lanes (2 ^ (vars + enc.rate)))
+    (lanes : ℕ) (word : MaskedWord E lanes (2 ^ (vars + enc.rate)))
     (claim : Claim E (lanes + vars)) (active : Bool) :
     (foldExtractor enc (fun _ w f => Close γ w (enc.interleave ι f)) decoders finish lanes word
       claim active).IsProverPreserving
@@ -70,7 +70,7 @@ theorem lastExtractor_preserving {K E : Type} [Field K] [Field E] [DecidableEq E
     {tail : ℕ} (lanes queries : ℕ) (enc : Encoding K tail) (ι : K →+* E)
     (sec : LevelSecurity) (decoder : ListDecoder (E := E) enc 0)
     (correct : decoder.Correct ι (radius enc sec) (listBound enc sec))
-    (word : Word E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail)) (active : Bool) :
+    (word : MaskedWord E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail)) (active : Bool) :
     (lastExtractor lanes queries enc ι
       (fun w f => Close (radius enc sec) w (enc.interleave ι f)) decoder word claim
         active).IsProverPreserving
@@ -101,7 +101,7 @@ theorem boundaryExtractor_preserving {K E : Type} [Semiring K] [CommRing E]
         (levelState ι rest nextSec word claims active))
     (preserving : ∀ word claims active,
       (suffix word claims active).IsProverPreserving (opening E rest).roles)
-    (word : Word E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail)) (active : Bool) :
+    (word : MaskedWord E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail)) (active : Bool) :
     (boundaryExtractor lanes queries enc ι
       (fun w f => Close (radius enc sec) w (enc.interleave ι f))
       rest (proximityFamily ι rest nextSec) decoder decoders suffix
@@ -147,6 +147,6 @@ theorem openingExtractor_preserving {K E : Type} [Field K] [Field E]
         (opening E s).roles := by
   cases s <;>
     exact ⟨(fun _ impossible => by cases impossible),
-      (levelExtractor_preserving ι _ sec decoders correct (fun x u => ι (word x u)) claims true).2⟩
+      (levelExtractor_preserving ι _ sec decoders correct (mapMasked ι word) claims true).2⟩
 
 end Whir

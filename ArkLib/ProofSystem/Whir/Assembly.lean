@@ -26,7 +26,7 @@ theorem batch_local_bound {K E : Type} [Field K] [Field E] [DecidableEq E]
     [Fintype E] [SampleableType E] {vars lanes : ℕ} (enc : Encoding K vars) (ι : K →+* E)
     (sec : LevelSecurity) (decoder : ListDecoder (E := E) enc lanes)
     (correct : decoder.Correct ι (radius enc sec) (listBound enc sec))
-    (word : Word E lanes (2 ^ (vars + enc.rate)))
+    (word : MaskedWord E lanes (2 ^ (vars + enc.rate)))
     (claims : List (Claim E (lanes + vars))) (active : Bool) :
     Pr{let r ←$ᵗ E}[∃ f,
       ¬ (candidateState enc ι (radius enc sec) word claims active).holds
@@ -71,9 +71,9 @@ theorem initial_selection_of_current_witness {K E : Type} [Field K] [Field E]
     (sec : LevelSecurity) (valid : sec.Valid enc)
     (decoder : ListDecoder (E := K) enc lanes)
     (correct : decoder.Correct (RingHom.id K) (radius enc sec) (listBound enc sec))
-    (word : Word K lanes (2 ^ (vars + enc.rate))) (claims : List (Claim E (lanes + vars)))
+    (word : MaskedWord K lanes (2 ^ (vars + enc.rate))) (claims : List (Claim E (lanes + vars)))
     (f : Table E (lanes + vars))
-    (close : Close (radius enc sec) (fun x u => ι (word x u)) (enc.interleave ι f))
+    (close : Close (radius enc sec) (mapMasked ι word) (enc.interleave ι f))
     (hclaims : ∀ c ∈ claims, c.Holds f) :
     (initialState enc ι (radius enc sec) word claims).holds
       (initialExtractor decoder ι word claims) := by
@@ -88,17 +88,17 @@ theorem initial_batch_local_bound {K E : Type} [Field K] [Field E]
     (sec : LevelSecurity) (valid : sec.Valid enc)
     (decoder : ListDecoder (E := K) enc lanes)
     (correct : decoder.Correct (RingHom.id K) (radius enc sec) (listBound enc sec))
-    (word : Word K lanes (2 ^ (vars + enc.rate))) (claims : List (Claim E (lanes + vars))) :
+    (word : MaskedWord K lanes (2 ^ (vars + enc.rate))) (claims : List (Claim E (lanes + vars))) :
     Pr{let r ←$ᵗ E}[∃ f,
       ¬ (initialState enc ι (radius enc sec) word claims).holds
         (initialExtractor decoder ι word claims) ∧
-      (candidateState enc ι (radius enc sec) (fun x u => ι (word x u)) [batch claims r]
+      (candidateState enc ι (radius enc sec) (mapMasked ι word) [batch claims r]
         true).holds f] ≤ batchError (E := E) enc sec claims.length := by
   classical
   let current := nearbyDecoder enc ι (radius enc sec) lanes
   have hcurrent := nearbyDecoder_correct enc ι contract sec valid lanes
   refine (prEvent_mono ($ᵗ E) _ _ ?_).trans
-    (prob_batch_escape_le ι sec current hcurrent (fun x u => ι (word x u)) claims)
+    (prob_batch_escape_le ι sec current hcurrent (mapMasked ι word) claims)
   rintro r ⟨f, bad, good⟩
   refine ⟨f, (hcurrent.mem_iff _ _).mpr good.2.1, ?_,
     good.2.2 _ (List.mem_singleton_self _)⟩
@@ -123,12 +123,12 @@ theorem openingExtractor_bounded {K E : Type} [Field K] [Field E]
   | last lanes tail enc queries =>
       exact ⟨localGame_bounded _ _ _ (initial_batch_local_bound enc ι
         valid.2.2.1 valid.2.2.2 sec valid.2.1 decoder correct word claims),
-        (levelExtractor_bounded ι _ sec decoders familyCorrect valid (fun x u => ι (word x u))
+        (levelExtractor_bounded ι _ sec decoders familyCorrect valid (mapMasked ι word)
           claims true).2⟩
   | more lanes enc queries rest =>
       exact ⟨localGame_bounded _ _ _ (initial_batch_local_bound enc ι
         valid.2.2.1 valid.2.2.2.1 sec.1 valid.2.1 decoder correct word claims),
-        (levelExtractor_bounded ι _ sec decoders familyCorrect valid (fun x u => ι (word x u))
+        (levelExtractor_bounded ι _ sec decoders familyCorrect valid (mapMasked ι word)
           claims true).2⟩
 
 end Whir

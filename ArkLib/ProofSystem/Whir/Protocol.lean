@@ -55,7 +55,7 @@ def Schedule.columns {K : Type} {n : ℕ} : Schedule K n → ℕ
 
 /-- The column oracle message for the head of a schedule. -/
 abbrev oracleMessage (E : Type) {K : Type} {n : ℕ} (s : Schedule K n) :=
-  Word E s.lanes s.columns
+  MaskedWord E s.lanes s.columns
 
 /-- The opening phase of the public-coin oracle protocol. -/
 def opening (E : Type) {K : Type} : {n : ℕ} → Schedule K n → Protocol
@@ -141,10 +141,11 @@ def accepts {K E : Type} [Semiring K] [CommRing E] [DecidableEq E] (ι : K →+*
       let finalTable := round.2.2.2.1
       let xs := round.2.2.2.2.1
       let finalClaims := residual :: List.ofFn (fun q : Fin queries =>
-        (⟨fun u => ι (enc.weight (xs q) u), foldWord word round.2.1 (xs q)⟩ : Claim E tail))
+        (⟨fun u => ι (enc.weight (xs q) u),
+          (foldMaskedWord word round.2.1 (xs q)).getD 0⟩ : Claim E tail))
       let finalBatch := batch finalClaims round.2.2.2.2.2.1
       let closing := readRounds .done tail finalBatch.value round.2.2.2.2.2.2
-      round.2.2.1 && closing.2.2.1 &&
+      round.2.2.1 && queriesKnown word xs && closing.2.2.1 &&
         decide (mle finalBatch.weight closing.2.1 * mle finalTable closing.2.1 = closing.1)
   | _, .more lanes enc queries rest, word, claims, path =>
       let batched := batch claims path.1
@@ -153,7 +154,7 @@ def accepts {K E : Type} [Semiring K] [CommRing E] [DecidableEq E] (ι : K →+*
       let residual := ⟨restrict batched.weight round.2.1, round.1⟩
       let after := round.2.2.2
       let claims' := nextClaims enc ι residual after.2.1 after.2.2.1 after.2.2.2.1
-        (foldWord word round.2.1)
-      round.2.2.1 && accepts ι rest after.1 claims' after.2.2.2.2
+        (fun x => (foldMaskedWord word round.2.1 x).getD 0)
+      round.2.2.1 && queriesKnown word after.2.2.2.1 && accepts ι rest after.1 claims' after.2.2.2.2
 
 end Whir

@@ -103,14 +103,14 @@ theorem fold_local_bound {K E : Type} [Field K] [Field E] [DecidableEq E]
     (decoders : (lanes : ℕ) → ListDecoder (E := E) enc lanes)
     (correct : ∀ lanes, (decoders lanes).Correct ι (radius enc sec) (listBound enc sec))
     (valid : sec.Valid enc) (contract : EncodingContract enc ι)
-    (word : Word E (lanes + 1) (2 ^ (vars + enc.rate)))
+    (word : MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate)))
     (claim : Claim E ((lanes + 1) + vars)) (active : Bool) (q : Quadratic E) :
     Pr{let r ←$ᵗ E}[∃ f,
       ¬ (candidateState enc ι (radius enc sec) word [claim]
         (active && (Sumcheck.compressedOps 1).accept claim.value q)).holds
           (listLift ((decoders (lanes + 1)).decode word)
             (fun g => foldMessageOne g r) claim.Holds f) ∧
-      (candidateState enc ι (radius enc sec) (foldRowsOne word r)
+      (candidateState enc ι (radius enc sec) (foldMaskedRowsOne word r)
         [⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩]
         (active && (Sumcheck.compressedOps 1).accept claim.value q)).holds f] ≤
       foldError (E := E) enc sec := by
@@ -129,13 +129,13 @@ theorem foldExtractor_bounded {K E : Type} [Field K] [Field E] [DecidableEq E]
     (correct : ∀ lanes, (decoders lanes).Correct ι (radius enc sec) (listBound enc sec))
     (valid : sec.Valid enc) (contract : EncodingContract enc ι)
     {rest : Protocol}
-    (finish : (word : Word E 0 (2 ^ (vars + enc.rate))) →
+    (finish : (word : MaskedWord E 0 (2 ^ (vars + enc.rate))) →
       (claim : Claim E (0 + vars)) → (active : Bool) →
       RoundExtractor rest.tree (candidateState enc ι (radius enc sec) word [claim] active))
     (schedule : RoundExtractor.ChallengeSchedule rest.tree rest.roles)
     (bounded : ∀ word claim active,
       (finish word claim active).IsLocallyBounded rest.roles schedule)
-    (lanes : ℕ) (word : Word E lanes (2 ^ (vars + enc.rate)))
+    (lanes : ℕ) (word : MaskedWord E lanes (2 ^ (vars + enc.rate)))
     (claim : Claim E (lanes + vars)) (active : Bool) :
     (foldExtractor enc (fun _ w f => Close (radius enc sec) w (enc.interleave ι f)) decoders
       finish lanes word claim active).IsLocallyBounded

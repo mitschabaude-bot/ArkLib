@@ -41,12 +41,12 @@ private def twoSchedule : Schedule ℚ 2 := .more 1 (toyEncoding 1) 1 lastSchedu
 
 /-- A zero transcript with an explicit OOD answer. -/
 private def twoPath (answer : ℚ) : (opening ℚ twoSchedule).tree.ExecutionPath :=
-  ⟨(0 : ℚ), ((0, fun _ => 0) : Quadratic ℚ), (0 : ℚ), (fun _ _ => (0 : ℚ)),
+  ⟨(0 : ℚ), ((0, fun _ => 0) : Quadratic ℚ), (0 : ℚ), (fullWord (fun _ _ => (0 : ℚ))),
     (fun _ => (0 : ℚ)), answer, (fun _ => 0), zeroPath⟩
 
 /-- A constant-one transcript carries a nonzero witness through both levels. -/
 private def twoOnePath : (opening ℚ twoSchedule).tree.ExecutionPath :=
-  ⟨(0 : ℚ), ((2, fun _ => 0) : Quadratic ℚ), (0 : ℚ), (fun _ _ => (1 : ℚ)),
+  ⟨(0 : ℚ), ((2, fun _ => 0) : Quadratic ℚ), (0 : ℚ), (fullWord (fun _ _ => (1 : ℚ))),
     (fun _ => (0 : ℚ)), (1 : ℚ), (fun _ => 0), lastPath 1⟩
 
 /-- Real-valued security data is confined to the extraction fixture's erased predicates. -/
@@ -94,28 +94,28 @@ private def check (name : String) (ok : Bool) : IO Unit := do
 /-- Execute accepted and rejected transcripts and both total list-selection outcomes. -/
 private def smoke : IO Unit := do
   check "last level accepts the consistent plaintext table"
-    (accepts (RingHom.id ℚ) lastSchedule (fun _ _ => 1) [⟨1, 2⟩] (lastPath 1))
+    (accepts (RingHom.id ℚ) lastSchedule (fullWord (fun _ _ => 1)) [⟨1, 2⟩] (lastPath 1))
   check "last level rejects a wrong plaintext table"
-    (!(accepts (RingHom.id ℚ) lastSchedule (fun _ _ => 1) [⟨1, 2⟩] (lastPath 0)))
+    (!(accepts (RingHom.id ℚ) lastSchedule (fullWord (fun _ _ => 1)) [⟨1, 2⟩] (lastPath 0)))
   check "closing check includes the residual weight"
-    (!(accepts (RingHom.id ℚ) lastSchedule (fun _ _ => 1) [⟨2, 2⟩] (lastPath 1)))
+    (!(accepts (RingHom.id ℚ) lastSchedule (fullWord (fun _ _ => 1)) [⟨2, 2⟩] (lastPath 1)))
   check "two levels accept consistent zero messages"
-    (accepts (RingHom.id ℚ) twoSchedule (fun _ _ => 0) [⟨0, 0⟩] (twoPath 0))
+    (accepts (RingHom.id ℚ) twoSchedule (fullWord (fun _ _ => 0)) [⟨0, 0⟩] (twoPath 0))
   check "two levels route the OOD claim into the next sumcheck"
-    (!(accepts (RingHom.id ℚ) twoSchedule (fun _ _ => 0) [⟨0, 0⟩] (twoPath 1)))
+    (!(accepts (RingHom.id ℚ) twoSchedule (fullWord (fun _ _ => 0)) [⟨0, 0⟩] (twoPath 1)))
   check "compressed rounds propagate the decoded running claim"
     (decide ((readRounds .done 2 (10 : ℚ) roundPath).1 = 72) &&
       decide ((readRounds .done 2 (10 : ℚ) roundPath).2.1 = ![3, 2]) &&
       (readRounds .done 2 (10 : ℚ) roundPath).2.2.1)
   check "closing accepts the decoded affine polynomial"
-    (accepts (RingHom.id ℚ) closingSchedule (fun _ _ => 0) [⟨1, 3⟩] (closingPath 0))
+    (accepts (RingHom.id ℚ) closingSchedule (fullWord (fun _ _ => 0)) [⟨1, 3⟩] (closingPath 0))
   check "closing rejects a wrong transmitted quadratic coefficient"
-    (!(accepts (RingHom.id ℚ) closingSchedule (fun _ _ => 0) [⟨1, 3⟩] (closingPath 1)))
+    (!(accepts (RingHom.id ℚ) closingSchedule (fullWord (fun _ _ => 0)) [⟨1, 3⟩] (closingPath 1)))
   let decoder : ListDecoder (E := ℚ) (toyEncoding 0) 1 := ⟨fun _ => [0, 1]⟩
   check "initial extractor selects the satisfying list member"
-    (decide (initialExtractor decoder (RingHom.id ℚ) (fun _ _ => 1) [⟨1, 2⟩] = 1))
+    (decide (initialExtractor decoder (RingHom.id ℚ) (fullWord (fun _ _ => 1)) [⟨1, 2⟩] = 1))
   check "initial extractor returns zero when no member satisfies the claim"
-    (decide (initialExtractor decoder (RingHom.id ℚ) (fun _ _ => 1) [⟨1, 3⟩] = 0))
+    (decide (initialExtractor decoder (RingHom.id ℚ) (fullWord (fun _ _ => 1)) [⟨1, 3⟩] = 0))
   let candidates : List (Table ℚ 1) := [0, 1]
   check "list lift prefers a valid preimage over an earlier invalid preimage"
     (decide (listLift candidates (fun _ => (0 : Table ℚ 0))
@@ -139,19 +139,43 @@ private def smoke : IO Unit := do
     (decide (boundaryLift [] id (fun _ => True) candidates (fun _ => 0) 2 = .inl 0))
   let level := levelExtractor (RingHom.id ℚ) twoSchedule
     (proximityFamily (RingHom.id ℚ) twoSchedule toySecurity)
-    toyDecoders (fun _ _ => 1) [⟨1, 4⟩] true
+    toyDecoders (fullWord (fun _ _ => 1)) [⟨1, 4⟩] true
   check "full two-level backward extraction executes folds and the OOD boundary"
     (decide ((show Table ℚ 2 from level.extractWitness twoOnePath PUnit.unit) = 1))
   let opening := openingExtractor (RingHom.id ℚ) twoSchedule
     (proximityFamily (RingHom.id ℚ) twoSchedule toySecurity)
-    (openingState (RingHom.id ℚ) twoSchedule toySecurity (fun _ _ => 1) [⟨1, 4⟩]).holds
-    toyDecoders (fun _ _ => 1) [⟨1, 4⟩] ⟨fun _ => [0, 1]⟩
+    (openingState (RingHom.id ℚ) twoSchedule toySecurity (fullWord (fun _ _ => 1)) [⟨1, 4⟩]).holds
+    toyDecoders (fullWord (fun _ _ => 1)) [⟨1, 4⟩] ⟨fun _ => [0, 1]⟩
   check "full opening extraction executes the supplied decoder family"
     (decide ((show Table ℚ 2 from opening.extractWitness twoOnePath PUnit.unit) = 1))
   check "Sumcheck prefix equivalence executes its inverse after continuation"
     (decide (sumcheckCarrier (some 0) ((sumcheckCarrier (some 0)).symm 37) = 37))
   check "Sumcheck prefix equivalence executes its inverse after abort"
     (decide (sumcheckCarrier none ((sumcheckCarrier none).symm 19) = 19))
+
+/-- Hidden columns reject queries and are excluded by the executable zero-fill decoder filter. -/
+private def maskedSmoke : IO Unit := do
+  let hidden : MaskedWord ℚ 1 2 := fun _ => none
+  check "hidden columns never agree with zero"
+    (decide ((agreement hidden (fun _ _ => 0)).card = 0))
+  check "hidden query columns reject the transcript"
+    (!(accepts (RingHom.id ℚ) lastSchedule hidden [⟨0, 0⟩] (lastPath 0)))
+  let masked : MaskedWord ℚ 1 2 := fun x => if x.val = 0 then some 0 else none
+  let decoder := ListDecoder.ofZeroFill (enc := toyEncoding 0) (lanes := 1)
+    (RingHom.id ℚ) 1 (fun _ => [0, 1])
+  check "zero-fill decoding filters by masked agreement"
+    (decide (decoder.decode masked = [0]))
+  check "folding preserves hidden columns"
+    ((foldMaskedRowsOne masked 7 1).isNone)
+
+/--
+info: hidden columns never agree with zero
+hidden query columns reject the transcript
+zero-fill decoding filters by masked agreement
+folding preserves hidden columns
+-/
+#guard_msgs in
+#eval maskedSmoke
 
 /--
 info: last level accepts the consistent plaintext table

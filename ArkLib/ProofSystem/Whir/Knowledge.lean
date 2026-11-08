@@ -30,7 +30,7 @@ namespace Whir
 /-- An explicit interleaved list-decoding algorithm, with correctness supplied separately. -/
 structure ListDecoder {K E : Type} {vars : ℕ} (enc : Encoding K vars) (lanes : ℕ) where
   /-- Candidate messages are ordered, so selection is a named deterministic operation. -/
-  decode : Word E lanes (2 ^ (vars + enc.rate)) → List (Table E (lanes + vars))
+  decode : MaskedWord E lanes (2 ^ (vars + enc.rate)) → List (Table E (lanes + vars))
 
 /-- Exact list coverage, no duplicates, and the real Johnson cardinality bound. -/
 structure ListDecoder.Correct {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
@@ -43,10 +43,45 @@ structure ListDecoder.Correct {K E : Type} [Semiring K] [Semiring E] [DecidableE
   /-- The list length is bounded without an interleaving row factor. -/
   length_le : ∀ word, ((decoder.decode word).length : ℝ) ≤ L
 
+/-- Filter a zero-filled decoder's output using an executable absolute agreement cutoff. -/
+def ListDecoder.ofZeroFill {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
+    {vars lanes : ℕ} {enc : Encoding K vars} (ι : K →+* E) (cutoff : ℕ)
+    (decode : Word E lanes (2 ^ (vars + enc.rate)) → List (Table E (lanes + vars))) :
+    ListDecoder (E := E) enc lanes where
+  decode word := (decode (zeroFill word)).filter fun f =>
+    decide (cutoff ≤ (agreement word (enc.interleave ι f)).card)
+
+/-- Zero-fill decoding followed by masked filtering preserves the certified list contract. -/
+theorem ListDecoder.ofZeroFill_correct {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
+    {vars lanes : ℕ} {enc : Encoding K vars} (ι : K →+* E) (cutoff : ℕ)
+    (decode : Word E lanes (2 ^ (vars + enc.rate)) → List (Table E (lanes + vars)))
+    (γ L : ℝ)
+    (threshold : ∀ count : ℕ, cutoff ≤ count ↔ (1 - γ) * (2 ^ (vars + enc.rate) : ℕ) ≤ (count : ℝ))
+    (nodup : ∀ word, (decode word).Nodup)
+    (mem : ∀ word f, f ∈ decode word ↔ Close γ (fullWord word) (enc.interleave ι f))
+    (length : ∀ word, ((decode word).length : ℝ) ≤ L) :
+    (ListDecoder.ofZeroFill ι cutoff decode).Correct ι γ L := by
+  refine ⟨fun word => (nodup _).filter _, ?_, ?_⟩
+  · intro word f
+    simp only [ListDecoder.ofZeroFill, List.mem_filter, decide_eq_true_eq, mem, threshold]
+    exact ⟨fun h => h.2, fun h => ⟨Close.zeroFill h, h⟩⟩
+  · intro word
+    have h : ((ListDecoder.ofZeroFill ι cutoff decode).decode word).length ≤
+        (decode (zeroFill word)).length := List.length_filter_le _ _
+    exact (Nat.cast_le.mpr h).trans (length (zeroFill word))
+
+/-- Hiding columns only shrinks every certified decoder list. -/
+theorem ListDecoder.mem_mono {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
+    {vars lanes : ℕ} {enc : Encoding K vars} (decoder : ListDecoder (E := E) enc lanes)
+    (ι : K →+* E) (γ L : ℝ) (correct : decoder.Correct ι γ L)
+    {small large : MaskedWord E lanes (2 ^ (vars + enc.rate))} (h : MaskLE small large)
+    {f : Table E (lanes + vars)} (hf : f ∈ decoder.decode small) : f ∈ decoder.decode large :=
+  (correct.mem_iff _ _).mpr (((correct.mem_iff _ _).mp hf).mono h)
+
 /-- The opening relation has the original base-field multilinear as its witness. -/
 def initialState {K E : Type} [Semiring K] [Semiring E] [DecidableEq K]
     {vars lanes : ℕ} (enc : Encoding K vars) (ι : K →+* E) (γ : ℝ)
-    (word : Word K lanes (2 ^ (vars + enc.rate)))
+    (word : MaskedWord K lanes (2 ^ (vars + enc.rate)))
     (claims : List (Claim E (lanes + vars))) : KnowledgeState where
   Witness := Table K (lanes + vars)
   holds f := Close γ word (enc.interleave (RingHom.id K) f) ∧
@@ -56,7 +91,7 @@ def initialState {K E : Type} [Semiring K] [Semiring E] [DecidableEq K]
 The zero result in the empty case carries no assertion of knowledge. -/
 def initialExtractor {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
     {vars lanes : ℕ} {enc : Encoding K vars} (decoder : ListDecoder (E := K) enc lanes)
-    (ι : K →+* E) (word : Word K lanes (2 ^ (vars + enc.rate)))
+    (ι : K →+* E) (word : MaskedWord K lanes (2 ^ (vars + enc.rate)))
     (claims : List (Claim E (lanes + vars))) : Table K (lanes + vars) :=
   match (decoder.decode word).find? (fun f =>
     claims.all fun c => decide (c.Holds (fun u => ι (f u)))) with
@@ -68,7 +103,7 @@ theorem initialExtractor_holds {K E : Type} [Semiring K] [Semiring E]
     [DecidableEq K] [DecidableEq E] {vars lanes : ℕ} {enc : Encoding K vars}
     (decoder : ListDecoder (E := K) enc lanes) (γ L : ℝ)
     (correct : decoder.Correct (RingHom.id K) γ L) (ι : K →+* E)
-    (word : Word K lanes (2 ^ (vars + enc.rate)))
+    (word : MaskedWord K lanes (2 ^ (vars + enc.rate)))
     (claims : List (Claim E (lanes + vars)))
     (exists_witness : ∃ f, (initialState enc ι γ word claims).holds f) :
     (initialState enc ι γ word claims).holds (initialExtractor decoder ι word claims) := by
@@ -85,7 +120,7 @@ theorem initialExtractor_holds {K E : Type} [Semiring K] [Semiring E]
 /-- At a round boundary, a decoded current message is close and satisfies the running claims. -/
 def candidateState {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
     {vars lanes : ℕ} (enc : Encoding K vars) (ι : K →+* E) (γ : ℝ)
-    (word : Word E lanes (2 ^ (vars + enc.rate)))
+    (word : MaskedWord E lanes (2 ^ (vars + enc.rate)))
     (claims : List (Claim E (lanes + vars))) (active : Bool) : KnowledgeState where
   Witness := Table E (lanes + vars)
   holds f := active = true ∧ Close γ word (enc.interleave ι f) ∧
@@ -93,8 +128,8 @@ def candidateState {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
 
 /-- A word-to-message relation with active checks and accumulated claims. -/
 def relationState {E : Type} [Semiring E] {vars lanes columns : ℕ}
-    (nearby : Word E lanes columns → Table E (lanes + vars) → Prop)
-    (word : Word E lanes columns) (claims : List (Claim E (lanes + vars)))
+    (nearby : MaskedWord E lanes columns → Table E (lanes + vars) → Prop)
+    (word : MaskedWord E lanes columns) (claims : List (Claim E (lanes + vars)))
     (active : Bool) : KnowledgeState where
   Witness := Table E (lanes + vars)
   holds f := active = true ∧ nearby word f ∧ ∀ c ∈ claims, c.Holds f
@@ -147,7 +182,7 @@ def DecoderFamily {K E : Type} : {n : ℕ} → Schedule K n → Type
 
 /-- Proof-only proximity predicates indexed by level and intermediate row count. -/
 abbrev ProximityFamily (K E : Type) := (level : ℕ) → {vars : ℕ} → (enc : Encoding K vars) →
-  (lanes : ℕ) → Word E lanes (2 ^ (vars + enc.rate)) → Table E (lanes + vars) → Prop
+  (lanes : ℕ) → MaskedWord E lanes (2 ^ (vars + enc.rate)) → Table E (lanes + vars) → Prop
 
 /-- The security parameters at a level, with the final level used beyond the schedule. -/
 def securityAt {K : Type} : {n : ℕ} → (s : Schedule K n) → SecurityParameters s →

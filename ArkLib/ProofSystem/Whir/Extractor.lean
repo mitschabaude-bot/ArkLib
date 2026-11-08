@@ -74,13 +74,13 @@ def finalBatchExtractor {E : Type} [CommRing E] [DecidableEq E] {n : ℕ}
 /-- Each fold lifts from the current folded list, preferring a claim-satisfying preimage. -/
 def foldExtractor {K E : Type} [CommRing E] [DecidableEq E]
     {vars : ℕ} (enc : Encoding K vars) (nearby : (lanes : ℕ) →
-      Word E lanes (2 ^ (vars + enc.rate)) → Table E (lanes + vars) → Prop)
+      MaskedWord E lanes (2 ^ (vars + enc.rate)) → Table E (lanes + vars) → Prop)
     (decoders : (lanes : ℕ) → ListDecoder (E := E) enc lanes)
     {rest : Protocol}
-    (finish : (word : Word E 0 (2 ^ (vars + enc.rate))) →
+    (finish : (word : MaskedWord E 0 (2 ^ (vars + enc.rate))) →
       (claim : Claim E (0 + vars)) → (active : Bool) →
       RoundExtractor rest.tree (relationState (nearby 0) word [claim] active)) :
-    (lanes : ℕ) → (word : Word E lanes (2 ^ (vars + enc.rate))) →
+    (lanes : ℕ) → (word : MaskedWord E lanes (2 ^ (vars + enc.rate))) →
       (claim : Claim E (lanes + vars)) → (active : Bool) →
       RoundExtractor (scalarRounds E lanes rest).tree
         (relationState (nearby _) word [claim] active)
@@ -90,7 +90,7 @@ def foldExtractor {K E : Type} [CommRing E] [DecidableEq E]
     fun q =>
       let checked := active && (Sumcheck.compressedOps 1).accept claim.value q
       ⟨relationState (nearby _) word [claim] checked, id, fun r =>
-        let word' := foldRowsOne word r
+        let word' := foldMaskedRowsOne word r
         let claim' : Claim E (lanes + vars) :=
           ⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩
         ⟨relationState (nearby _) word' [claim'] checked,
@@ -101,8 +101,8 @@ def foldExtractor {K E : Type} [CommRing E] [DecidableEq E]
 /-- After a plaintext message, knowledge means that this fixed table was an old-list member. -/
 def plaintextProximityState {K E : Type} [Semiring E]
     {tail : ℕ} (enc : Encoding K tail)
-    (nearby : Word E 0 (2 ^ (tail + enc.rate)) → Table E (0 + tail) → Prop)
-    (word : Word E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail))
+    (nearby : MaskedWord E 0 (2 ^ (tail + enc.rate)) → Table E (0 + tail) → Prop)
+    (word : MaskedWord E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail))
     (candidate : Table E tail) (active : Bool) : KnowledgeState where
   Witness := PUnit
   holds _ := (relationState nearby word [claim] active).holds
@@ -111,8 +111,8 @@ def plaintextProximityState {K E : Type} [Semiring E]
 /-- The last-level message lifts the fixed plaintext; queries then test that one candidate. -/
 def lastExtractor {K E : Type} [Semiring K] [CommRing E] [DecidableEq E]
     {tail : ℕ} (lanes queries : ℕ) (enc : Encoding K tail) (ι : K →+* E)
-    (nearby : Word E 0 (2 ^ (tail + enc.rate)) → Table E (0 + tail) → Prop)
-    (decoder : ListDecoder (E := E) enc 0) (word : Word E 0 (2 ^ (tail + enc.rate)))
+    (nearby : MaskedWord E 0 (2 ^ (tail + enc.rate)) → Table E (0 + tail) → Prop)
+    (decoder : ListDecoder (E := E) enc 0) (word : MaskedWord E 0 (2 ^ (tail + enc.rate)))
     (claim : Claim E (0 + tail)) (active : Bool) :
     RoundExtractor (transition E (.last lanes tail enc queries)).tree
       (relationState nearby word [claim] active) :=
@@ -124,9 +124,9 @@ def lastExtractor {K E : Type} [Semiring K] [CommRing E] [DecidableEq E]
       let claims : List (Claim E tail) :=
         ⟨castTable (Nat.zero_add tail) claim.weight, claim.value⟩ ::
           List.ofFn (fun q : Fin queries =>
-            ⟨fun u => ι (enc.weight (xs q) u), word (xs q) Fin.elim0⟩)
-      ⟨plaintextState candidate claims active, (fun _ => PUnit.unit),
-        finalBatchExtractor candidate claims active⟩⟩
+            ⟨fun u => ι (enc.weight (xs q) u), zeroFill word (xs q) Fin.elim0⟩)
+      ⟨plaintextState candidate claims (active && queriesKnown word xs), (fun _ => PUnit.unit),
+        finalBatchExtractor candidate claims (active && queriesKnown word xs)⟩⟩
 
 /-- The collision predicate uses only the new oracle and the OOD point, before its answer. -/
 def OodCollision {E : Type} [CommRing E] {n : ℕ}
@@ -220,19 +220,19 @@ The candidate depends on the new list, OOD point and answer, but not on `xs`. -/
 theorem boundary_query_failure_subset {K E : Type} [Semiring K] [CommRing E]
     [DecidableEq E] {tail queries : ℕ} (enc : Encoding K tail) (ι : K →+* E) (γ L : ℝ)
     (decoder : ListDecoder (E := E) enc 0) (correct : decoder.Correct ι γ L)
-    (word : Word E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail))
+    (word : MaskedWord E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail))
     (candidates : List (Table E tail)) (z : Fin tail → E) (answer : E)
     (xs : Fin queries → enc.Columns) (active : Bool)
     (bad : ∃ f ∈ candidates, active = true ∧
       claim.Holds (castTable (Nat.zero_add tail).symm f) ∧ mle f z = answer ∧
-      (∀ q, word (xs q) Fin.elim0 = enc.encode ι f (xs q)) ∧
+      (∀ q, word (xs q) = some (fun _ => enc.encode ι f (xs q))) ∧
       ¬ (oodState (fun g => (candidateState enc ι γ word [claim] active).holds
           (castTable (Nat.zero_add tail).symm g)) candidates z active).holds
         (boundaryLift (decoder.decode word) (castTable (Nat.zero_add tail))
           claim.Holds candidates z f)) :
     ¬ Close γ word (enc.interleave ι
       (castTable (Nat.zero_add tail).symm (oodCandidate candidates z answer))) ∧
-    ∀ q, word (xs q) Fin.elim0 = enc.encode ι (oodCandidate candidates z answer) (xs q) := by
+    ∀ q, word (xs q) = some (fun _ => enc.encode ι (oodCandidate candidates z answer) (xs q)) := by
   classical
   obtain ⟨f, hf, ha, hclaim, hanswer, hqueries, hbad⟩ := bad
   have no_collision : ¬ OodCollision candidates z := by
@@ -274,13 +274,13 @@ theorem boundary_query_failure_subset {K E : Type} [Semiring K] [CommRing E]
 def boundaryExtractor {K E : Type} [Semiring K] [CommRing E]
     [DecidableEq E] {tail : ℕ} (lanes queries : ℕ) (enc : Encoding K tail)
     (ι : K →+* E)
-    (nearby : Word E 0 (2 ^ (tail + enc.rate)) → Table E (0 + tail) → Prop)
+    (nearby : MaskedWord E 0 (2 ^ (tail + enc.rate)) → Table E (0 + tail) → Prop)
     (rest : Schedule K tail) (nextNearby : ProximityFamily K E)
     (decoder : ListDecoder (E := E) enc 0) (decoders : DecoderFamily (E := E) rest)
     (suffixExtractor : (word : oracleMessage E rest) → (claims : List (Claim E tail)) →
       (active : Bool) → RoundExtractor (opening E rest).tree
         (relationLevelState rest nextNearby word claims active))
-    (word : Word E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail))
+    (word : MaskedWord E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail))
     (active : Bool) :
     RoundExtractor (transition E (.more lanes enc queries rest)).tree
       (relationState nearby word [claim] active) :=
@@ -297,11 +297,11 @@ def boundaryExtractor {K E : Type} [Semiring K] [CommRing E]
         ⟨separatedState, id, fun xs =>
           let residual : Claim E tail :=
             ⟨castTable (Nat.zero_add tail) claim.weight, claim.value⟩
-          let claims := nextClaims enc ι residual z answer xs (fun x => word x Fin.elim0)
-          ⟨relationLevelState rest nextNearby nextWord claims active,
+          let claims := nextClaims enc ι residual z answer xs (fun x => zeroFill word x Fin.elim0)
+          ⟨relationLevelState rest nextNearby nextWord claims (active && queriesKnown word xs),
             boundaryLift oldList
               (castTable (Nat.zero_add tail)) claim.Holds newList z,
-            suffixExtractor nextWord claims active⟩⟩⟩⟩
+            suffixExtractor nextWord claims (active && queriesKnown word xs)⟩⟩⟩⟩
 
 /-- The E-valued opening lifts the current witness through each batching and fold challenge. -/
 def levelExtractor {K E : Type} [Semiring K] [CommRing E]
@@ -347,12 +347,12 @@ def openingExtractor {K E : Type} [Semiring K] [CommRing E]
       RoundExtractor (opening E s).tree (⟨Table K n, input⟩)
   | _, .last lanes tail enc queries, nearby, input, decoders, word, claims, decoder =>
       rootSelection (levelExtractor ι (.last lanes tail enc queries) nearby decoders
-        (fun x u => ι (word x u)) claims true)
+        (mapMasked ι word) claims true)
         ⟨Table K (lanes + tail), input⟩
         (selectInitial ι (.last lanes tail enc queries) decoder word claims)
   | _, .more lanes enc queries rest, nearby, input, decoders, word, claims, decoder =>
       rootSelection (levelExtractor ι (.more lanes enc queries rest) nearby decoders
-        (fun x u => ι (word x u)) claims true)
+        (mapMasked ι word) claims true)
         ⟨_, input⟩
         (selectInitial ι (.more lanes enc queries rest) decoder word claims)
 

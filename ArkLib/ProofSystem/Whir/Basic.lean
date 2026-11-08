@@ -30,6 +30,44 @@ abbrev Table (F : Type) (n : ℕ) := Cube n → F
 /-- An interleaved word, queried one complete column at a time. -/
 abbrev Word (F : Type) (lanes columns : ℕ) := Fin columns → Cube lanes → F
 
+/-- A partial word hides whole columns; a hidden column never agrees with a codeword. -/
+abbrev MaskedWord (F : Type) (lanes columns : ℕ) := Fin columns → Option (Cube lanes → F)
+
+/-- Reveal every column of a full word. -/
+def fullWord {F : Type} {lanes columns : ℕ} (word : Word F lanes columns) :
+    MaskedWord F lanes columns := some ∘ word
+
+/-- Fill every hidden column with the zero column. -/
+def zeroFill {F : Type} [Zero F] {lanes columns : ℕ} (word : MaskedWord F lanes columns) :
+    Word F lanes columns := fun x => (word x).getD 0
+
+/-- Hiding preserves the values of all columns that remain known. -/
+def MaskLE {F : Type} {lanes columns : ℕ} (small large : MaskedWord F lanes columns) : Prop :=
+  ∀ x column, small x = some column → large x = some column
+
+/-- Map known columns without revealing hidden columns. -/
+def mapMasked {F E : Type} {lanes columns : ℕ} (f : F → E)
+    (word : MaskedWord F lanes columns) : MaskedWord E lanes columns :=
+  fun x => (word x).map (fun column u => f (column u))
+
+/-- Columns agreeing simultaneously in every row, with hidden columns excluded. -/
+def agreement {F : Type} [DecidableEq F] {lanes columns : ℕ}
+    (word : MaskedWord F lanes columns) (codeword : Word F lanes columns) : Finset (Fin columns) :=
+  Finset.univ.filter fun x => word x = some (codeword x)
+
+/-- Hiding columns only removes agreements. -/
+theorem agreement_mono {F : Type} [DecidableEq F] {lanes columns : ℕ}
+    {small large : MaskedWord F lanes columns} (h : MaskLE small large)
+    (codeword : Word F lanes columns) : agreement small codeword ⊆ agreement large codeword := by
+  intro x hx
+  exact Finset.mem_filter.mpr ⟨Finset.mem_univ x, h x _ (Finset.mem_filter.mp hx).2⟩
+
+/-- Zero filling preserves every known column. -/
+theorem maskLE_zeroFill {F : Type} [Zero F] {lanes columns : ℕ}
+    (word : MaskedWord F lanes columns) : MaskLE word (fullWord (zeroFill word)) := by
+  intro x column hx
+  simp only [fullWord, Function.comp_apply, zeroFill, hx, Option.getD_some]
+
 /-- The tensor equality weight at a Boolean vertex. -/
 def eqWeight {F : Type} [CommRing F] {n : ℕ} (z : Fin n → F) (u : Cube n) : F :=
   ∏ i, if u i then z i else 1 - z i
@@ -125,16 +163,49 @@ def batch {E : Type} [Semiring E] {vars : ℕ} (claims : List (Claim E vars))
   ⟨fun u => (claims.zipIdx.map fun (c, i) => r ^ i * c.weight u).sum,
     (claims.zipIdx.map fun (c, i) => r ^ i * c.value).sum⟩
 
-/-- Column distance uses simultaneous agreement in every interleaved row. -/
+/-- Proximity counts absolute column agreements against the original block length. -/
 def Close {E : Type} [DecidableEq E] {lanes columns : ℕ}
-    (radius : ℝ) (word codeword : Word E lanes columns) : Prop :=
-  (1 - radius) * columns ≤
-    ((Finset.univ.filter fun x => ∀ u, word x u = codeword x u).card : ℝ)
+    (radius : ℝ) (word : MaskedWord E lanes columns) (codeword : Word E lanes columns) : Prop :=
+  (1 - radius) * columns ≤ (agreement word codeword).card
+
+/-- Hiding columns only shrinks a proximity list. -/
+theorem Close.mono {E : Type} [DecidableEq E] {lanes columns : ℕ} {radius : ℝ}
+    {small large : MaskedWord E lanes columns} {codeword : Word E lanes columns}
+    (h : MaskLE small large) (close : Close radius small codeword) :
+    Close radius large codeword := by
+  exact close.trans (by exact_mod_cast Finset.card_le_card (agreement_mono h codeword))
+
+/-- Every masked list candidate is a candidate of the zero-filled word. -/
+theorem Close.zeroFill {E : Type} [Zero E] [DecidableEq E] {lanes columns : ℕ} {radius : ℝ}
+    {word : MaskedWord E lanes columns} {codeword : Word E lanes columns}
+    (close : Close radius word codeword) : Close radius (fullWord (zeroFill word)) codeword :=
+  close.mono (maskLE_zeroFill word)
+
+/-- Full masks recover simultaneous full-word agreement. -/
+theorem close_fullWord_iff {E : Type} [DecidableEq E] {lanes columns : ℕ}
+    (radius : ℝ) (word codeword : Word E lanes columns) :
+    Close radius (fullWord word) codeword ↔ (1 - radius) * columns ≤
+      ((Finset.univ.filter fun x => ∀ u, word x u = codeword x u).card : ℝ) := by
+  simp only [Close, agreement, fullWord, Function.comp_apply, Option.some.injEq, funext_iff]
 
 /-- Folding is multilinear evaluation of an oracle column in its row coordinates. -/
 def foldWord {E : Type} [CommRing E] {lanes columns : ℕ}
     (word : Word E lanes columns) (r : Fin lanes → E) : Fin columns → E :=
   fun x => mle (word x) r
+
+/-- Fold known columns and preserve every hidden column. -/
+def foldMaskedWord {E : Type} [CommRing E] {lanes columns : ℕ}
+    (word : MaskedWord E lanes columns) (r : Fin lanes → E) : Fin columns → Option E :=
+  fun x => (word x).map (fun column => mle column r)
+
+/-- View scalar columns as columns with no row coordinates. -/
+def scalarMaskedWord {E : Type} {columns : ℕ} (word : Fin columns → Option E) :
+    MaskedWord E 0 columns := fun x => (word x).map (fun y _ => y)
+
+/-- Sampled columns must be known before their values can be used as claims. -/
+def queriesKnown {E : Type} {lanes columns queries : ℕ}
+    (word : MaskedWord E lanes columns) (xs : Fin queries → Fin columns) : Bool :=
+  (List.ofFn xs).all (fun x => (word x).isSome)
 
 /-- Encoding commutes with interleaved folding, with no multiplicative-domain hypothesis. -/
 theorem fold_interleave {K E : Type} [Semiring K] [CommRing E] {vars lanes : ℕ}
@@ -177,5 +248,11 @@ def foldMessageOne {E : Type} [CommRing E] {lanes vars : ℕ}
 def foldRowsOne {E : Type} [CommRing E] {lanes columns : ℕ}
     (word : Word E (lanes + 1) columns) (r : E) : Word E lanes columns :=
   fun x u => (1 - r) * word x (Fin.cons false u) + r * word x (Fin.cons true u)
+
+/-- One affine row fold preserves the mask. -/
+def foldMaskedRowsOne {E : Type} [CommRing E] {lanes columns : ℕ}
+    (word : MaskedWord E (lanes + 1) columns) (r : E) : MaskedWord E lanes columns :=
+  fun x => (word x).map fun column u =>
+    (1 - r) * column (Fin.cons false u) + r * column (Fin.cons true u)
 
 end Whir

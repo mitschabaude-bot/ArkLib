@@ -7,6 +7,8 @@ module
 
 public import ArkLib.ProofSystem.Whir.Assembly
 public import ArkLib.ProofSystem.Whir.Acceptance
+public import ArkLib.ProofSystem.Whir.BadEvents
+public import ArkLib.ProofSystem.Whir.PlaintextBadEvents
 
 /-!
 # WHIR opening knowledge certificate
@@ -47,7 +49,7 @@ theorem accepts_terminal {K E : Type} [Field K] [Field E]
     (valid : s.Valid ι sec) (word : oracleMessage K s) (claims : List (Claim E n))
     (decoder : InitialDecoder s) (correct : InitialDecoder.Correct decoder sec)
     (path : (opening E s).tree.ExecutionPath)
-    (accepted : accepts ι s (fun x u => ι (word x u)) claims path = true) :
+    (accepted : accepts ι s (mapMasked ι word) claims path = true) :
     ∃ witness, ((certificate ι s sec decoders familyCorrect valid word claims decoder
       correct).extractor.terminalState
       path).holds witness := by

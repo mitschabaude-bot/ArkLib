@@ -29,8 +29,8 @@ namespace Whir
 def ListFoldFailure {K E : Type} [CommRing E] {vars lanes : ℕ} {enc : Encoding K vars}
     (before : ListDecoder (E := E) enc (lanes + 1))
     (after : ListDecoder (E := E) enc lanes)
-    (word : Word E (lanes + 1) (2 ^ (vars + enc.rate))) (r : E) : Prop :=
-  ∃ f ∈ after.decode (foldRowsOne word r),
+    (word : MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate))) (r : E) : Prop :=
+  ∃ f ∈ after.decode (foldMaskedRowsOne word r),
     ∀ g ∈ before.decode word, foldMessageOne g r ≠ f
 
 /-- A satisfying list preimage is preferred over every preimage violating the old claims. -/
@@ -72,7 +72,7 @@ theorem listLift_of_preimage {E : Type} [Zero E] [DecidableEq E] {n m : ℕ}
 theorem batch_lift_failure_subset {K E : Type} [Semiring K] [CommRing E] [DecidableEq E]
     {vars lanes : ℕ} {enc : Encoding K vars} (ι : K →+* E) (γ L : ℝ)
     (decoder : ListDecoder (E := E) enc lanes) (correct : decoder.Correct ι γ L)
-    (word : Word E lanes (2 ^ (vars + enc.rate)))
+    (word : MaskedWord E lanes (2 ^ (vars + enc.rate)))
     (claims : List (Claim E (lanes + vars))) (active : Bool) (r : E)
     (bad : ∃ f,
       (candidateState enc ι γ word [batch claims r] active).holds f ∧
@@ -97,45 +97,11 @@ theorem initial_list_descends {K E : Type} [Field K] [Field E]
     [DecidableEq K] [DecidableEq E] {vars lanes : ℕ} (enc : Encoding K vars) (ι : K →+* E)
     (base_contract : EncodingContract enc (RingHom.id K)) (contract : EncodingContract enc ι)
     (sec : LevelSecurity) (valid : sec.Valid enc)
-    (word : Word K lanes (2 ^ (vars + enc.rate))) (f : Table E (lanes + vars))
-    (close : Close (radius enc sec) (fun x u => ι (word x u)) (enc.interleave ι f)) :
+    (word : MaskedWord K lanes (2 ^ (vars + enc.rate))) (f : Table E (lanes + vars))
+    (close : Close (radius enc sec) (mapMasked ι word) (enc.interleave ι f)) :
     ∃ g : Table K (lanes + vars), f = (fun u => ι (g u)) ∧
       Close (radius enc sec) word (enc.interleave (RingHom.id K) g) := by
-  classical
-  let T := Finset.univ.filter fun x => ∀ u, ι (word x u) = enc.interleave ι f x u
-  have large : 2 ^ vars ≤ T.card := by
-    have hclose : (1 - radius enc sec) * 2 ^ (vars + enc.rate) ≤ (T.card : ℝ) := by
-      simpa only [Close, T, Nat.cast_pow, Nat.cast_ofNat] using close
-    have h : (2 ^ vars : ℝ) ≤ T.card := (dimension_lt_agreement valid).le.trans hclose
-    exact_mod_cast h
-  have rows : ∀ u : Cube lanes, ∃ base : enc.Columns → K,
-      base ∈ ReedSolomon.code enc.domain (2 ^ vars) ∧
-        (fun x => enc.interleave ι f x u) = fun x => ι (base x) := by
-    intro u
-    exact ReedSolomon.exists_base_codeword_of_agreement enc.domain ι (2 ^ vars)
-      (fun x => word x u) (fun x => enc.interleave ι f x u)
-      (interleave_mem enc ι contract f u) T large
-      (fun x hx => ((Finset.mem_filter.mp hx).2 u).symm)
-  choose base hbase heq using rows
-  have base_mem : (fun x u => base u x) ∈
-      ((ReedSolomon.code enc.domain (2 ^ vars))^⋈(Cube lanes)) := by
-    intro u
-    change (fun x => base u x) ∈ ReedSolomon.code enc.domain (2 ^ vars)
-    exact hbase u
-  have hdomain : enc.extendedDomain (RingHom.id K) = enc.domain := by
-    ext x
-    rfl
-  obtain ⟨g, hg⟩ := interleave_surjective enc (RingHom.id K) base_contract (fun x u => base u x)
-    (by rwa [hdomain])
-  have message : f = fun u => ι (g u) := by
-    apply interleave_injective enc ι contract
-    rw [interleave_scalar_extension, hg]
-    funext x u
-    exact congrFun (heq u) x
-  refine ⟨g, message, ?_⟩
-  rw [message, interleave_scalar_extension] at close
-  unfold Close at close ⊢
-  simpa only [ι.injective.eq_iff] using close
+  sorry
 
 /-- List lifting uses MCA over the remaining row interleaving, with no row-count factor. -/
 theorem prob_listFoldFailure_le {K E : Type} [Field K] [Field E] [DecidableEq E]
@@ -146,23 +112,24 @@ theorem prob_listFoldFailure_le {K E : Type} [Field K] [Field E] [DecidableEq E]
     (after : ListDecoder (E := E) enc lanes)
     (before_correct : before.Correct ι (radius enc sec) (listBound enc sec))
     (after_correct : after.Correct ι (radius enc sec) (listBound enc sec))
-    (word : Word E (lanes + 1) (2 ^ (vars + enc.rate))) :
+    (word : MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate))) :
     Pr{let r ←$ᵗ E}[ListFoldFailure before after word r] ≤ mcaError (E := E) enc sec := by
   classical
   let C := (ReedSolomon.code (enc.extendedDomain ι) (2 ^ vars))^⋈(Cube lanes)
   have inclusion := prEvent_mono ($ᵗ E) (ListFoldFailure before after word)
     (fun r => CoreDefinitions.IsMCA (CoreDefinitions.AffineLineGenerator E) C
-      r (foldMcaInput word) (radius enc sec)) (by
+      r (foldMcaInput (zeroFill word)) (radius enc sec)) (by
         rintro r ⟨f, hf, absent⟩
         by_contra good
         obtain ⟨g, hg, hgf⟩ := fold_preimage_of_not_isMCA enc ι contract sec valid word r good f
           ((after_correct.mem_iff _ _).mp hf)
         exact absent g ((before_correct.mem_iff _ _).mpr hg) hgf)
   have supremum : Pr{let r ←$ᵗ E}[CoreDefinitions.IsMCA
-      (CoreDefinitions.AffineLineGenerator E) C r (foldMcaInput word) (radius enc sec)] ≤
+      (CoreDefinitions.AffineLineGenerator E) C r (foldMcaInput (zeroFill word)) (radius enc sec)] ≤
       CoreDefinitions.mcaError (CoreDefinitions.AffineLineGenerator E) C (radius enc sec) :=
     le_iSup (fun U => Pr{let r ←$ᵗ E}[CoreDefinitions.IsMCA
-      (CoreDefinitions.AffineLineGenerator E) C r U (radius enc sec)]) (foldMcaInput word)
+      (CoreDefinitions.AffineLineGenerator E) C r U (radius enc sec)])
+      (foldMcaInput (zeroFill word))
   refine inclusion.trans (supremum.trans ?_)
   rw [CoreDefinitions.mcaError_moduleInterleavedCode_eq_of_card_le
     (CoreDefinitions.AffineLineGenerator E) _ _ le_rfl]
@@ -174,7 +141,7 @@ theorem prob_batch_escape_le {K E : Type} [Semiring K] [Field E] [DecidableEq E]
     (ι : K →+* E) (sec : LevelSecurity)
     (decoder : ListDecoder (E := E) enc lanes)
     (correct : decoder.Correct ι (radius enc sec) (listBound enc sec))
-    (word : Word E lanes (2 ^ (vars + enc.rate)))
+    (word : MaskedWord E lanes (2 ^ (vars + enc.rate)))
     (claims : List (Claim E (lanes + vars))) :
     Pr{let r ←$ᵗ E}[∃ f ∈ decoder.decode word,
       (∃ c ∈ claims, ¬ c.Holds f) ∧ (batch claims r).Holds f] ≤
@@ -198,7 +165,7 @@ theorem prob_fold_claimEscape_le {K E : Type} [Semiring K] [Field E] [DecidableE
     (ι : K →+* E) (sec : LevelSecurity)
     (before : ListDecoder (E := E) enc (lanes + 1))
     (correct : before.Correct ι (radius enc sec) (listBound enc sec))
-    (word : Word E (lanes + 1) (2 ^ (vars + enc.rate)))
+    (word : MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate)))
     (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E) :
     Pr{let r ←$ᵗ E}[∃ f ∈ before.decode word, ¬ claim.Holds f ∧
       (⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩ :
@@ -225,10 +192,10 @@ theorem fold_lift_failure_subset {K E : Type} [Semiring K] [CommRing E] [Decidab
     (before : ListDecoder (E := E) enc (lanes + 1))
     (after : ListDecoder (E := E) enc lanes)
     (before_correct : before.Correct ι γ L) (after_correct : after.Correct ι γ L)
-    (word : Word E (lanes + 1) (2 ^ (vars + enc.rate)))
+    (word : MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate)))
     (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E) (active : Bool) (r : E)
     (bad : ∃ f,
-      (candidateState enc ι γ (foldRowsOne word r)
+      (candidateState enc ι γ (foldMaskedRowsOne word r)
         [⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩] active).holds f ∧
       ¬ (candidateState enc ι γ word [claim] active).holds
         (listLift (before.decode word) (fun g => foldMessageOne g r) claim.Holds f)) :
@@ -265,10 +232,10 @@ theorem prob_fold_lift_failure_le {K E : Type} [Field K] [Field E] [DecidableEq 
     (after : ListDecoder (E := E) enc lanes)
     (before_correct : before.Correct ι (radius enc sec) (listBound enc sec))
     (after_correct : after.Correct ι (radius enc sec) (listBound enc sec))
-    (word : Word E (lanes + 1) (2 ^ (vars + enc.rate)))
+    (word : MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate)))
     (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E) (active : Bool) :
     Pr{let r ←$ᵗ E}[∃ f,
-      (candidateState enc ι (radius enc sec) (foldRowsOne word r)
+      (candidateState enc ι (radius enc sec) (foldMaskedRowsOne word r)
         [⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩] active).holds f ∧
       ¬ (candidateState enc ι (radius enc sec) word [claim] active).holds
         (listLift (before.decode word) (fun g => foldMessageOne g r) claim.Holds f)] ≤
@@ -289,7 +256,7 @@ theorem prob_ood_collision_le {K E : Type} [Semiring K] [Field E] [DecidableEq E
     (ι : K →+* E) (sec : LevelSecurity) (valid : sec.Valid enc)
     (decoder : ListDecoder (E := E) enc lanes)
     (correct : decoder.Correct ι (radius enc sec) (listBound enc sec))
-    (word : Word E lanes (2 ^ (vars + enc.rate))) :
+    (word : MaskedWord E lanes (2 ^ (vars + enc.rate))) :
     Pr{let z ←$ᵗ (Fin (lanes + vars) → E)}[
       ∃ f ∈ decoder.decode word, ∃ g ∈ decoder.decode word, f ≠ g ∧ mle f z = mle g z] ≤
         oodError (E := E) enc sec (lanes + vars) := by

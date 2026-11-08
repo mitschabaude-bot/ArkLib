@@ -1083,6 +1083,7 @@ public import ArkLib.ProofSystem.Sumcheck.Impl.Projection
 public import ArkLib.ProofSystem.Sumcheck.Impl.Representation
 public import ArkLib.ProofSystem.Sumcheck.Interaction.ArbitraryCompleteness
 public import ArkLib.ProofSystem.Sumcheck.Interaction.ArbitraryRounds
+public import ArkLib.ProofSystem.Sumcheck.Interaction.BadEvents
 public import ArkLib.ProofSystem.Sumcheck.Interaction.Closing
 public import ArkLib.ProofSystem.Sumcheck.Interaction.Composition
 public import ArkLib.ProofSystem.Sumcheck.Interaction.Computable
@@ -1133,6 +1134,7 @@ public import ArkLib.ProofSystem.ToyProblem.Spec.SimplifiedIOR
 public import ArkLib.ProofSystem.Whir.Acceptance
 public import ArkLib.ProofSystem.Whir.Algebra
 public import ArkLib.ProofSystem.Whir.Assembly
+public import ArkLib.ProofSystem.Whir.BadEvents
 public import ArkLib.ProofSystem.Whir.Basic
 public import ArkLib.ProofSystem.Whir.BoundarySecurity
 public import ArkLib.ProofSystem.Whir.Certificate
@@ -1143,6 +1145,7 @@ public import ArkLib.ProofSystem.Whir.Knowledge
 public import ArkLib.ProofSystem.Whir.LocalBounds
 public import ArkLib.ProofSystem.Whir.LocalSecurity
 public import ArkLib.ProofSystem.Whir.Parameters
+public import ArkLib.ProofSystem.Whir.PlaintextBadEvents
 public import ArkLib.ProofSystem.Whir.Preservation
 public import ArkLib.ProofSystem.Whir.Protocol
 public import ArkLib.ProofSystem.Whir.Transcript

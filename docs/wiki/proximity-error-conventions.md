@@ -198,3 +198,13 @@ mathlib style.
 The file-level references and paper KB pages identify the source results represented by these
 theorems. Run `./scripts/validate.sh --axioms` to verify their axiom dependencies along with the
 rest of the library.
+
+## Masked WHIR proximity and algebraic events
+
+`Whir.MaskedWord E lanes columns` is a column-indexed `Option` of a complete row column. `none` never agrees, including with zero. `Close γ word codeword` requires at least `(1 - γ) * columns` known agreements; the denominator is the original block length. Full-word callers use `fullWord word`. `MaskLE small large` retains the values of every column known in `small`; `Close.mono` and `ListDecoder.mem_mono` express list inclusion under this order. The certificate and its executable backward maps consume masked words throughout.
+
+`ListDecoder.ofZeroFill` runs a supplied full-word decoding algorithm on `zeroFill word` and filters its candidates using an integer absolute agreement cutoff. Its correctness contract identifies that cutoff with the real-valued proximity threshold. The real radius remains an analytical parameter; neither the executable filter nor an extractor computes with real numbers. `queriesKnown` rejects a query hitting a hidden column before any zero-filled value can be used in an accepted claim.
+
+`Whir.BadEvents` supplies `BadBatch`, `BadOod`, `BadMCA`, `BadFoldClaim`, and their combined `BadFold`, with Boolean checkers through certified masked decoders. `BadMCA` requires a large known folded agreement set with no joint old-row codeword extension on that set. `ListFoldFailure` describes a backward-map failure and is not the monotone CI relation. Zero fill embeds each algebraic bad set in the corresponding full-word event at the same radius, rate, and error. `PlaintextBadEvents` supplies the fixed-public-plaintext events `BadFinalBatch` and `BadClosing`; their mask-order facts hold with the public candidate and claims fixed.
+
+`Sumcheck.Interaction.Knowledge.BadSummand` is the candidate-list event that a transmitted bounded coefficient vector differs from a candidate's true vector and agrees at the sampled field point. Its checker uses executable coefficient vectors. The bridge to retained-witness Sumcheck names coefficient-agreement premises for the runtime message and projected true polynomial; `MessageModel.interpret` itself is a mathematical polynomial interpretation.
