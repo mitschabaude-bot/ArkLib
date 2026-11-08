@@ -4,6 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Gregor Mitscha-Baude
 -/
 import ArkLib.ProofSystem.Whir.WitnessCertificate
+import ArkLib.Interaction.Oracle.Security.WitnessAppend
 import ArkLib.ProofSystem.Sumcheck.Interaction.CompressedBadEvents
 
 /-!
@@ -234,3 +235,79 @@ Sumcheck prefix equivalence executes its inverse after abort
 -/
 #guard_msgs in
 #eval smoke
+
+namespace PrefixIndexedAppend
+set_option backward.isDefEq.respectTransparency false
+open Interaction.Oracle.Security Interaction.Oracle.Security.StandardBcs
+open Interaction.Oracle.Security.StateRestoration
+
+/-- A constant true knowledge state for testing causal prefix parsing. -/
+private def state : KnowledgeState.{0} := ⟨PUnit, fun _ => True⟩
+
+/-- The first protocol commits one Boolean oracle message. -/
+private def first : Protocol := .oracleWith Bool
+  ⟨PUnit, ⟨fun _ => Bool, fun _ word => word⟩⟩ .done
+
+/-- Its public-coin presentation hides the oracle message from the key. -/
+private def firstCoin : PublicCoin first := .oracle .done
+
+/-- The first extractor retains that message in its execution path. -/
+private def firstExtractor : RoundExtractor first.tree state :=
+  fun _ => ⟨state, id, PUnit.unit⟩
+
+/-- The suffix has one challenge independent of the oracle's masked value. -/
+private def second : Protocol := .public .receiver Bool fun _ => .done
+
+/-- The suffix's single public draw. -/
+private def secondCoin : PublicCoin second := .challenge .done
+
+/-- The test event depends on the extracted message and the suffix challenge. -/
+private def schema : BadSchema Bool where
+  Input := Bool
+  equality := inferInstance
+  isQuery := false
+  MaskLE := Eq
+  Bad input challenge := input = true ∧ challenge = true
+  check input challenge := input && challenge
+  check_iff _ _ := Bool.and_eq_true_iff
+  monotone _ _ equal _ bad := equal ▸ bad
+  error := Erased.mk ⊤
+  bad_bound _ _ := by
+    simp only [Erased.out_mk]
+    exact le_top
+
+/-- The suffix extractor has no false-knowledge transition. -/
+private def secondExtractor (path : first.tree.ExecutionPath) :
+    RoundExtractor second.tree (firstExtractor.terminalState path) :=
+  fun _ => ⟨state, id, PUnit.unit⟩
+
+/-- The suffix input reads the earlier extracted word rather than fixing it externally. -/
+private def annotation : BadAnnotation (firstCoin.append (fun _ => secondCoin))
+    (BadSchemas.append secondCoin (schema, PUnit.unit) firstCoin PUnit.unit)
+    (firstExtractor.append (fun _ => second.tree) secondExtractor) :=
+  BadAnnotation.append secondCoin (schema, PUnit.unit) firstCoin PUnit.unit firstExtractor
+    (fun _ => PUnit.unit) secondExtractor (fun path =>
+      ⟨path.1, (fun _ _ escape => by
+        obtain ⟨w, bad, _⟩ := escape
+        exact (bad trivial).elim), fun _ => PUnit.unit⟩)
+
+/-- Parsing the same public key with different extracted prefixes changes the suffix event input. -/
+private def parsed (word : Bool) : Bool :=
+  annotatedInput (Com := Bool) (firstCoin.append (fun _ => secondCoin))
+    (BadSchemas.append secondCoin (schema, PUnit.unit) firstCoin PUnit.unit)
+    (firstExtractor.append (fun _ => second.tree) secondExtractor) annotation
+    ⟨false, .inl PUnit.unit⟩ ⟨word, PUnit.unit⟩
+
+/-- Prefix indexing executes for both values under the same public key. -/
+private def appendSmoke : IO Unit := do
+  check "prefix-indexed suffix reads false" (!parsed false)
+  check "prefix-indexed suffix reads true" (parsed true)
+
+/--
+info: prefix-indexed suffix reads false
+prefix-indexed suffix reads true
+-/
+#guard_msgs in
+#eval appendSmoke
+
+end PrefixIndexedAppend

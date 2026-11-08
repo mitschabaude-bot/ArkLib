@@ -16,9 +16,12 @@ open Interaction.Oracle.Security.StandardBcs
 
 namespace Whir
 
+/-- Field enumeration belongs only to the analytical claims of the annotation. -/
+noncomputable local instance {E : Type} [Finite E] : Fintype E := Fintype.ofFinite E
+
 /-- Closing annotations retain the original masked prefix through every public scalar fold. -/
-noncomputable def closingAnnotation {E : Type} [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] {n columns queries : ℕ}
+def closingAnnotation {E : Type} [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] {n columns queries : ℕ}
     (pre : PlaintextPrefix E n columns queries) : (count : ℕ) →
     (history : Table E n → List (Claim E n) → Table E count × Claim E count) →
     (active : Bool) → (active = true → pre.known = true) →
@@ -41,9 +44,9 @@ noncomputable def closingAnnotation {E : Type} [Field E] [DecidableEq E]
           (fun h => known (Bool.and_eq_true_iff.mp h).1)⟩⟩
 
 /-- The last query fixes a guarded masked prefix before final batching and closing. -/
-noncomputable def lastAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] {tail : ℕ} (lanes queries : ℕ)
-    (enc : Encoding K tail) (ι : K →+* E) (sec : LevelSecurity)
+def lastAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] {tail : ℕ} (lanes queries : ℕ)
+    (enc : Encoding K tail) (ι : K →+* E) (sec : Erased LevelSecurity)
     (decoder : ListDecoder (E := E) enc 0)
     (word : MaskedWord E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail))
     (active : Bool) :
@@ -54,7 +57,7 @@ noncomputable def lastAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E
         (finalBatchSchema tail (2 ^ (tail + enc.rate)) queries,
           closingSchemas tail (2 ^ (tail + enc.rate)) queries tail)))
       (lastExtractor lanes queries enc ι
-        (fun w f => Close (radius enc sec) w (enc.interleave ι f)) decoder word claim active) :=
+        (fun w f => Close (radius enc sec.out) w (enc.interleave ι f)) decoder word claim active) :=
   fun candidate => ⟨PUnit.unit, ⟨fun _ impossible _ => Bool.noConfusion impossible, fun xs =>
     let pre : PlaintextPrefix E tail (2 ^ (tail + enc.rate)) queries :=
       ⟨⟨candidate, [⟨castTable (Nat.zero_add tail) claim.weight, claim.value⟩],
@@ -66,28 +69,28 @@ noncomputable def lastAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E
         (active && pre.known) (fun h => (Bool.and_eq_true_iff.mp h).2)⟩⟩⟩⟩
 
 /-- Fold annotations expose the maximal-agreement event for each concrete list-lifting map. -/
-noncomputable def foldAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] {vars : ℕ} (enc : Encoding K vars) (ι : K →+* E)
-    (sec : LevelSecurity) (contract : EncodingContract enc ι) (valid : sec.Valid enc)
+def foldAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] {vars : ℕ} (enc : Encoding K vars) (ι : K →+* E)
+    (sec : Erased LevelSecurity) (contract : EncodingContract enc ι) (valid : sec.out.Valid enc)
     (decoders : (lanes : ℕ) → ListDecoder (E := E) enc lanes)
-    (correct : ∀ lanes, (decoders lanes).Correct ι (radius enc sec) (listBound enc sec))
+    (correct : ∀ lanes, (decoders lanes).Correct ι (radius enc sec.out) (listBound enc sec.out))
     {rest : Protocol} (coin : PublicCoin rest) (schemas : BadSchemas coin)
     (finish : (word : MaskedWord E 0 (2 ^ (vars + enc.rate))) →
       (claim : Claim E (0 + vars)) → (active : Bool) →
       RoundExtractor rest.tree
-        (candidateState enc ι (radius enc sec) word [claim] active))
+        (candidateState enc ι (radius enc sec.out) word [claim] active))
     (suffix : ∀ word claim active, BadAnnotation coin schemas (finish word claim active)) :
     (lanes : ℕ) → (word : MaskedWord E lanes (2 ^ (vars + enc.rate))) →
     (claim : Claim E (lanes + vars)) → (active : Bool) →
     BadAnnotation (scalarRoundsPublicCoin (E := E) lanes coin)
       (foldSchemas enc ι sec contract valid decoders correct coin schemas lanes)
-      (foldExtractor enc (fun _ w f => Close (radius enc sec) w (enc.interleave ι f))
+      (foldExtractor enc (fun _ w f => Close (radius enc sec.out) w (enc.interleave ι f))
         decoders finish lanes word claim active)
   | 0, word, claim, active => suffix word claim active
   | lanes + 1, word, claim, active => fun q =>
       ⟨⟨word, (claim, q), active && (Sumcheck.compressedOps 1).accept claim.value q⟩,
         ⟨fun r _ escape => ⟨escape.choose_spec.2.1,
-        fold_escape_subset_bad ι contract sec valid (decoders _) (decoders _)
+        fold_escape_subset_bad ι contract sec.out valid (decoders _) (decoders _)
           (correct _) (correct _) word claim q
           (active && (Sumcheck.compressedOps 1).accept claim.value q) r
           ⟨escape.choose, escape.choose_spec.2, escape.choose_spec.1⟩⟩,
@@ -98,9 +101,9 @@ noncomputable def foldAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E
 
 /-- A collision in the newly extracted list is precisely the entering masked OOD event. -/
 theorem enteringOod_collision {K E : Type} [Field K] [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] (ι : K →+* E) {n : ℕ} (s : Schedule K n)
-    (sec : SecurityParameters s) (decoders : DecoderFamily (E := E) s)
-    (correct : DecoderFamily.Correct ι s decoders sec) (valid : s.Valid ι sec)
+    [Finite E] [SampleableType E] (ι : K →+* E) {n : ℕ} (s : Schedule K n)
+    (sec : Erased (SecurityParameters s)) (decoders : DecoderFamily (E := E) s)
+    (correct : DecoderFamily.Correct ι s decoders sec.out) (valid : s.Valid ι sec.out)
     (word : oracleMessage E s) (z : Fin n → E)
     (collision : OodCollision (levelList s decoders word) z) :
     (enteringOodSchema ι s sec decoders correct valid).Bad
@@ -111,21 +114,24 @@ theorem enteringOod_collision {K E : Type} [Field K] [Field E] [DecidableEq E]
       exact ⟨f, g, ((correct lanes).mem_iff _ _).mp hf,
         ((correct lanes).mem_iff _ _).mp hg, rest⟩
   | more lanes enc queries rest' =>
-      exact ⟨f, g, ((correct.1 lanes).mem_iff _ _).mp hf,
-        ((correct.1 lanes).mem_iff _ _).mp hg, rest⟩
+      change BadOod ι (radius enc (Erased.mk sec.out.1).out) word z
+      simpa only [Erased.out_mk] using
+        (show BadOod ι (radius enc sec.out.1) word z from
+          ⟨f, g, ((correct.1 lanes).mem_iff _ _).mp hf,
+            ((correct.1 lanes).mem_iff _ _).mp hg, rest⟩)
 
 /-- Boundary annotations read the new oracle before OOD and classify only the column query. -/
-noncomputable def boundaryAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] {tail : ℕ} (lanes queries : ℕ)
-    (enc : Encoding K tail) (ι : K →+* E) (sec : LevelSecurity)
+def boundaryAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] {tail : ℕ} (lanes queries : ℕ)
+    (enc : Encoding K tail) (ι : K →+* E) (sec : Erased LevelSecurity)
     (decoder : ListDecoder (E := E) enc 0)
-    (rest : Schedule K tail) (nextSec : SecurityParameters rest)
+    (rest : Schedule K tail) (nextSec : Erased (SecurityParameters rest))
     (decoders : DecoderFamily (E := E) rest)
-    (correct : DecoderFamily.Correct ι rest decoders nextSec) (valid : rest.Valid ι nextSec)
+    (correct : DecoderFamily.Correct ι rest decoders nextSec.out) (valid : rest.Valid ι nextSec.out)
     (suffix : ∀ word claims active, claims.length = queries + 2 →
       BadAnnotation (openingPublicCoin rest)
         (openingSchemas ι rest nextSec decoders correct valid (queries + 2))
-        (levelExtractor ι rest (proximityFamily ι rest nextSec) decoders word claims active))
+        (levelExtractor ι rest (proximityFamily ι rest nextSec.out) decoders word claims active))
     (word : MaskedWord E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail))
     (active : Bool) :
     BadAnnotation (protocol := transition E (.more lanes enc queries rest))
@@ -134,9 +140,9 @@ noncomputable def boundaryAnnotation {K E : Type} [Field K] [Field E] [Decidable
         fun _ => (querySchema (Fin queries → enc.Columns),
           openingSchemas ι rest nextSec decoders correct valid (queries + 2)))
       (boundaryExtractor lanes queries enc ι
-        (fun w f => Close (radius enc sec) w (enc.interleave ι f))
-        rest (proximityFamily ι rest nextSec) decoder decoders
-        (levelExtractor ι rest (proximityFamily ι rest nextSec) decoders) word claim active) :=
+        (fun w f => Close (radius enc sec.out) w (enc.interleave ι f))
+        rest (proximityFamily ι rest nextSec.out) decoder decoders
+        (levelExtractor ι rest (proximityFamily ι rest nextSec.out) decoders) word claim active) :=
   fun nextWord => ⟨enteringOodInput ι rest nextSec decoders correct valid nextWord,
     ⟨fun z _ escape => by
       apply enteringOod_collision ι rest nextSec decoders correct valid nextWord z
@@ -151,37 +157,65 @@ noncomputable def boundaryAnnotation {K E : Type} [Field K] [Field E] [Decidable
         (active && queriesKnown word xs) (by
           simp only [nextClaims, List.length_cons, List.length_ofFn])⟩⟩⟩⟩
 
+/-- The first proximity relation reads the head security parameters. -/
+theorem proximityFamily_more_head {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
+    (ι : K →+* E) {n lanes : ℕ} (enc : Encoding K n) (queries : ℕ)
+    (rest : Schedule K n) (sec : SecurityParameters (.more lanes enc queries rest)) :
+    proximityFamily ι (.more lanes enc queries rest) sec 0 enc =
+      (fun _ word f => Close (radius enc sec.1) word (enc.interleave ι f)) := rfl
+
+/-- Advancing an encoded level reads exactly the suffix security parameters. -/
+theorem proximityFamily_more_tail {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
+    (ι : K →+* E) {n lanes : ℕ} (enc : Encoding K n) (queries : ℕ)
+    (rest : Schedule K n) (sec : SecurityParameters (.more lanes enc queries rest)) :
+    (fun level {vars} =>
+      proximityFamily ι (.more lanes enc queries rest) sec (level + 1) (vars := vars)) =
+      proximityFamily ι rest sec.2 := rfl
+
 /-- Every level of the actual list-lifting extractor has its masked bad-event annotation. -/
-noncomputable def levelAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] (ι : K →+* E) : {n : ℕ} → (s : Schedule K n) →
-    (sec : SecurityParameters s) → (decoders : DecoderFamily (E := E) s) →
-    (correct : DecoderFamily.Correct ι s decoders sec) → (valid : s.Valid ι sec) →
+def levelAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] (ι : K →+* E) : {n : ℕ} → (s : Schedule K n) →
+    (sec : Erased (SecurityParameters s)) → (decoders : DecoderFamily (E := E) s) →
+    (correct : DecoderFamily.Correct ι s decoders sec.out) → (valid : s.Valid ι sec.out) →
     (word : oracleMessage E s) → (claims : List (Claim E n)) → (active : Bool) →
     BadAnnotation (openingPublicCoin s)
       (openingSchemas ι s sec decoders correct valid claims.length)
-      (levelExtractor ι s (proximityFamily ι s sec) decoders word claims active)
+      (levelExtractor ι s (proximityFamily ι s sec.out) decoders word claims active)
   | _, .last lanes tail enc queries, sec, decoders, correct, valid, word, claims, active =>
-      ⟨⟨word, ⟨claims, rfl⟩, active⟩, ⟨fun r _ escape => ⟨escape.choose_spec.2.1,
+      ⟨⟨word, ⟨claims, le_rfl⟩, active⟩, ⟨fun r _ escape => ⟨escape.choose_spec.2.1,
         batch_escape_subset_bad ι _ _ _ (correct lanes) word claims active r
           ⟨escape.choose, escape.choose_spec.2, escape.choose_spec.1⟩⟩,
         fun r => foldAnnotation enc ι sec valid.2.2.2 valid.2.1 decoders correct _ _
           (lastExtractor lanes queries enc ι
-            (fun w f => Close (radius enc sec) w (enc.interleave ι f)) (decoders 0))
+            (fun w f => Close (radius enc sec.out) w (enc.interleave ι f)) (decoders 0))
           (lastAnnotation lanes queries enc ι sec (decoders 0)) lanes word (batch claims r)
           active⟩⟩
   | _, .more lanes enc queries rest, sec, decoders, correct, valid, word, claims, active =>
-      ⟨⟨word, ⟨claims, rfl⟩, active⟩, ⟨fun r _ escape => ⟨escape.choose_spec.2.1,
-        batch_escape_subset_bad ι _ _ _ (correct.1 lanes) word claims active r
-          ⟨escape.choose, escape.choose_spec.2, escape.choose_spec.1⟩⟩,
-        fun r => foldAnnotation enc ι sec.1 valid.2.2.2.1 valid.2.1 decoders.1 correct.1 _ _
-          (boundaryExtractor lanes queries enc ι
-            (fun w f => Close (radius enc sec.1) w (enc.interleave ι f))
-            rest (proximityFamily ι rest sec.2) (decoders.1 0) decoders.2
-            (levelExtractor ι rest (proximityFamily ι rest sec.2) decoders.2))
-          (boundaryAnnotation lanes queries enc ι sec.1 (decoders.1 0) rest sec.2 decoders.2
-            correct.2 valid.2.2.2.2 (fun word claims active length => by
-              simpa only [length] using
-                levelAnnotation ι rest sec.2 decoders.2 correct.2 valid.2.2.2.2 word claims active))
-          lanes word (batch claims r) active⟩⟩
+      ⟨⟨word, ⟨claims, le_rfl⟩, active⟩, ⟨fun r _ escape => ⟨escape.choose_spec.2.1,
+        by simpa only [Erased.out_mk] using
+          batch_escape_subset_bad ι _ _ _ (correct.1 lanes) word claims active r
+            ⟨escape.choose, escape.choose_spec.2, escape.choose_spec.1⟩⟩,
+        fun r => by
+          simp only [levelExtractor, openingSchemas]
+          rw [proximityFamily_more_head, proximityFamily_more_tail]
+          convert foldAnnotation enc ι (Erased.mk sec.out.1) valid.2.2.2.1
+              (by simpa only [Erased.out_mk] using valid.2.1) decoders.1
+              (by simpa only [Erased.out_mk] using correct.1) _ _
+              (boundaryExtractor lanes queries enc ι
+                (fun w f => Close (radius enc (Erased.mk sec.out.1).out) w (enc.interleave ι f))
+                rest (proximityFamily ι rest (Erased.mk sec.out.2).out) (decoders.1 0) decoders.2
+                (levelExtractor ι rest (proximityFamily ι rest (Erased.mk sec.out.2).out)
+                  decoders.2))
+              (boundaryAnnotation lanes queries enc ι (Erased.mk sec.out.1) (decoders.1 0)
+                rest (Erased.mk sec.out.2) decoders.2
+                (by simpa only [Erased.out_mk] using correct.2)
+                (by simpa only [Erased.out_mk] using valid.2.2.2.2)
+                (fun word claims active length => by
+                  simpa only [length] using
+                    levelAnnotation ι rest (Erased.mk sec.out.2) decoders.2
+                      (by simpa only [Erased.out_mk] using correct.2)
+                      (by simpa only [Erased.out_mk] using valid.2.2.2.2) word claims active))
+              lanes word (batch claims r) active using 1
+          congr 3 <;> rw [Erased.out_mk]⟩⟩
 
 end Whir

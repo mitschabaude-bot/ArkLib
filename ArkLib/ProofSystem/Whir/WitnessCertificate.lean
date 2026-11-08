@@ -46,7 +46,38 @@ theorem initial_batch_escape_subset_bad {K E : Type} [Field K] [Field E]
   simpa only [not_exists, not_and, not_not] using absent
 
 /-- The opening annotation retains its supplied initial mask in the first algebraic input. -/
-noncomputable def openingAnnotation {K E : Type} [Field K] [Field E]
+def openingAnnotation {K E : Type} [Field K] [Field E]
+    [DecidableEq K] [DecidableEq E] [Finite E] [SampleableType E]
+    (ι : K →+* E) {n : ℕ} (s : Schedule K n) (sec : Erased (SecurityParameters s))
+    (decoders : DecoderFamily (E := E) s)
+    (familyCorrect : DecoderFamily.Correct ι s decoders sec.out) (valid : s.Valid ι sec.out)
+    (word : oracleMessage K s) (claims : List (Claim E n)) (decoder : InitialDecoder s)
+    (correct : InitialDecoder.Correct decoder sec.out) (count : ℕ)
+    (length : claims.length ≤ count) :
+    BadAnnotation (openingPublicCoin s)
+      (openingSchemas ι s sec decoders familyCorrect valid count)
+      (openingExtractor ι s (proximityFamily ι s sec.out)
+        (openingState ι s sec.out word claims).holds decoders word claims decoder) := by
+  cases s with
+  | last lanes tail enc queries =>
+      refine ⟨⟨mapMasked ι word, ⟨claims, length⟩, true⟩, ⟨?_, ?_⟩⟩
+      · intro r _ escape
+        exact ⟨rfl, initial_batch_escape_subset_bad enc ι valid.2.2.1 valid.2.2.2 sec.out valid.2.1
+          decoder correct word claims r escape⟩
+      · exact (levelAnnotation ι (.last lanes tail enc queries) sec decoders familyCorrect
+          valid (mapMasked ι word) claims true).2.2
+  | more lanes enc queries rest =>
+      refine ⟨⟨mapMasked ι word, ⟨claims, length⟩, true⟩, ⟨?_, ?_⟩⟩
+      · intro r _ escape
+        refine ⟨rfl, ?_⟩
+        simpa only [Erased.out_mk] using
+          initial_batch_escape_subset_bad enc ι valid.2.2.1 valid.2.2.2.1 sec.out.1 valid.2.1
+            decoder correct word claims r escape
+      · exact (levelAnnotation ι (.more lanes enc queries rest) sec decoders familyCorrect
+          valid (mapMasked ι word) claims true).2.2
+
+/-- The opening annotation uses the certificate's exact security-indexed input state. -/
+def fixedOpeningAnnotation {K E : Type} [Field K] [Field E]
     [DecidableEq K] [DecidableEq E] [Fintype E] [SampleableType E]
     (ι : K →+* E) {n : ℕ} (s : Schedule K n) (sec : SecurityParameters s)
     (decoders : DecoderFamily (E := E) s)
@@ -54,26 +85,20 @@ noncomputable def openingAnnotation {K E : Type} [Field K] [Field E]
     (word : oracleMessage K s) (claims : List (Claim E n)) (decoder : InitialDecoder s)
     (correct : InitialDecoder.Correct decoder sec) :
     BadAnnotation (openingPublicCoin s)
-      (openingSchemas ι s sec decoders familyCorrect valid claims.length)
+      (openingSchemas ι s (Erased.mk sec) decoders
+        (by simpa only [Erased.out_mk] using familyCorrect)
+        (by simpa only [Erased.out_mk] using valid) claims.length)
       (certificate ι s sec decoders familyCorrect valid word claims decoder correct).extractor := by
-  cases s with
-  | last lanes tail enc queries =>
-      refine ⟨⟨mapMasked ι word, ⟨claims, rfl⟩, true⟩, ⟨?_, ?_⟩⟩
-      · intro r _ escape
-        exact ⟨rfl, initial_batch_escape_subset_bad enc ι valid.2.2.1 valid.2.2.2 sec valid.2.1
-          decoder correct word claims r escape⟩
-      · exact (levelAnnotation ι (.last lanes tail enc queries) sec decoders familyCorrect
-          valid (mapMasked ι word) claims true).2.2
-  | more lanes enc queries rest =>
-      refine ⟨⟨mapMasked ι word, ⟨claims, rfl⟩, true⟩, ⟨?_, ?_⟩⟩
-      · intro r _ escape
-        exact ⟨rfl, initial_batch_escape_subset_bad enc ι valid.2.2.1 valid.2.2.2.1 sec.1 valid.2.1
-          decoder correct word claims r escape⟩
-      · exact (levelAnnotation ι (.more lanes enc queries rest) sec decoders familyCorrect
-          valid (mapMasked ι word) claims true).2.2
+  have annotation := openingAnnotation ι s (Erased.mk sec) decoders
+    (by simpa only [Erased.out_mk] using familyCorrect)
+    (by simpa only [Erased.out_mk] using valid) word claims decoder
+    (by simpa only [Erased.out_mk] using correct) claims.length le_rfl
+  simp only [certificate] at annotation ⊢
+  rw [Erased.out_mk] at annotation
+  exact annotation
 
 /-- The concrete opening refinement authenticates its external initial word and strict prefix. -/
-noncomputable def witnessCertificate {K E Com : Type} [Field K] [Field E]
+def witnessCertificate {K E Com : Type} [Field K] [Field E]
     [DecidableEq K] [DecidableEq E] [DecidableEq Com] [Fintype E] [SampleableType E]
     (ι : K →+* E) {n : ℕ} (s : Schedule K n) (sec : SecurityParameters s)
     (decoders : DecoderFamily (E := E) s)
@@ -87,13 +112,21 @@ noncomputable def witnessCertificate {K E Com : Type} [Field K] [Field E]
       oracleMessage K s → PrefixMessages (openingPublicCoin s) key.2 → Authentication key → Bool) :
     WitnessKnowledgeCertificate (Com := Com) (fun _ : PUnit => openingPublicCoin s)
       (fun _ => openingState ι s sec word claims)
-      (fun _ => certificate ι s sec decoders familyCorrect valid word claims decoder correct) :=
-  BadAnnotation.certificate (fun _ => openingPublicCoin s)
+      (fun _ => certificate ι s sec decoders familyCorrect valid word claims decoder correct) where
+  toWitnessCIRelation := BadAnnotation.relation (fun _ => openingPublicCoin s)
     (fun _ => openingState ι s sec word claims)
-    (fun _ => certificate ι s sec decoders familyCorrect valid word claims decoder correct)
-    (fun _ => openingSchemas ι s sec decoders familyCorrect valid claims.length)
-    (fun _ => openingAnnotation ι s sec decoders familyCorrect valid word claims decoder correct)
+    (fun _ => openingExtractor ι s (proximityFamily ι s sec)
+      (openingState ι s sec word claims).holds decoders word claims decoder)
+    (fun _ => openingSchemas ι s (Erased.mk sec) decoders
+      (by simpa only [Erased.out_mk] using familyCorrect)
+      (by simpa only [Erased.out_mk] using valid) claims.length)
+    (fun _ => fixedOpeningAnnotation ι s sec decoders familyCorrect valid
+      word claims decoder correct)
     Authentication (fun key messages auth => authenticate key word messages auth)
+  escape_subset _ path messages table r selected hs hq escape :=
+    annotated_escape_subset (openingPublicCoin s) _ _
+      (fixedOpeningAnnotation ι s sec decoders familyCorrect valid word claims decoder correct)
+      path messages table r selected hs hq escape
 
 section Decomposition
 

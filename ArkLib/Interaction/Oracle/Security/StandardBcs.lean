@@ -564,10 +564,10 @@ structure WitnessCIRelation {Statement Com : Type} [DecidableEq Com]
   monotone : ∀ key small large, MaskLE key small large →
     ∀ α, Bad key small α → Bad key large α
   /-- The existing per-word algebraic error, without a mask or rate penalty. -/
-  error : Key Statement PUnit (fun s => compiledCoin Com (coin s)) → ℝ≥0∞
+  error : Key Statement PUnit (fun s => compiledCoin Com (coin s)) → Erased ℝ≥0∞
   /-- Each fixed masked prefix has its original uniform challenge bound. -/
   bad_bound : ∀ key words, isQuery key = false →
-    Pr{let α ← ($ᵗ key.Challenge : ProbComp key.Challenge)}[Bad key words α] ≤ error key
+    Pr{let α ← ($ᵗ key.Challenge : ProbComp key.Challenge)}[Bad key words α] ≤ (error key).out
 
 /-- A knowledge certificate whose algebraic escapes lie in authenticated monotone bad events. -/
 structure WitnessKnowledgeCertificate {Statement Com : Type} [DecidableEq Com]
@@ -594,6 +594,19 @@ abbrev WitnessCIOutput {Statement Com : Type} [DecidableEq Com]
   (key : Key Statement PUnit (fun s => compiledCoin Com (coin s))) ×
     PrefixMessages (coin key.1) key.2 × relation.Authentication key
 
+/-- Check the authenticated masked witness and earlier-challenge consistency at one compiled key. -/
+def witnessCheck {Statement Com : Type} [DecidableEq Com]
+    {protocol : Statement → Protocol} {coin : (s : Statement) → PublicCoin (protocol s)}
+    (relation : WitnessCIRelation (Com := Com) coin)
+    (h : Table Statement PUnit (fun s => compiledCoin Com (coin s)))
+    (output : Option (WitnessCIOutput relation)) : Bool :=
+  match output with
+    | none => false
+    | some ⟨key, words, auth⟩ => !relation.isQuery key &&
+        prefixConsistent (coin key.1) key.2 words (Table.fibre h key.1)
+          (fun pre => relation.challengeEq ⟨key.1, pre⟩) &&
+        relation.authenticate key words auth && relation.check key words (h key)
+
 /-- The witness game checks authentication and the monotone bad set at the hash of the key. -/
 def witnessCIGame {Statement Com Coins : Type} [DecidableEq Com] [SampleableType Coins]
     {protocol : Statement → Protocol} {coin : (s : Statement) → PublicCoin (protocol s)}
@@ -601,12 +614,7 @@ def witnessCIGame {Statement Com Coins : Type} [DecidableEq Com] [SampleableType
     (h : Table Statement PUnit (fun s => compiledCoin Com (coin s)))
     (B : Coins → Option (WitnessCIOutput relation)) : ProbComp Bool := do
   let c ← $ᵗ Coins
-  return match B c with
-    | none => false
-    | some ⟨key, words, auth⟩ => !relation.isQuery key &&
-        prefixConsistent (coin key.1) key.2 words (Table.fibre h key.1)
-          (fun pre => relation.challengeEq ⟨key.1, pre⟩) &&
-        relation.authenticate key words auth && relation.check key words (h key)
+  return witnessCheck relation h (B c)
 
 /-- Winning probability of the executable witness-CI experiment. -/
 noncomputable def witnessCI {Statement Com Coins : Type} [DecidableEq Com] [SampleableType Coins]
@@ -742,7 +750,7 @@ theorem knowledgeSoundness_witness :
   have game (r : ℕ) : Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[algebraic r c] =
       witnessCI refinement.toWitnessCIRelation h
         (reductionAdversary refinement.toWitnessCIRelation A ext auth r) := by
-    simp only [witnessCI, witnessCIGame, bind_pure_comp, prEvent_map]
+    simp only [witnessCI, witnessCIGame, witnessCheck, bind_pure_comp, prEvent_map]
     apply prEvent_congr
     intro c
     cases he : reductionAdversary refinement.toWitnessCIRelation A ext auth r c with

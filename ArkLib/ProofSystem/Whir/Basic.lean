@@ -219,6 +219,50 @@ theorem queriesKnown_iff {E : Type} {lanes columns queries : ℕ}
     queriesKnown word xs = true ↔ ∀ q, (word (xs q)).isSome = true := by
   simp only [queriesKnown, List.all_eq_true, List.forall_mem_ofFn_iff]
 
+/-- Scalar maps preserve full revelation. -/
+@[simp] theorem mapMasked_fullWord {F E : Type} {lanes columns : ℕ} (f : F → E)
+    (word : Word F lanes columns) :
+    mapMasked f (fullWord word) = fullWord (fun x u => f (word x u)) := rfl
+
+/-- Zero filling a fully revealed word recovers that word. -/
+@[simp] theorem zeroFill_fullWord {F : Type} [Zero F] {lanes columns : ℕ}
+    (word : Word F lanes columns) : zeroFill (fullWord word) = word := rfl
+
+/-- Every query of a fully revealed word is known. -/
+@[simp] theorem queriesKnown_fullWord {F : Type} {lanes columns queries : ℕ}
+    (word : Word F lanes columns) (xs : Fin queries → Fin columns) :
+    queriesKnown (fullWord word) xs = true := by
+  apply (queriesKnown_iff _ _).mpr
+  intro q
+  rfl
+
+/-- Folding a fully revealed word preserves full revelation of its scalar result. -/
+@[simp] theorem foldMaskedWord_fullWord {F : Type} [CommRing F] {lanes columns : ℕ}
+    (word : Word F lanes columns) (r : Fin lanes → F) :
+    foldMaskedWord (fullWord word) r = fun x => some (foldWord word r x) := rfl
+
+/-- Mapping values leaves query availability unchanged. -/
+@[simp] theorem queriesKnown_mapMasked {F E : Type} {lanes columns queries : ℕ}
+    (f : F → E) (word : MaskedWord F lanes columns) (xs : Fin queries → Fin columns) :
+    queriesKnown (mapMasked f word) xs = queriesKnown word xs := by
+  simp only [queriesKnown, mapMasked, Option.isSome_map]
+
+/-- Zero fill commutes with scalar extension. -/
+theorem zeroFill_mapMasked {F E : Type} [Semiring F] [Semiring E]
+    {lanes columns : ℕ} (f : F →+* E) (word : MaskedWord F lanes columns) :
+    zeroFill (mapMasked f word) = fun x u => f (zeroFill word x u) := by
+  funext x u
+  cases h : word x <;> simp only [zeroFill, mapMasked, h, Option.map_none,
+    Option.map_some, Option.getD_none, Option.getD_some, Pi.zero_apply, map_zero]
+
+/-- The scalar zero default is the fold of the zero-filled column. -/
+theorem foldMaskedWord_getD {F : Type} [CommRing F] {lanes columns : ℕ}
+    (word : MaskedWord F lanes columns) (r : Fin lanes → F) (x : Fin columns) :
+    (foldMaskedWord word r x).getD 0 = foldWord (zeroFill word) r x := by
+  cases h : word x <;> simp only [foldMaskedWord, foldWord, zeroFill, h,
+    Option.map_none, Option.map_some, Option.getD_none, Option.getD_some,
+    mle, Pi.zero_apply, mul_zero, Finset.sum_const_zero]
+
 /-- Known scalar columns agree with their zero-filled value. -/
 theorem scalarColumn_eq {E : Type} [Zero E] {columns : ℕ}
     (word : MaskedWord E 0 columns) (x : Fin columns) (known : (word x).isSome = true) :

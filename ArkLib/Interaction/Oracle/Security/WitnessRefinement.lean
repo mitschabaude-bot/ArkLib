@@ -35,16 +35,16 @@ structure BadSchema (Challenge : Type) [SampleableType Challenge] where
   /-- Revealing consistent columns preserves badness. -/
   monotone : ∀ small large, MaskLE small large → ∀ α, Bad small α → Bad large α
   /-- The local algebraic error. -/
-  error : ENNReal
+  error : Erased ENNReal
   /-- Each fixed masked input has the stated uniform bound. -/
-  bad_bound : ∀ input, isQuery = false → Pr{let α ←$ᵗ Challenge}[Bad input α] ≤ error
+  bad_bound : ∀ input, isQuery = false → Pr{let α ←$ᵗ Challenge}[Bad input α] ≤ error.out
 
 /-- Round schemas follow public syntax and are independent of extracted oracle messages. -/
-def BadSchemas : {protocol : Protocol} → PublicCoin protocol → Type 1
-  | _, .done => PUnit
-  | _, @PublicCoin.sender _ _ _ next => (move : _) → BadSchemas (next move)
-  | _, @PublicCoin.oracle _ _ _ _ next => BadSchemas next
-  | _, @PublicCoin.challenge Challenge _ _ next => BadSchema Challenge × BadSchemas next
+def BadSchemas {protocol : Protocol} (coin : PublicCoin protocol) : Type 1 :=
+  PublicCoin.rec (motive := fun _ _ => Type 1) PUnit
+    (fun {Moves} {_} {_} _ next => (move : Moves) → next move)
+    (fun _ next => next)
+    (fun {Challenge} {_} {_} _ next => BadSchema Challenge × next) coin
 
 /-- Annotating an extractor supplies its current masked input and every local escape containment. -/
 def BadAnnotation : {protocol : Protocol} → (coin : PublicCoin protocol) → BadSchemas coin →
@@ -130,18 +130,17 @@ theorem annotated_escape_subset {Com : Type} [DecidableEq Com] {protocol : Proto
           exact ih schemas.2 (extractor path.1).2.2 (annotation.2.2 path.1)
             path.2 messages _ r _ hs hq escape.2
 
-/-- Local schemas and annotated escape proofs assemble a witness knowledge certificate. -/
-def BadAnnotation.certificate {Statement Com : Type} [DecidableEq Com]
+/-- Parse executable local inputs without carrying an analytical challenge schedule. -/
+def BadAnnotation.relation {Statement Com : Type} [DecidableEq Com]
     {protocol : Statement → Protocol} (coin : (s : Statement) → PublicCoin (protocol s))
     (state : Statement → KnowledgeState)
-    (certificate : (s : Statement) → KnowledgeCertificate
-      (protocol s).tree (protocol s).roles (state s))
+    (extractor : (s : Statement) → RoundExtractor (protocol s).tree (state s))
     (schemas : (s : Statement) → BadSchemas (coin s))
-    (annotation : (s : Statement) → BadAnnotation (coin s) (schemas s) (certificate s).extractor)
+    (annotation : (s : Statement) → BadAnnotation (coin s) (schemas s) (extractor s))
     (Authentication : Key Statement PUnit (fun s => compiledCoin Com (coin s)) → Type)
     (authenticate : (key : Key Statement PUnit (fun s => compiledCoin Com (coin s))) →
       PrefixMessages (coin key.1) key.2 → Authentication key → Bool) :
-    WitnessKnowledgeCertificate (Com := Com) coin state certificate where
+    WitnessCIRelation (Com := Com) coin where
   challengeEq key := (schemaAt (coin key.1) (schemas key.1) key.2).equality
   isQuery key := (schemaAt (coin key.1) (schemas key.1) key.2).isQuery
   Authentication := Authentication
@@ -157,8 +156,26 @@ def BadAnnotation.certificate {Statement Com : Type} [DecidableEq Com]
   monotone key _small _large := (schemaAt (coin key.1) (schemas key.1) key.2).monotone _ _
   error key := (schemaAt (coin key.1) (schemas key.1) key.2).error
   bad_bound key _words := (schemaAt (coin key.1) (schemas key.1) key.2).bad_bound _
-  escape_subset s path messages table r selected hs hq escape :=
-    annotated_escape_subset (coin s) (schemas s) _ (annotation s)
+
+/-- Local schemas and annotated escape proofs assemble a witness knowledge certificate. -/
+def BadAnnotation.certificate {Statement Com : Type} [DecidableEq Com]
+    {protocol : Statement → Protocol} (coin : (s : Statement) → PublicCoin (protocol s))
+    (state : Statement → KnowledgeState)
+    (certificate : Erased ((s : Statement) → KnowledgeCertificate
+      (protocol s).tree (protocol s).roles (state s)))
+    (extractor : (s : Statement) → RoundExtractor (protocol s).tree (state s))
+    (extractor_eq : ∀ s, (certificate.out s).extractor = extractor s)
+    (schemas : (s : Statement) → BadSchemas (coin s))
+    (annotation : (s : Statement) → BadAnnotation (coin s) (schemas s) (extractor s))
+    (Authentication : Key Statement PUnit (fun s => compiledCoin Com (coin s)) → Type)
+    (authenticate : (key : Key Statement PUnit (fun s => compiledCoin Com (coin s))) →
+      PrefixMessages (coin key.1) key.2 → Authentication key → Bool) :
+    WitnessKnowledgeCertificate (Com := Com) coin state certificate.out where
+  toWitnessCIRelation := BadAnnotation.relation coin state extractor schemas annotation
+    Authentication authenticate
+  escape_subset s path messages table r selected hs hq escape := by
+    rw [extractor_eq s] at escape
+    exact annotated_escape_subset (coin s) (schemas s) _ (annotation s)
       path messages table r selected hs hq escape
 
 end Interaction.Oracle.Security.StandardBcs

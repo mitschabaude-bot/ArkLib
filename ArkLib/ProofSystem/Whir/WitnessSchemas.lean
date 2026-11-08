@@ -17,37 +17,46 @@ open Interaction.Oracle.Security.StandardBcs
 
 namespace Whir
 
+/-- Field enumeration is confined to analytical propositions and erased bounds. -/
+noncomputable local instance {E : Type} [Finite E] : Fintype E := Fintype.ofFinite E
+
 /-- Encoded batching reads a masked word and a public claim list of the scheduled length. -/
-noncomputable def batchSchema {K E : Type} [Field K] [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] {vars lanes : ℕ} (enc : Encoding K vars)
-    (ι : K →+* E) (sec : LevelSecurity) (decoder : ListDecoder (E := E) enc lanes)
-    (correct : decoder.Correct ι (radius enc sec) (listBound enc sec)) (count : ℕ) :
+def batchSchema {K E : Type} [Field K] [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] {vars lanes : ℕ} (enc : Encoding K vars)
+    (ι : K →+* E) (sec : Erased LevelSecurity) (decoder : ListDecoder (E := E) enc lanes)
+    (correct : decoder.Correct ι (radius enc sec.out) (listBound enc sec.out)) (count : ℕ) :
     BadSchema E where
   Input := MaskedWord E lanes (2 ^ (vars + enc.rate)) ×
-    {claims : List (Claim E (lanes + vars)) // claims.length = count} × Bool
+    {claims : List (Claim E (lanes + vars)) // claims.length ≤ count} × Bool
   equality := inferInstance
   isQuery := false
   MaskLE small large := small.2.2 = true → large.2.2 = true ∧
     Whir.MaskLE small.1 large.1 ∧ small.2.1.val = large.2.1.val
-  Bad input r := input.2.2 = true ∧ BadBatch ι (radius enc sec) input.1 input.2.1.val r
+  Bad input r := input.2.2 = true ∧ BadBatch ι (radius enc sec.out) input.1 input.2.1.val r
   check input r := input.2.2 && checkBadBatch decoder input.1 input.2.1.val r
   check_iff input r := by
     simp only [Bool.and_eq_true, checkBadBatch_iff ι _ _ decoder correct]
   monotone small large h r bad := by
     obtain ⟨active, mask, claims⟩ := h bad.1
     exact ⟨active, claims ▸ bad.2.mono mask⟩
-  error := batchError (E := E) enc sec count
+  error := Erased.mk (batchError (E := E) enc sec.out count)
   bad_bound input _ := by
+    simp only [Erased.out_mk]
     refine (prEvent_mono ($ᵗ E) _ _ (fun _ bad => bad.2)).trans ?_
-    simpa only [input.2.1.property] using
-      prob_badBatch_le ι sec decoder correct input.1 input.2.1.val
+    refine (prob_badBatch_le ι sec.out decoder correct input.1 input.2.1.val).trans ?_
+    unfold batchError
+    apply ENNReal.ofReal_le_ofReal
+    apply div_le_div_of_nonneg_right _ (Nat.cast_nonneg _)
+    apply mul_le_mul_of_nonneg_right _
+      ((Nat.cast_nonneg (decoder.decode input.1).length).trans (correct.length_le input.1))
+    exact_mod_cast Nat.sub_le_sub_right input.2.1.property 1
 
 /-- Encoded folds combine the maximal-agreement obstruction and the old-list root event. -/
-noncomputable def foldSchema {K E : Type} [Field K] [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] {vars lanes : ℕ} (enc : Encoding K vars)
-    (ι : K →+* E) (sec : LevelSecurity) (contract : EncodingContract enc ι)
-    (valid : sec.Valid enc) (decoders : (lanes : ℕ) → ListDecoder (E := E) enc lanes)
-    (correct : ∀ lanes, (decoders lanes).Correct ι (radius enc sec) (listBound enc sec)) :
+def foldSchema {K E : Type} [Field K] [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] {vars lanes : ℕ} (enc : Encoding K vars)
+    (ι : K →+* E) (sec : Erased LevelSecurity) (contract : EncodingContract enc ι)
+    (valid : sec.out.Valid enc) (decoders : (lanes : ℕ) → ListDecoder (E := E) enc lanes)
+    (correct : ∀ lanes, (decoders lanes).Correct ι (radius enc sec.out) (listBound enc sec.out)) :
     BadSchema E where
   Input := MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate)) ×
     (Claim E ((lanes + 1) + vars) × Quadratic E) × Bool
@@ -56,7 +65,7 @@ noncomputable def foldSchema {K E : Type} [Field K] [Field E] [DecidableEq E]
   MaskLE small large := small.2.2 = true → large.2.2 = true ∧
     Whir.MaskLE small.1 large.1 ∧ small.2.1 = large.2.1
   Bad input r := input.2.2 = true ∧
-    BadFold ι (radius enc sec) input.1 input.2.1.1 input.2.1.2 r
+    BadFold ι (radius enc sec.out) input.1 input.2.1.1 input.2.1.2 r
   check input r := input.2.2 && checkBadFold ι (decoders (lanes + 1)) (decoders lanes)
     input.1 input.2.1.1 input.2.1.2 r
   check_iff input r := by
@@ -65,29 +74,31 @@ noncomputable def foldSchema {K E : Type} [Field K] [Field E] [DecidableEq E]
     obtain ⟨active, mask, data⟩ := h bad.1
     refine ⟨active, ?_⟩
     simpa only [← data] using bad.2.mono mask
-  error := foldError (E := E) enc sec
-  bad_bound input _ :=
-    (prEvent_mono ($ᵗ E) _ _ (fun _ bad => bad.2)).trans
-      (prob_badFold_le ι contract sec valid (decoders _) (correct _)
+  error := Erased.mk (foldError (E := E) enc sec.out)
+  bad_bound input _ := by
+    simp only [Erased.out_mk]
+    exact (prEvent_mono ($ᵗ E) _ _ (fun _ bad => bad.2)).trans
+      (prob_badFold_le ι contract sec.out valid (decoders _) (correct _)
         input.1 input.2.1.1 input.2.1.2)
 
 /-- OOD separation reads only the newly committed masked word. -/
-noncomputable def oodSchema {K E : Type} [Field K] [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] {vars lanes : ℕ} (enc : Encoding K vars)
-    (ι : K →+* E) (sec : LevelSecurity) (valid : sec.Valid enc)
+def oodSchema {K E : Type} [Field K] [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] {vars lanes : ℕ} (enc : Encoding K vars)
+    (ι : K →+* E) (sec : Erased LevelSecurity) (valid : sec.out.Valid enc)
     (decoder : ListDecoder (E := E) enc lanes)
-    (correct : decoder.Correct ι (radius enc sec) (listBound enc sec)) :
+    (correct : decoder.Correct ι (radius enc sec.out) (listBound enc sec.out)) :
     BadSchema (Fin (lanes + vars) → E) where
   Input := MaskedWord E lanes (2 ^ (vars + enc.rate))
   equality := inferInstance
   isQuery := false
   MaskLE := Whir.MaskLE
-  Bad := BadOod ι (radius enc sec)
+  Bad := BadOod ι (radius enc sec.out)
   check := checkBadOod decoder
   check_iff := checkBadOod_iff ι _ _ decoder correct
   monotone _ _ h _ bad := bad.mono h
-  error := oodError (E := E) enc sec (lanes + vars)
-  bad_bound word _ := prob_badOod_le ι sec valid decoder correct word
+  error := Erased.mk (oodError (E := E) enc sec.out (lanes + vars))
+  bad_bound word _ := by
+    simpa only [Erased.out_mk] using prob_badOod_le ι sec.out valid decoder correct word
 
 /-- Query challenges retain their extractor-relative event in the decomposition. -/
 def querySchema (Challenge : Type) [SampleableType Challenge] [DecidableEq Challenge] :
@@ -100,12 +111,12 @@ def querySchema (Challenge : Type) [SampleableType Challenge] [DecidableEq Chall
   check _ _ := false
   check_iff _ _ := by simp only [Bool.false_eq_true]
   monotone _ _ _ _ bad := bad.elim
-  error := 0
+  error := Erased.mk (0)
   bad_bound _ impossible := Bool.noConfusion impossible
 
 /-- Final batching authenticates the masked prefix from which the sampled claims are read. -/
-noncomputable def finalBatchSchema {E : Type} [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] (n columns queries : ℕ) : BadSchema E where
+def finalBatchSchema {E : Type} [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] (n columns queries : ℕ) : BadSchema E where
   Input := {pre : PlaintextPrefix E n columns queries // pre.publicData.residual.length = 1}
   equality := inferInstance
   isQuery := false
@@ -114,8 +125,9 @@ noncomputable def finalBatchSchema {E : Type} [Field E] [DecidableEq E]
   check input := checkPrefixBadFinalBatch input.val
   check_iff input := checkPrefixBadFinalBatch_iff input.val
   monotone _ _ h _ bad := BadFinalBatch.mask_mono h bad
-  error := (queries : ENNReal) / Fintype.card E
+  error := Erased.mk ((queries : ENNReal) / Fintype.card E)
   bad_bound input _ := by
+    simp only [Erased.out_mk]
     refine (prEvent_mono ($ᵗ E) _ _ (fun _ bad => bad.2)).trans ?_
     have len : input.val.claims.length - 1 = queries := by
       simp only [PlaintextPrefix.claims, List.length_append, List.length_ofFn, input.property]
@@ -132,8 +144,8 @@ structure ClosingInput (E : Type) (n columns queries count : ℕ) where
   quadratic : Quadratic E
 
 /-- Closing checks a guarded root event after applying only public scalar history. -/
-noncomputable def closingSchema {E : Type} [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] (n columns queries count : ℕ) : BadSchema E where
+def closingSchema {E : Type} [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] (n columns queries count : ℕ) : BadSchema E where
   Input := ClosingInput E n columns queries count
   equality := inferInstance
   isQuery := false
@@ -147,25 +159,26 @@ noncomputable def closingSchema {E : Type} [Field E] [DecidableEq E]
     rcases large with ⟨pre', history', q'⟩
     obtain ⟨masks, rfl, rfl⟩ := h
     exact BadClosing.mask_mono history masks bad
-  error := (2 : ENNReal) / Fintype.card E
-  bad_bound input _ :=
-    (prEvent_mono ($ᵗ E) _ _ (fun _ bad => bad.2)).trans
+  error := Erased.mk ((2 : ENNReal) / Fintype.card E)
+  bad_bound input _ := by
+    simp only [Erased.out_mk]
+    exact (prEvent_mono ($ᵗ E) _ _ (fun _ bad => bad.2)).trans
       (prob_badClosing_le _ _ _)
 
 /-- The closing block classifies every scalar round as a guarded quadratic root event. -/
-noncomputable def closingSchemas {E : Type} [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] (n columns queries : ℕ) : (count : ℕ) →
+def closingSchemas {E : Type} [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] (n columns queries : ℕ) : (count : ℕ) →
     BadSchemas (scalarRoundsPublicCoin (E := E) count .done)
   | 0 => PUnit.unit
   | count + 1 => fun _ => ⟨closingSchema n columns queries count,
       closingSchemas n columns queries count⟩
 
 /-- Fold schemas precede a fixed suffix and use the exact encoded fold error. -/
-noncomputable def foldSchemas {K E : Type} [Field K] [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] {vars : ℕ} (enc : Encoding K vars) (ι : K →+* E)
-    (sec : LevelSecurity) (contract : EncodingContract enc ι) (valid : sec.Valid enc)
+def foldSchemas {K E : Type} [Field K] [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] {vars : ℕ} (enc : Encoding K vars) (ι : K →+* E)
+    (sec : Erased LevelSecurity) (contract : EncodingContract enc ι) (valid : sec.out.Valid enc)
     (decoders : (lanes : ℕ) → ListDecoder (E := E) enc lanes)
-    (correct : ∀ lanes, (decoders lanes).Correct ι (radius enc sec) (listBound enc sec))
+    (correct : ∀ lanes, (decoders lanes).Correct ι (radius enc sec.out) (listBound enc sec.out))
     {rest : Protocol} (coin : PublicCoin rest) (suffix : BadSchemas coin) : (lanes : ℕ) →
     BadSchemas (scalarRoundsPublicCoin (E := E) lanes coin)
   | 0 => suffix
@@ -173,28 +186,31 @@ noncomputable def foldSchemas {K E : Type} [Field K] [Field E] [DecidableEq E]
       foldSchemas enc ι sec contract valid decoders correct coin suffix lanes⟩
 
 /-- The new level's OOD schema uses its certified head decoder. -/
-noncomputable def enteringOodSchema {K E : Type} [Field K] [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] (ι : K →+* E) {n : ℕ} (s : Schedule K n)
-    (sec : SecurityParameters s) (decoders : DecoderFamily (E := E) s)
-    (correct : DecoderFamily.Correct ι s decoders sec) (valid : s.Valid ι sec) :
+def enteringOodSchema {K E : Type} [Field K] [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] (ι : K →+* E) {n : ℕ} (s : Schedule K n)
+    (sec : Erased (SecurityParameters s)) (decoders : DecoderFamily (E := E) s)
+    (correct : DecoderFamily.Correct ι s decoders sec.out) (valid : s.Valid ι sec.out) :
     BadSchema (Fin n → E) :=
   match s with
   | .last lanes _ enc _ => oodSchema enc ι sec valid.2.1 (decoders lanes) (correct lanes)
-  | .more lanes enc _ _ => oodSchema enc ι sec.1 valid.2.1 (decoders.1 lanes) (correct.1 lanes)
+  | .more lanes enc _ _ =>
+      oodSchema enc ι (Erased.mk sec.out.1)
+        (by simpa only [Erased.out_mk] using valid.2.1) (decoders.1 lanes)
+        (by simpa only [Erased.out_mk] using correct.1 lanes)
 
 /-- The newly extracted oracle is the masked input to the head OOD schema. -/
-noncomputable def enteringOodInput {K E : Type} [Field K] [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] (ι : K →+* E) {n : ℕ} (s : Schedule K n)
-    (sec : SecurityParameters s) (decoders : DecoderFamily (E := E) s)
-    (correct : DecoderFamily.Correct ι s decoders sec) (valid : s.Valid ι sec)
+def enteringOodInput {K E : Type} [Field K] [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] (ι : K →+* E) {n : ℕ} (s : Schedule K n)
+    (sec : Erased (SecurityParameters s)) (decoders : DecoderFamily (E := E) s)
+    (correct : DecoderFamily.Correct ι s decoders sec.out) (valid : s.Valid ι sec.out)
     (word : oracleMessage E s) : (enteringOodSchema ι s sec decoders correct valid).Input := by
   cases s <;> exact word
 
 /-- WHIR's local classifier follows its opening syntax, with only column challenges marked query. -/
-noncomputable def openingSchemas {K E : Type} [Field K] [Field E] [DecidableEq E]
-    [Fintype E] [SampleableType E] (ι : K →+* E) : {n : ℕ} → (s : Schedule K n) →
-    (sec : SecurityParameters s) → (decoders : DecoderFamily (E := E) s) →
-    DecoderFamily.Correct ι s decoders sec → s.Valid ι sec → ℕ →
+def openingSchemas {K E : Type} [Field K] [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] (ι : K →+* E) : {n : ℕ} → (s : Schedule K n) →
+    (sec : Erased (SecurityParameters s)) → (decoders : DecoderFamily (E := E) s) →
+    DecoderFamily.Correct ι s decoders sec.out → s.Valid ι sec.out → ℕ →
     BadSchemas (openingPublicCoin (E := E) s)
   | _, .last lanes tail enc queries, sec, decoders, correct, valid, count =>
       ⟨batchSchema enc ι sec (decoders lanes) (correct lanes) count,
@@ -205,12 +221,19 @@ noncomputable def openingSchemas {K E : Type} [Field K] [Field E] [DecidableEq E
             ⟨finalBatchSchema tail (2 ^ (tail + enc.rate)) queries,
               closingSchemas tail (2 ^ (tail + enc.rate)) queries tail⟩⟩) lanes⟩
   | _, .more lanes enc queries rest, sec, decoders, correct, valid, count =>
-      ⟨batchSchema enc ι sec.1 (decoders.1 lanes) (correct.1 lanes) count,
-        foldSchemas enc ι sec.1 valid.2.2.2.1 valid.2.1 decoders.1 correct.1
+      ⟨batchSchema enc ι (Erased.mk sec.out.1) (decoders.1 lanes)
+          (by simpa only [Erased.out_mk] using correct.1 lanes) count,
+        foldSchemas enc ι (Erased.mk sec.out.1) valid.2.2.2.1
+          (by simpa only [Erased.out_mk] using valid.2.1) decoders.1
+          (by simpa only [Erased.out_mk] using correct.1)
           (rest := transition E (.more lanes enc queries rest))
           (.oracle (.challenge (.sender fun _ => .challenge (openingPublicCoin rest))))
-          ⟨enteringOodSchema ι rest sec.2 decoders.2 correct.2 valid.2.2.2.2,
+          ⟨enteringOodSchema ι rest (Erased.mk sec.out.2) decoders.2
+              (by simpa only [Erased.out_mk] using correct.2)
+              (by simpa only [Erased.out_mk] using valid.2.2.2.2),
             fun _ => ⟨querySchema (Fin queries → enc.Columns),
-              openingSchemas ι rest sec.2 decoders.2 correct.2 valid.2.2.2.2 (queries + 2)⟩⟩ lanes⟩
+              openingSchemas ι rest (Erased.mk sec.out.2) decoders.2
+              (by simpa only [Erased.out_mk] using correct.2)
+              (by simpa only [Erased.out_mk] using valid.2.2.2.2) (queries + 2)⟩⟩ lanes⟩
 
 end Whir
