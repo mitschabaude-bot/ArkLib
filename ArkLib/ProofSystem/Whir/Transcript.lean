@@ -105,6 +105,24 @@ theorem foldExtractor_terminalState {K E : Type} [Semiring K] [CommRing E] [Deci
           (readRounds rest lanes claim.value path).1⟩
         (active && (readRounds rest lanes claim.value path).2.2.1)).terminalState
           (readRounds rest lanes claim.value path).2.2.2 := by
-  sorry
+  induction lanes generalizing active with
+  | zero =>
+      change (finish word claim active).terminalState path =
+        (finish (scalarMaskedWord (foldMaskedWord word Fin.elim0))
+          ⟨castTable (Nat.zero_add vars).symm (restrict claim.weight Fin.elim0), claim.value⟩
+          (active && true)).terminalState path
+      rw [scalarMaskedWord_fold_zero, restrict_zero, castTable_inverse, Bool.and_true]
+  | succ lanes ih =>
+      let q : Quadratic E := path.1
+      let r : E := path.2.1
+      change (foldExtractor enc (fun _ w f => Close γ w (enc.interleave ι f)) decoders finish
+        lanes (foldMaskedRowsOne word r)
+        ⟨foldMessageOne claim.weight r, evalQuadratic claim.value q r⟩
+        (active && (Sumcheck.compressedOps 1).accept claim.value q)).terminalState
+          path.2.2 = _
+      rw [ih]
+      simp only [readRounds]
+      rw [foldMaskedWord_cons word r _, restrict_foldMessageOne claim.weight r _, Bool.and_assoc]
+
 
 end Whir

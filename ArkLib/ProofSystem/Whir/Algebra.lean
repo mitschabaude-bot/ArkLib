@@ -476,4 +476,43 @@ theorem prob_fold_fixed_le {E : Type} [Field E] [Fintype E] [SampleableType E]
     (foldPolynomial_degree claim.weight candidate) (quadraticPolynomial_degree claim.value q)
   simpa only [foldPolynomial_eval, quadraticPolynomial_eval, Claim.Holds, Nat.cast_ofNat] using h
 
+/-- Successive masked row folds equal evaluation at the complete row challenge. -/
+theorem foldMaskedWord_cons {E : Type} [CommRing E] {lanes columns : ℕ}
+    (word : MaskedWord E (lanes + 1) columns) (r : E) (rs : Fin lanes → E) :
+    foldMaskedWord (foldMaskedRowsOne word r) rs = foldMaskedWord word (Fin.cons r rs) := by
+  funext x
+  cases hc : word x with
+  | none => simp only [foldMaskedWord, foldMaskedRowsOne, hc, Option.map_none]
+  | some column =>
+      simp only [foldMaskedWord, foldMaskedRowsOne, hc, Option.map_some, Option.some.injEq]
+      exact (mle_cons column r rs).symm
+
+/-- Zero row folding retains every known scalar column. -/
+theorem scalarMaskedWord_fold_zero {E : Type} [CommRing E] {columns : ℕ}
+    (word : MaskedWord E 0 columns) :
+    scalarMaskedWord (foldMaskedWord word Fin.elim0) = word := by
+  funext x
+  cases hc : word x with
+  | none => simp only [scalarMaskedWord, foldMaskedWord, hc, Option.map_none]
+  | some column =>
+      simp only [scalarMaskedWord, foldMaskedWord, hc, Option.map_some, Option.some.injEq]
+      funext u
+      simp only [mle, eqWeight, Fin.prod_univ_zero, one_mul, Fintype.sum_unique]
+      exact congrArg column (Subsingleton.elim _ _)
+
+/-- Folding and scalar packaging preserve the known-query guard. -/
+theorem queriesKnown_scalar_fold {E : Type} [CommRing E] {lanes columns queries : ℕ}
+    (word : MaskedWord E lanes columns) (r : Fin lanes → E)
+    (xs : Fin queries → Fin columns) :
+    queriesKnown (scalarMaskedWord (foldMaskedWord word r)) xs = queriesKnown word xs := by
+  simp only [queriesKnown, scalarMaskedWord, foldMaskedWord, Option.isSome_map]
+
+/-- Scalar packaging and zero fill give the defaulted masked fold value. -/
+theorem zeroFill_scalar_fold {E : Type} [CommRing E] {lanes columns : ℕ}
+    (word : MaskedWord E lanes columns) (r : Fin lanes → E) (x : Fin columns) :
+    zeroFill (scalarMaskedWord (foldMaskedWord word r)) x Fin.elim0 =
+      (foldMaskedWord word r x).getD 0 := by
+  cases hc : word x <;> simp only [zeroFill, scalarMaskedWord, foldMaskedWord, hc,
+    Option.map_none, Option.map_some, Option.getD_none, Option.getD_some, Pi.zero_apply]
+
 end Whir

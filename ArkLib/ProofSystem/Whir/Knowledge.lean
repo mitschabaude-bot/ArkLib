@@ -53,20 +53,20 @@ def ListDecoder.ofZeroFill {K E : Type} [Semiring K] [Semiring E] [DecidableEq E
 
 /-- Zero-fill decoding followed by masked filtering preserves the certified list contract. -/
 theorem ListDecoder.ofZeroFill_correct {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
-    {vars lanes : ℕ} {enc : Encoding K vars} (ι : K →+* E) (cutoff : ℕ)
+    {vars lanes : ℕ} {enc : Encoding K vars} (ι : K →+* E)
     (decode : Word E lanes (2 ^ (vars + enc.rate)) → List (Table E (lanes + vars)))
     (γ L : ℝ)
-    (threshold : ∀ count : ℕ, cutoff ≤ count ↔ (1 - γ) * (2 ^ (vars + enc.rate) : ℕ) ≤ (count : ℝ))
     (nodup : ∀ word, (decode word).Nodup)
     (mem : ∀ word f, f ∈ decode word ↔ Close γ (fullWord word) (enc.interleave ι f))
     (length : ∀ word, ((decode word).length : ℝ) ≤ L) :
-    (ListDecoder.ofZeroFill ι cutoff decode).Correct ι γ L := by
+    (ListDecoder.ofZeroFill ι ⌈(1 - γ) * (2 ^ (vars + enc.rate) : ℕ)⌉₊ decode).Correct ι γ L := by
   refine ⟨fun word => (nodup _).filter _, ?_, ?_⟩
   · intro word f
-    simp only [ListDecoder.ofZeroFill, List.mem_filter, decide_eq_true_eq, mem, threshold]
+    simp only [ListDecoder.ofZeroFill, List.mem_filter, decide_eq_true_eq, mem, ← close_iff_cutoff]
     exact ⟨fun h => h.2, fun h => ⟨Close.zeroFill h, h⟩⟩
   · intro word
-    have h : ((ListDecoder.ofZeroFill ι cutoff decode).decode word).length ≤
+    have h : ((ListDecoder.ofZeroFill ι
+        ⌈(1 - γ) * (2 ^ (vars + enc.rate) : ℕ)⌉₊ decode).decode word).length ≤
         (decode (zeroFill word)).length := List.length_filter_le _ _
     exact (Nat.cast_le.mpr h).trans (length (zeroFill word))
 

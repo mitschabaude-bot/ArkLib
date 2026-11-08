@@ -782,6 +782,7 @@ public import ArkLib.Interaction.Oracle.Security.StateRestorationReplay
 public import ArkLib.Interaction.Oracle.Security.StateRestorationResources
 public import ArkLib.Interaction.Oracle.Security.StateRestorationStopped
 public import ArkLib.Interaction.Oracle.Security.StateRestorationStoppedBudget
+public import ArkLib.Interaction.Oracle.Security.WitnessRefinement
 public import ArkLib.Interaction.Oracle.Sequential
 public import ArkLib.Interaction.Oracle.Source
 public import ArkLib.Interaction.Oracle.SourceRouting
@@ -1086,6 +1087,7 @@ public import ArkLib.ProofSystem.Sumcheck.Interaction.ArbitraryRounds
 public import ArkLib.ProofSystem.Sumcheck.Interaction.BadEvents
 public import ArkLib.ProofSystem.Sumcheck.Interaction.Closing
 public import ArkLib.ProofSystem.Sumcheck.Interaction.Composition
+public import ArkLib.ProofSystem.Sumcheck.Interaction.CompressedBadEvents
 public import ArkLib.ProofSystem.Sumcheck.Interaction.Computable
 public import ArkLib.ProofSystem.Sumcheck.Interaction.ComputableCompleteness
 public import ArkLib.ProofSystem.Sumcheck.Interaction.ComputableSoundness
@@ -1149,6 +1151,9 @@ public import ArkLib.ProofSystem.Whir.PlaintextBadEvents
 public import ArkLib.ProofSystem.Whir.Preservation
 public import ArkLib.ProofSystem.Whir.Protocol
 public import ArkLib.ProofSystem.Whir.Transcript
+public import ArkLib.ProofSystem.Whir.WitnessAnnotation
+public import ArkLib.ProofSystem.Whir.WitnessCertificate
+public import ArkLib.ProofSystem.Whir.WitnessSchemas
 public import ArkLib.ToCompPoly.Multilinear.Basic
 public import ArkLib.ToCompPoly.Multilinear.NestedEvaluationTree
 public import ArkLib.ToCompPoly.Multivariate.Eval

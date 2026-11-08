@@ -3,7 +3,8 @@ Copyright (c) 2026 ArkLib Contributors. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Gregor Mitscha-Baude
 -/
-import ArkLib.ProofSystem.Whir.Certificate
+import ArkLib.ProofSystem.Whir.WitnessCertificate
+import ArkLib.ProofSystem.Sumcheck.Interaction.CompressedBadEvents
 
 /-!
 # WHIR transcript execution fixtures
@@ -167,6 +168,36 @@ private def maskedSmoke : IO Unit := do
     (decide (decoder.decode masked = [0]))
   check "folding preserves hidden columns"
     ((foldMaskedRowsOne masked 7 1).isNone)
+
+/-- Guarded suffix checkers and compressed coefficients execute on fixed plaintext examples. -/
+private def witnessSmoke : IO Unit := do
+  let pre : PlaintextPrefix ℚ 0 2 1 :=
+    ⟨⟨0, [⟨0, 1⟩], (fun _ => 0), (fun _ => 0)⟩, fun _ => some (fun _ => -1)⟩
+  check "guarded final batching detects a false-claim cancellation"
+    (checkPrefixBadFinalBatch pre 1)
+  check "guarded final batching rejects hidden queried columns"
+    (!(checkPrefixBadFinalBatch { pre with word := fun _ => none } 1))
+  let history : Table ℚ 0 → List (Claim ℚ 0) → Table ℚ 1 × Claim ℚ 1 :=
+    fun _ _ => (0, ⟨0, 1⟩)
+  check "guarded closing detects a quadratic root"
+    (checkPrefixBadClosing history pre (0, fun _ => 0) 0)
+  check "guarded closing rejects hidden queried columns"
+    (!(checkPrefixBadClosing history { pre with word := fun _ => none } (0, fun _ => 0) 0))
+  let q : Quadratic ℚ := (3, fun _ => 5)
+  let coeffs := Sumcheck.Interaction.Knowledge.compressedCoefficients 17 q
+  check "compressed Sumcheck coefficients reconstruct the omitted linear term"
+    (decide (coeffs = ![3, 6, 5]) &&
+      decide (Sumcheck.Interaction.Knowledge.evalCoefficients coeffs 2 = evalQuadratic 17 q 2))
+
+/--
+info: guarded final batching detects a false-claim cancellation
+guarded final batching rejects hidden queried columns
+guarded closing detects a quadratic root
+guarded closing rejects hidden queried columns
+compressed Sumcheck coefficients reconstruct the omitted linear term
+-/
+#guard_msgs in
+#eval witnessSmoke
 
 /--
 info: hidden columns never agree with zero

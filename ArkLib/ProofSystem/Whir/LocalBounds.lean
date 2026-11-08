@@ -101,7 +101,60 @@ theorem initial_list_descends {K E : Type} [Field K] [Field E]
     (close : Close (radius enc sec) (mapMasked ι word) (enc.interleave ι f)) :
     ∃ g : Table K (lanes + vars), f = (fun u => ι (g u)) ∧
       Close (radius enc sec) word (enc.interleave (RingHom.id K) g) := by
-  sorry
+  classical
+  let T := agreement (mapMasked ι word) (enc.interleave ι f)
+  have known (x : enc.Columns) (hx : x ∈ T) :
+      ∀ u, ι (zeroFill word x u) = enc.interleave ι f x u := by
+    have ha := (Finset.mem_filter.mp hx).2
+    cases hc : word x with
+    | none => simp only [mapMasked, hc, Option.map_none] at ha; cases ha
+    | some column =>
+        simp only [mapMasked, hc, Option.map_some, Option.some.injEq] at ha
+        intro u
+        simpa only [zeroFill, hc, Option.getD_some] using congrFun ha u
+  have large : 2 ^ vars ≤ T.card := by
+    have hclose : (1 - radius enc sec) * 2 ^ (vars + enc.rate) ≤ (T.card : ℝ) := by
+      simpa only [Close, T, Nat.cast_pow, Nat.cast_ofNat] using close
+    have h : (2 ^ vars : ℝ) ≤ T.card := (dimension_lt_agreement valid).le.trans hclose
+    exact_mod_cast h
+  have rows : ∀ u : Cube lanes, ∃ base : enc.Columns → K,
+      base ∈ ReedSolomon.code enc.domain (2 ^ vars) ∧
+        (fun x => enc.interleave ι f x u) = fun x => ι (base x) := by
+    intro u
+    exact ReedSolomon.exists_base_codeword_of_agreement enc.domain ι (2 ^ vars)
+      (fun x => zeroFill word x u) (fun x => enc.interleave ι f x u)
+      (interleave_mem enc ι contract f u) T large
+      (fun x hx => (known x hx u).symm)
+  choose base hbase heq using rows
+  have base_mem : (fun x u => base u x) ∈
+      ((ReedSolomon.code enc.domain (2 ^ vars))^⋈(Cube lanes)) := by
+    intro u
+    change (fun x => base u x) ∈ ReedSolomon.code enc.domain (2 ^ vars)
+    exact hbase u
+  have hdomain : enc.extendedDomain (RingHom.id K) = enc.domain := by
+    ext x
+    rfl
+  obtain ⟨g, hg⟩ := interleave_surjective enc (RingHom.id K) base_contract (fun x u => base u x)
+    (by rwa [hdomain])
+  have message : f = fun u => ι (g u) := by
+    apply interleave_injective enc ι contract
+    rw [interleave_scalar_extension, hg]
+    funext x u
+    exact congrFun (heq u) x
+  refine ⟨g, message, ?_⟩
+  rw [message, interleave_scalar_extension] at close
+  unfold Close at close ⊢
+  have same : agreement (mapMasked ι word)
+      (fun x u => ι (enc.interleave (RingHom.id K) g x u)) =
+      agreement word (enc.interleave (RingHom.id K) g) := by
+    ext x
+    simp only [agreement, Finset.mem_filter, Finset.mem_univ, true_and]
+    cases hc : word x with
+    | none => simp only [mapMasked, hc, Option.map_none, reduceCtorEq]
+    | some column =>
+        simp only [mapMasked, hc, Option.map_some, Option.some.injEq, funext_iff,
+          ι.injective.eq_iff]
+  rwa [same] at close
 
 /-- List lifting uses MCA over the remaining row interleaving, with no row-count factor. -/
 theorem prob_listFoldFailure_le {K E : Type} [Field K] [Field E] [DecidableEq E]
@@ -121,7 +174,7 @@ theorem prob_listFoldFailure_le {K E : Type} [Field K] [Field E] [DecidableEq E]
       r (foldMcaInput (zeroFill word)) (radius enc sec)) (by
         rintro r ⟨f, hf, absent⟩
         by_contra good
-        obtain ⟨g, hg, hgf⟩ := fold_preimage_of_not_isMCA enc ι contract sec valid word r good f
+        obtain ⟨g, hg, hgf, _⟩ := fold_preimage_of_not_isMCA enc ι contract sec valid word r good f
           ((after_correct.mem_iff _ _).mp hf)
         exact absent g ((before_correct.mem_iff _ _).mpr hg) hgf)
   have supremum : Pr{let r ←$ᵗ E}[CoreDefinitions.IsMCA

@@ -121,8 +121,111 @@ theorem fold_preimage_of_not_isMCA {K E : Type} [Field K] [Field E] [DecidableEq
       r (foldMcaInput (zeroFill word)) (radius enc sec))
     (f : Table E (lanes + vars))
     (close : Close (radius enc sec) (foldMaskedRowsOne word r) (enc.interleave ι f)) :
-    ∃ g, Close (radius enc sec) word (enc.interleave ι g) ∧ foldMessageOne g r = f := by
-  sorry
+    ∃ g, Close (radius enc sec) word (enc.interleave ι g) ∧ foldMessageOne g r = f ∧
+      ∀ x ∈ agreement (foldMaskedRowsOne word r) (enc.interleave ι f),
+        word x = some (enc.interleave ι g x) := by
+  classical
+  let C := (ReedSolomon.code (enc.extendedDomain ι) (2 ^ vars))^⋈(Cube lanes)
+  let T := agreement (foldMaskedRowsOne word r) (enc.interleave ι f)
+  have combination : (fun x => ∑ j, CoreDefinitions.AffineLineGenerator E r j •
+      foldMcaInput (zeroFill word) j x) = foldRowsOne (zeroFill word) r := by
+    funext x u
+    simp only [CoreDefinitions.AffineLineGenerator, Fin.sum_univ_two, foldMcaInput,
+      Matrix.cons_val_zero, Matrix.cons_val_one, Pi.add_apply, Pi.smul_apply, smul_eq_mul,
+      one_mul, foldRowsOne]
+    ring
+  have known (x : enc.Columns) (hx : x ∈ T) :
+      ∃ column, word x = some column ∧
+        foldRowsOne (zeroFill word) r x = enc.interleave ι f x := by
+    have ha := (Finset.mem_filter.mp hx).2
+    obtain ⟨column, hc⟩ := known_of_foldMaskedRowsOne word r x _ ha
+    refine ⟨column, hc, ?_⟩
+    change (fun u => (1 - r) * zeroFill word x (Fin.cons false u) +
+      r * zeroFill word x (Fin.cons true u)) = _
+    simpa only [foldMaskedRowsOne, hc, Option.map_some, Option.some.injEq,
+      zeroFill, Option.getD_some] using ha
+  have hdim : 2 ^ vars ≤ ⌈(Fintype.card enc.Columns : ℝ) * (1 - radius enc sec)⌉₊ := by
+    have hbound : (2 ^ vars : ℝ) ≤
+        (Fintype.card enc.Columns : ℝ) * (1 - radius enc sec) := by
+      simpa only [Fintype.card_fin, Nat.cast_pow, Nat.cast_ofNat, mul_comm] using
+        (dimension_lt_agreement valid).le
+    have h := hbound.trans (Nat.le_ceil
+      ((Fintype.card enc.Columns : ℝ) * (1 - radius enc sec)))
+    exact_mod_cast h
+  have hdet := (ReedSolomon.determinedByAgreement_code (enc.extendedDomain ι) hdim
+    ).moduleInterleavedCode (κ := Cube lanes)
+  have large : (Fintype.card enc.Columns : ℝ) * (1 - radius enc sec) ≤ T.card := by
+    simpa only [Close, T, Fintype.card_fin, mul_comm] using close
+  obtain ⟨p, hp, hcomb, hexact⟩ := CoreDefinitions.list_preimages_of_not_isMCA
+    (CoreDefinitions.AffineLineGenerator E) C (radius enc sec) hdet r (foldMcaInput (zeroFill word))
+    good (enc.interleave ι f) (interleave_mem enc ι contract f) T large (by
+      intro x hx
+      rw [congrFun combination x]
+      exact (known x hx).choose_spec.2.symm)
+  have rows (j : Fin 2) (u : Cube lanes) :
+      (fun x => p j x u) ∈ ReedSolomon.code (enc.extendedDomain ι) (2 ^ vars) := by
+    have heq : Matrix.transpose (p j) u = (fun x => p j x u) := by
+      funext x
+      exact Matrix.transpose_apply _ _ _
+    rw [← heq]
+    exact hp j u
+  let old : Word E (lanes + 1) (2 ^ (vars + enc.rate)) := fun x u =>
+    if u 0 then p 0 x (Fin.tail u) + p 1 x (Fin.tail u) else p 0 x (Fin.tail u)
+  have old_mem : old ∈
+      ((ReedSolomon.code (enc.extendedDomain ι) (2 ^ vars))^⋈(Cube (lanes + 1))) := by
+    intro u
+    change (fun x => if u 0 then p 0 x (Fin.tail u) + p 1 x (Fin.tail u)
+      else p 0 x (Fin.tail u)) ∈ ReedSolomon.code (enc.extendedDomain ι) (2 ^ vars)
+    by_cases hb : u 0 = true
+    · simp only [hb, ite_true]
+      have heq : ((fun x => p 0 x (Fin.tail u)) + (fun x => p 1 x (Fin.tail u))) =
+          (fun x => p 0 x (Fin.tail u) + p 1 x (Fin.tail u)) := by
+        funext x
+        exact Pi.add_apply _ _ _
+      rw [← heq]
+      exact (ReedSolomon.code _ _).add_mem (rows 0 (Fin.tail u)) (rows 1 (Fin.tail u))
+    · simpa only [hb, Bool.false_eq_true, ite_false] using rows 0 (Fin.tail u)
+  obtain ⟨g, hg⟩ := interleave_surjective enc ι contract old old_mem
+  have old_extends : ∀ x ∈ T, word x = some (old x) := by
+    intro x hx
+    have hx' : enc.interleave ι f x = ∑ j,
+        CoreDefinitions.AffineLineGenerator E r j • foldMcaInput (zeroFill word) j x := by
+      rw [congrFun combination x]
+      exact (known x hx).choose_spec.2.symm
+    have he := (hexact x).mp hx'
+    have h0 := he 0
+    have h1 := he 1
+    simp only [foldMcaInput, Matrix.cons_val_zero, Matrix.cons_val_one] at h0 h1
+    obtain ⟨column, hc, _⟩ := known x hx
+    refine hc.trans ?_
+    apply congrArg some
+    have hz : column = zeroFill word x := by simp only [zeroFill, hc, Option.getD_some]
+    rw [hz]
+    funext u
+    dsimp [old]
+    rw [h0, h1]
+    cases hb : u 0 <;> simp only [Bool.false_eq_true, ite_false, ite_true]
+    · congr 1
+      simpa only [hb] using (Fin.cons_self_tail u).symm
+    · rw [add_sub_cancel]
+      congr 1
+      simpa only [hb] using (Fin.cons_self_tail u).symm
+  have old_close : Close (radius enc sec) word old := by
+    refine close.trans ?_
+    exact_mod_cast Finset.card_le_card (show T ⊆ agreement word old from by
+      intro x hx
+      exact Finset.mem_filter.mpr ⟨Finset.mem_univ _, old_extends x hx⟩)
+  refine ⟨g, hg ▸ old_close, interleave_injective enc ι contract ?_, ?_⟩
+  swap
+  · intro x hx
+    rw [hg]
+    exact old_extends x hx
+  rw [← foldRowsOne_interleave, hg, hcomb]
+  funext x u
+  simp only [foldRowsOne, old, Fin.cons_zero, Fin.tail_cons, Bool.false_eq_true,
+    ite_false, ite_true, CoreDefinitions.AffineLineGenerator, Fin.sum_univ_two,
+    Matrix.cons_val_zero, Matrix.cons_val_one, Pi.add_apply, Pi.smul_apply, smul_eq_mul, one_mul]
+  ring
 
 /-- Classical proximity enumeration satisfies the Johnson contract without a row factor. -/
 theorem nearbyDecoder_correct {K E : Type} [Field K] [Field E] [DecidableEq E]
@@ -131,6 +234,42 @@ theorem nearbyDecoder_correct {K E : Type} [Field K] [Field E] [DecidableEq E]
     (lanes : ℕ) :
     (nearbyDecoder enc ι (radius enc sec) lanes).Correct ι
       (radius enc sec) (listBound enc sec) := by
-  sorry
+  classical
+  refine ⟨fun _ => Finset.nodup_toList _, ?_, ?_⟩
+  · intro word f
+    simp only [nearbyDecoder, Finset.mem_toList, Finset.mem_filter, Finset.mem_univ, true_and]
+  · intro word
+    let T := Finset.univ.filter fun f => Close (radius enc sec) word (enc.interleave ι f)
+    let C := (ReedSolomon.code (enc.extendedDomain ι) (2 ^ vars))^⋈(Cube lanes)
+    have pairwise : ∀ c ∈ (C : Set (enc.Columns → Cube lanes → E)),
+        ∀ c' ∈ (C : Set (enc.Columns → Cube lanes → E)), c ≠ c' →
+        (Code.agree c c' : ℝ) ≤ Real.sqrt (dimensionRate enc) ^ 2 *
+          Fintype.card enc.Columns := by
+      intro c hc c' hc' hne
+      obtain ⟨x, hx⟩ := Function.ne_iff.mp hne
+      obtain ⟨u, hu⟩ := Function.ne_iff.mp hx
+      have row_ne : (fun x => c x u) ≠ (fun x => c' x u) :=
+        fun h => hu (congrFun h x)
+      have hle : Code.agree c c' ≤ Code.agree (fun x => c x u) (fun x => c' x u) := by
+        apply Finset.card_le_card
+        intro x hx
+        simp only [Finset.mem_filter, Finset.mem_univ, true_and] at hx ⊢
+        exact congrFun hx u
+      have hlt := ReedSolomon.agree_lt_of_mem_code (hc u) (hc' u) row_ne
+      have hbound : (Code.agree c c' : ℝ) ≤ 2 ^ vars := by exact_mod_cast hle.trans hlt.le
+      rw [Real.sq_sqrt (dimensionRate_pos enc).le]
+      simpa only [dimensionRate, Fintype.card_fin, Nat.cast_pow, Nat.cast_ofNat,
+        div_mul_cancel₀ _ (by positivity : (2 ^ (vars + enc.rate) : ℝ) ≠ 0)] using hbound
+    have hbound := Code.card_le_of_pairwise_agree_le
+      (Real.sqrt_pos.mpr (dimensionRate_pos enc)) valid.2.2.2.1 pairwise
+      (zeroFill word) (T.image (enc.interleave ι)) (by
+        rintro c hc
+        obtain ⟨f, hf, rfl⟩ := Finset.mem_image.mp hc
+        apply Code.mem_closeCodewordsRel_iff.mpr
+        exact ⟨interleave_mem enc ι contract f,
+          (close_iff_relHammingDist (by positivity) _ _ _).mp
+            ((Finset.mem_filter.mp hf).2).zeroFill⟩)
+    rw [Finset.card_image_of_injective T (interleave_injective enc ι contract)] at hbound
+    simpa only [nearbyDecoder, Finset.length_toList, T, listBound] using hbound
 
 end Whir

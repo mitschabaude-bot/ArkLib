@@ -140,7 +140,7 @@ theorem BadFoldClaim.mono {ι : K →+* E} {γ : ℝ}
   obtain ⟨f, hf, rest⟩ := bad
   exact ⟨f, hf.mono h, rest⟩
 
-/-- On a large known agreement set the folded word extends to code but the rows do not jointly. -/
+/-- On a large known agreement set the folded word extension to code but the rows do not jointly. -/
 def BadMCA (ι : K →+* E) (γ : ℝ)
     (word : MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate))) (r : E) : Prop :=
   ∃ f, Close γ (foldMaskedRowsOne word r) (enc.interleave ι f) ∧
@@ -163,13 +163,35 @@ theorem checkBadMCA_iff (ι : K →+* E) (γ L : ℝ)
     (hc : before.Correct ι γ L) (hc' : after.Correct ι γ L)
     (word : MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate))) (r : E) :
     checkBadMCA ι before after word r = true ↔ BadMCA ι γ word r := by
-  sorry
+  simp only [checkBadMCA, List.any_eq_true, Bool.not_eq_true', List.any_eq_false,
+    decide_eq_true_eq, hc'.mem_iff, BadMCA]
+  constructor
+  · rintro ⟨f, close, no⟩
+    refine ⟨f, close, ?_⟩
+    rintro ⟨g, extension⟩
+    have oldclose : Close γ word (enc.interleave ι g) := by
+      refine close.trans ?_
+      exact_mod_cast Finset.card_le_card (show agreement (foldMaskedRowsOne word r)
+        (enc.interleave ι f) ⊆ agreement word (enc.interleave ι g) from by
+          intro x hx
+          exact Finset.mem_filter.mpr ⟨Finset.mem_univ _, extension x hx⟩)
+    exact no g ((hc.mem_iff _ _).mpr oldclose) extension
+  · rintro ⟨f, close, no⟩
+    exact ⟨f, close, fun g _ extension => no ⟨g, extension⟩⟩
 
 /-- Hiding removes possible MCA agreement sets without creating a joint extension obstruction. -/
 theorem BadMCA.mono {ι : K →+* E} {γ : ℝ}
     {small large : MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate))}
     (h : MaskLE small large) {r : E} (bad : BadMCA ι γ small r) : BadMCA ι γ large r := by
-  sorry
+  obtain ⟨f, close, no⟩ := bad
+  refine ⟨f, close.mono (foldMaskedRowsOne_mono h r), ?_⟩
+  rintro ⟨g, extension⟩
+  apply no
+  refine ⟨g, fun x hx => ?_⟩
+  have hx' := agreement_mono (foldMaskedRowsOne_mono h r) (enc.interleave ι f) hx
+  obtain ⟨old, hold⟩ := known_of_foldMaskedRowsOne small r x _ (Finset.mem_filter.mp hx).2
+  have heq := (h x old hold).symm.trans (extension x hx')
+  exact hold.trans (congrArg some (Option.some.inj heq))
 
 /-- Every masked MCA witness is a full-word MCA witness of the zero-filled word. -/
 theorem BadMCA.zeroFill {ι : K →+* E} {γ : ℝ}
@@ -220,7 +242,7 @@ theorem fold_escape_subset_bad
     (valid : sec.Valid enc)
     (before : ListDecoder (E := E) enc (lanes + 1)) (after : ListDecoder (E := E) enc lanes)
     (hc : before.Correct ι (radius enc sec) (listBound enc sec))
-    (hc' : after.Correct ι (radius enc sec) (listBound enc sec))
+    (_hc' : after.Correct ι (radius enc sec) (listBound enc sec))
     (word : MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate)))
     (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E) (active : Bool) (r : E)
     (escape : ∃ f,
@@ -229,7 +251,47 @@ theorem fold_escape_subset_bad
       ¬ (candidateState enc ι (radius enc sec) word [claim] active).holds
         (listLift (before.decode word) (fun g => foldMessageOne g r) claim.Holds f)) :
     BadFold ι (radius enc sec) word claim q r := by
-  sorry
+  classical
+  obtain ⟨f, ⟨ha, close, claims⟩, failure⟩ := escape
+  by_cases bad : BadMCA ι (radius enc sec) word r
+  · exact Or.inl bad
+  have extension : ∃ g : Table E ((lanes + 1) + vars),
+      ∀ x ∈ agreement (foldMaskedRowsOne word r) (enc.interleave ι f),
+        word x = some (enc.interleave ι g x) := by
+    by_contra absent
+    exact bad ⟨f, close, absent⟩
+  obtain ⟨g, extension⟩ := extension
+  have oldclose : Close (radius enc sec) word (enc.interleave ι g) := by
+    refine close.trans ?_
+    exact_mod_cast Finset.card_le_card (show agreement (foldMaskedRowsOne word r)
+      (enc.interleave ι f) ⊆ agreement word (enc.interleave ι g) from by
+        intro x hx
+        exact Finset.mem_filter.mpr ⟨Finset.mem_univ _, extension x hx⟩)
+  have folded : foldMessageOne g r = f := by
+    apply interleave_injective enc ι contract
+    have large : 2 ^ vars ≤ (agreement (foldMaskedRowsOne word r)
+        (enc.interleave ι f)).card := by
+      have h := (dimension_lt_agreement valid).le.trans
+        (show (1 - radius enc sec) * 2 ^ (vars + enc.rate) ≤
+          ((agreement (foldMaskedRowsOne word r) (enc.interleave ι f)).card : ℝ) by
+            simpa only [Close, Nat.cast_pow, Nat.cast_ofNat] using close)
+      exact_mod_cast h
+    apply (ReedSolomon.determinedByAgreement_code (enc.extendedDomain ι) le_rfl
+      ).moduleInterleavedCode _ (interleave_mem enc ι contract _)
+      _ (interleave_mem enc ι contract _) _ large
+    intro x hx
+    rw [← foldRowsOne_interleave]
+    have he := (Finset.mem_filter.mp hx).2
+    change (fun u => (1 - r) * enc.interleave ι g x (Fin.cons false u) +
+      r * enc.interleave ι g x (Fin.cons true u)) = _
+    simpa only [foldMaskedRowsOne, extension x hx, Option.map_some, Option.some.injEq] using he
+  have falseClaim : ¬ claim.Holds g := by
+    intro hg
+    have lift := listLift_of_valid_preimage (before.decode word) (fun g => foldMessageOne g r)
+      claim.Holds f ⟨g, (hc.mem_iff _ _).mpr oldclose, folded, hg⟩
+    exact failure ⟨ha, (hc.mem_iff _ _).mp lift.1,
+      by simpa only [List.mem_singleton, forall_eq] using lift.2.2⟩
+  exact Or.inr ⟨g, oldclose, falseClaim, folded ▸ claims _ (List.mem_singleton_self _)⟩
 
 end FoldEscape
 
@@ -264,6 +326,7 @@ theorem prob_badOod_le (ι : K →+* E) (sec : LevelSecurity) (valid : sec.Valid
   exact ⟨f, (correct.mem_iff _ _).mpr hf.zeroFill,
     g, (correct.mem_iff _ _).mpr hg.zeroFill, rest⟩
 
+omit [SampleableType E] in
 /-- A masked subset obstruction is the existing full-word BCHKS event after zero fill. -/
 theorem badMCA_implies_isMCA_zeroFill (ι : K →+* E) (contract : EncodingContract enc ι)
     (sec : LevelSecurity) (valid : sec.Valid enc)
@@ -272,7 +335,12 @@ theorem badMCA_implies_isMCA_zeroFill (ι : K →+* E) (contract : EncodingContr
     CoreDefinitions.IsMCA (CoreDefinitions.AffineLineGenerator E)
       ((ReedSolomon.code (enc.extendedDomain ι) (2 ^ vars))^⋈(Cube lanes))
       r (foldMcaInput (zeroFill word)) (radius enc sec) := by
-  sorry
+  classical
+  obtain ⟨f, close, obstruction⟩ := bad
+  by_contra good
+  obtain ⟨g, _, _, extension⟩ := fold_preimage_of_not_isMCA enc ι contract sec valid
+    word r good f close
+  exact obstruction ⟨g, extension⟩
 
 /-- Zero fill bounds subset MCA by the full-word BCHKS event at the same radius and rate. -/
 theorem prob_badMCA_le (ι : K →+* E) (contract : EncodingContract enc ι)

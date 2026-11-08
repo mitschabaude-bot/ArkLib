@@ -168,6 +168,12 @@ def Close {E : Type} [DecidableEq E] {lanes columns : ℕ}
     (radius : ℝ) (word : MaskedWord E lanes columns) (codeword : Word E lanes columns) : Prop :=
   (1 - radius) * columns ≤ (agreement word codeword).card
 
+/-- Masked proximity uses the decoder's integer agreement cutoff. -/
+theorem close_iff_cutoff {E : Type} [DecidableEq E] {lanes columns : ℕ}
+    (γ : ℝ) (word : MaskedWord E lanes columns) (codeword : Word E lanes columns) :
+    Close γ word codeword ↔ ⌈(1 - γ) * (columns : ℝ)⌉₊ ≤ (agreement word codeword).card := by
+  exact Nat.ceil_le.symm
+
 /-- Hiding columns only shrinks a proximity list. -/
 theorem Close.mono {E : Type} [DecidableEq E] {lanes columns : ℕ} {radius : ℝ}
     {small large : MaskedWord E lanes columns} {codeword : Word E lanes columns}
@@ -206,6 +212,23 @@ def scalarMaskedWord {E : Type} {columns : ℕ} (word : Fin columns → Option E
 def queriesKnown {E : Type} {lanes columns queries : ℕ}
     (word : MaskedWord E lanes columns) (xs : Fin queries → Fin columns) : Bool :=
   (List.ofFn xs).all (fun x => (word x).isSome)
+
+/-- The query guard requires each sampled column to be present. -/
+theorem queriesKnown_iff {E : Type} {lanes columns queries : ℕ}
+    (word : MaskedWord E lanes columns) (xs : Fin queries → Fin columns) :
+    queriesKnown word xs = true ↔ ∀ q, (word (xs q)).isSome = true := by
+  simp only [queriesKnown, List.all_eq_true, List.forall_mem_ofFn_iff]
+
+/-- Known scalar columns agree with their zero-filled value. -/
+theorem scalarColumn_eq {E : Type} [Zero E] {columns : ℕ}
+    (word : MaskedWord E 0 columns) (x : Fin columns) (known : (word x).isSome = true) :
+    word x = some (fun _ => zeroFill word x Fin.elim0) := by
+  cases hc : word x with
+  | none => simp only [hc, Option.isSome_none, Bool.false_eq_true] at known
+  | some column =>
+      simp only [zeroFill, hc, Option.getD_some, Option.some.injEq]
+      funext u
+      exact congrArg column (Subsingleton.elim _ _)
 
 /-- Encoding commutes with interleaved folding, with no multiplicative-domain hypothesis. -/
 theorem fold_interleave {K E : Type} [Semiring K] [CommRing E] {vars lanes : ℕ}
@@ -254,5 +277,23 @@ def foldMaskedRowsOne {E : Type} [CommRing E] {lanes columns : ℕ}
     (word : MaskedWord E (lanes + 1) columns) (r : E) : MaskedWord E lanes columns :=
   fun x => (word x).map fun column u =>
     (1 - r) * column (Fin.cons false u) + r * column (Fin.cons true u)
+
+/-- Affine row folding preserves inclusion of known columns. -/
+theorem foldMaskedRowsOne_mono {E : Type} [CommRing E] {lanes columns : ℕ}
+    {small large : MaskedWord E (lanes + 1) columns} (h : MaskLE small large) (r : E) :
+    MaskLE (foldMaskedRowsOne small r) (foldMaskedRowsOne large r) := by
+  intro x column hx
+  cases hs : small x with
+  | none => simp only [foldMaskedRowsOne, hs, Option.map_none] at hx; cases hx
+  | some value => simpa only [foldMaskedRowsOne, hs, h x value hs, Option.map_some] using hx
+
+/-- A known folded column is the affine fold of a known old column. -/
+theorem known_of_foldMaskedRowsOne {E : Type} [CommRing E] {lanes columns : ℕ}
+    (word : MaskedWord E (lanes + 1) columns) (r : E) (x : Fin columns)
+    (column : Cube lanes → E) (hx : foldMaskedRowsOne word r x = some column) :
+    ∃ old, word x = some old := by
+  cases hs : word x with
+  | none => simp only [foldMaskedRowsOne, hs, Option.map_none] at hx; cases hx
+  | some value => exact ⟨value, rfl⟩
 
 end Whir

@@ -509,7 +509,31 @@ theorem prefixConsistent_of_escape {Com : Type} [DecidableEq Com] {protocol : Pr
     (r : ℕ) selected (hs : selectedPrefix coin path messages r = some selected)
     (escape : escapeAt coin extractor path messages table r) :
     prefixConsistent coin selected.1 selected.2 table equality = true := by
-  sorry
+  induction coin generalizing state r with
+  | done => exact escape.elim
+  | sender next ih =>
+      simp only [selectedPrefix, Option.map_eq_some_iff] at hs
+      obtain ⟨⟨pre, words⟩, hs, heq⟩ := hs
+      cases heq
+      exact ih path.1 (extractor path.1).2.2 path.2 messages _ _ r _ hs escape
+  | oracle next ih =>
+      simp only [selectedPrefix, Option.map_eq_some_iff] at hs
+      obtain ⟨⟨pre, words⟩, hs, heq⟩ := hs
+      cases heq
+      exact ih (extractor (messages (.inl ()))).2.2 path.2
+        (fun i => messages (.inr i)) _ _ r _ hs escape
+  | challenge next ih =>
+      cases r with
+      | zero =>
+          simp only [selectedPrefix, Option.some.injEq] at hs
+          cases hs
+          rfl
+      | succ r =>
+          simp only [selectedPrefix, Option.map_eq_some_iff] at hs
+          obtain ⟨⟨pre, words⟩, hs, heq⟩ := hs
+          cases heq
+          simp only [prefixConsistent, Bool.and_eq_true, decide_eq_true_eq]
+          exact ⟨escape.1, ih (extractor path.1).2.2 path.2 messages _ _ r _ hs escape.2⟩
 
 /-- A falsifiable algebraic relation authenticates masked prefixes and classifies query keys. -/
 structure WitnessCIRelation {Statement Com : Type} [DecidableEq Com]
@@ -652,7 +676,7 @@ variable {Statement Com Openings Coins : Type} [DecidableEq Com] [SampleableType
     (transfer : ∀ c, verify coin h accept (A c) → ¬ Disagree c →
       ((certificate (A c).1).extractor.terminalState
         (extractedPath (coin (A c).1) (A c).2.1 (ext c))).holds (terminalWitness c))
-    (authenticated : ∀ c, verify coin h accept (A c) → ¬ Disagree c → ∀ r selected,
+    (authenticated : ∀ c r selected,
       selectedPrefix (coin (A c).1) (A c).2.1 (ext c) r = some selected →
       refinement.authenticate ⟨(A c).1, selected.1⟩ selected.2 (auth c selected.1) = true)
     (count : ℕ) (bound : ChallengeBound (Com := Com) coin count)
@@ -688,7 +712,7 @@ theorem knowledgeSoundness_witness_union :
     | true => exact Or.inr (Or.inr ⟨r, hr, ⟨⟨selected, hs, hq⟩, escape⟩⟩)
     | false =>
         refine Or.inr (Or.inl ⟨r, hr, ⟨⟨(A c).1, selected.1⟩, selected.2, auth c selected.1⟩,
-          ?_, hq, ?_, authenticated c accepted hd r selected hs, ?_⟩)
+          ?_, hq, ?_, authenticated c r selected hs, ?_⟩)
         · simp only [reductionAdversary, hs, Option.map_some]
         · exact prefixConsistent_of_escape (coin (A c).1) (certificate (A c).1).extractor
             (A c).2.1 (ext c) _ (fun pre => refinement.challengeEq ⟨(A c).1, pre⟩)
@@ -707,7 +731,36 @@ theorem knowledgeSoundness_witness :
         (reductionAdversary refinement.toWitnessCIRelation A ext auth r)) +
       ∑ r ∈ Finset.range count,
         queryRel refinement.toWitnessCIRelation state certificate A ext h r := by
-  sorry
+  let algebraic := fun r c => ∃ output,
+    reductionAdversary refinement.toWitnessCIRelation A ext auth r c = some output ∧
+      refinement.isQuery output.1 = false ∧
+      prefixConsistent (coin output.1.1) output.1.2 output.2.1
+        (Table.fibre h output.1.1)
+        (fun pre => refinement.challengeEq ⟨output.1.1, pre⟩) = true ∧
+      refinement.authenticate output.1 output.2.1 output.2.2 = true ∧
+      refinement.Bad output.1 output.2.1 (h output.1)
+  have game (r : ℕ) : Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[algebraic r c] =
+      witnessCI refinement.toWitnessCIRelation h
+        (reductionAdversary refinement.toWitnessCIRelation A ext auth r) := by
+    simp only [witnessCI, witnessCIGame, bind_pure_comp, prEvent_map]
+    apply prEvent_congr
+    intro c
+    cases he : reductionAdversary refinement.toWitnessCIRelation A ext auth r c with
+    | none => simp [algebraic, he]
+    | some output =>
+        simp only [algebraic, he, Option.some.injEq, Bool.and_eq_true,
+          Bool.not_eq_true', refinement.check_iff, and_assoc]
+        exact ⟨fun ⟨_, heq, rest⟩ => heq ▸ rest, fun rest => ⟨output, rfl, rest⟩⟩
+  refine (knowledgeSoundness_witness_union coin state certificate refinement A ext auth h
+    accept terminalWitness Disagree transfer authenticated count bound).trans ?_
+  refine (prEvent_or_le _ _ _).trans ?_
+  refine (add_le_add le_rfl (prEvent_or_le _ _ _)).trans ?_
+  rw [← add_assoc]
+  apply add_le_add
+  · apply add_le_add le_rfl
+    simpa only [game] using
+      prEvent_exists_finset_le (Finset.range count) ($ᵗ Coins : ProbComp Coins) algebraic
+  · exact prEvent_exists_finset_le (Finset.range count) ($ᵗ Coins : ProbComp Coins) _
 
 end WitnessDecomposition
 

@@ -1068,3 +1068,5 @@ home_page/            site assets and assembled website root
 `ArkLibTest/` mirrors production module paths for compile-time examples and regression tests.
 `lake test` builds all test modules; the default validation wrapper runs it. Tests stay outside
 the generated `ArkLib.lean` umbrella and production modules must not import them.
+
+WHIR authenticated masked-prefix schemas, their concrete extractor annotations, and the opening witness certificate live in `ProofSystem/Whir/WitnessSchemas.lean`, `WitnessAnnotation.lean`, and `WitnessCertificate.lean`. `Interaction/Oracle/Security/WitnessRefinement.lean` assembles annotated local events into the generic witness certificate.
