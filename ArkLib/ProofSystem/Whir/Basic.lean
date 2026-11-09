@@ -34,12 +34,24 @@ inductive TableCache (F : Type) : ℕ → Type
   /-- The two restrictions of the first Boolean coordinate. -/
   | node {n : ℕ} : TableCache F n → TableCache F n → TableCache F (n + 1)
 
+/-- Prepend one Boolean coordinate by matching its natural index directly. -/
+def Cube.prepend {n : ℕ} (bit : Bool) (tail : Cube n) : Cube (n + 1)
+  | ⟨0, _⟩ => bit
+  | ⟨i + 1, hi⟩ => tail ⟨i, Nat.lt_of_succ_lt_succ hi⟩
+
+/-- Direct coordinate indexing agrees with the tuple constructor. -/
+theorem Cube.prepend_eq_cons {n : ℕ} (bit : Bool) (tail : Cube n) :
+    prepend bit tail = Fin.cons bit tail := by
+  funext i
+  obtain ⟨i, hi⟩ := i
+  cases i <;> rfl
+
 /-- Materialize every Boolean value before later coordinate lookups. -/
 @[noinline] def TableCache.ofTable {F : Type} : {n : ℕ} → Table F n → TableCache F n
   | 0, f => .leaf (f Fin.elim0)
   | n + 1, f => .node
-    (ofTable (n := n) (fun u => f (Fin.cons false u)))
-    (ofTable (n := n) (fun u => f (Fin.cons true u)))
+    (ofTable (n := n) (fun u => f (Cube.prepend false u)))
+    (ofTable (n := n) (fun u => f (Cube.prepend true u)))
 
 /-- Read one Boolean vertex from a materialized table. -/
 def TableCache.get {F : Type} : {n : ℕ} → TableCache F n → Table F n
@@ -55,7 +67,7 @@ theorem TableCache.get_ofTable {F : Type} {n : ℕ} (f : Table F n) (u : Cube n)
     change f Fin.elim0 = f u
     exact congrArg f (funext fun i => Fin.elim0 i)
   | succ n ih =>
-    simp only [ofTable, get, ih]
+    simp only [ofTable, get, ih, Cube.prepend_eq_cons]
     cases bit : u 0 <;> simp only [Bool.false_eq_true, ↓reduceIte]
     · exact congrArg f (by simpa only [bit] using Fin.cons_self_tail u)
     · exact congrArg f (by simpa only [bit] using Fin.cons_self_tail u)
