@@ -64,9 +64,10 @@ def BadClosing {E : Type} [CommRing E] {n : ℕ}
 /-- The closing checker evaluates only fixed public data and the scalar challenge. -/
 def checkBadClosing {E : Type} [CommRing E] [DecidableEq E] {n : ℕ}
     (candidate : Table E (n + 1)) (claim : Claim E (n + 1)) (q : Quadratic E) (r : E) : Bool :=
+  let weight := foldMessageOne (vars := 0) claim.weight r
+  let values := foldMessageOne (vars := 0) candidate r
   decide (¬ claim.Holds candidate ∧
-    (⟨foldMessageOne (vars := 0) claim.weight r, evalQuadratic claim.value q r⟩ :
-      Claim E n).Holds (foldMessageOne (vars := 0) candidate r))
+    (⟨weight, evalQuadratic claim.value q r⟩ : Claim E n).Holds values)
 
 /-- The closing checker decides the quadratic root event. -/
 theorem checkBadClosing_iff {E : Type} [CommRing E] [DecidableEq E] {n : ℕ}

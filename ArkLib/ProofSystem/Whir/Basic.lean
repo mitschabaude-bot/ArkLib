@@ -27,6 +27,49 @@ abbrev Cube (n : ℕ) := Fin n → Bool
 /-- A multilinear polynomial represented by its values on the Boolean cube. -/
 abbrev Table (F : Type) (n : ℕ) := Cube n → F
 
+/-- A Boolean table stored as data so its entries are evaluated once. -/
+inductive TableCache (F : Type) : ℕ → Type
+  /-- The value at the unique zero-dimensional vertex. -/
+  | leaf : F → TableCache F 0
+  /-- The two restrictions of the first Boolean coordinate. -/
+  | node {n : ℕ} : TableCache F n → TableCache F n → TableCache F (n + 1)
+
+/-- Materialize every Boolean value before later coordinate lookups. -/
+@[noinline] def TableCache.ofTable {F : Type} : {n : ℕ} → Table F n → TableCache F n
+  | 0, f => .leaf (f Fin.elim0)
+  | n + 1, f => .node
+    (ofTable (n := n) (fun u => f (Fin.cons false u)))
+    (ofTable (n := n) (fun u => f (Fin.cons true u)))
+
+/-- Read one Boolean vertex from a materialized table. -/
+def TableCache.get {F : Type} : {n : ℕ} → TableCache F n → Table F n
+  | 0, .leaf value => fun _ => value
+  | _ + 1, .node left right => fun u =>
+    if u 0 then right.get (Fin.tail u) else left.get (Fin.tail u)
+
+/-- Reading a materialized table returns its original value. -/
+theorem TableCache.get_ofTable {F : Type} {n : ℕ} (f : Table F n) (u : Cube n) :
+    (ofTable f).get u = f u := by
+  induction n with
+  | zero =>
+    change f Fin.elim0 = f u
+    exact congrArg f (funext fun i => Fin.elim0 i)
+  | succ n ih =>
+    simp only [ofTable, get, ih]
+    cases bit : u 0 <;> simp only [Bool.false_eq_true, ↓reduceIte]
+    · exact congrArg f (by simpa only [bit] using Fin.cons_self_tail u)
+    · exact congrArg f (by simpa only [bit] using Fin.cons_self_tail u)
+
+/-- Capture the materialized values before constructing their lookup function. -/
+@[macro_inline] def cacheTable {F : Type} {n : ℕ} (f : Table F n) : Table F n :=
+  let image := TableCache.ofTable f
+  fun u => image.get u
+
+/-- Materializing a table preserves every Boolean value. -/
+theorem cacheTable_eq {F : Type} {n : ℕ} (f : Table F n) : cacheTable f = f := by
+  funext u
+  exact TableCache.get_ofTable f u
+
 /-- An interleaved word, queried one complete column at a time. -/
 abbrev Word (F : Type) (lanes columns : ℕ) := Fin columns → Cube lanes → F
 
@@ -162,6 +205,18 @@ def batch {E : Type} [Semiring E] {vars : ℕ} (claims : List (Claim E vars))
     (r : E) : Claim E vars :=
   ⟨fun u => (claims.zipIdx.map fun (c, i) => r ^ i * c.weight u).sum,
     (claims.zipIdx.map fun (c, i) => r ^ i * c.value).sum⟩
+
+/-- Retain batching powers before repeated coordinate evaluation. -/
+@[noinline] def batchPowers {E : Type} [Semiring E] {vars : ℕ}
+    (claims : List (Claim E vars)) (r : E) : Claim E vars :=
+  let terms := claims.zipIdx.map fun (claim, index) => (r ^ index, claim)
+  ⟨fun u => (terms.map fun term => term.1 * term.2.weight u).sum,
+    (terms.map fun term => term.1 * term.2.value).sum⟩
+
+/-- Shared batching powers preserve the complete claim. -/
+@[csimp] theorem batch_code : @batch = @batchPowers := by
+  funext E inst vars claims r
+  simp only [batchPowers, batch, List.map_map, Function.comp_def]
 
 /-- Proximity counts absolute column agreements against the original block length. -/
 def Close {E : Type} [DecidableEq E] {lanes columns : ℕ}
@@ -310,6 +365,16 @@ def castTable {E : Type} {n m : ℕ} (h : n = m) (f : Table E n) : Table E m :=
 def foldMessageOne {E : Type} [CommRing E] {lanes vars : ℕ}
     (f : Table E ((lanes + 1) + vars)) (r : E) : Table E (lanes + vars) :=
   restrict (castTable (by omega) f) (fun _ : Fin 1 => r)
+
+/-- Materialize each affine restriction before it enters a later claim history. -/
+@[macro_inline] def foldMessageCached {E : Type} [CommRing E] {lanes vars : ℕ}
+    (f : Table E ((lanes + 1) + vars)) (r : E) : Table E (lanes + vars) :=
+  cacheTable (restrict (castTable (by omega) f) (fun _ : Fin 1 => r))
+
+/-- Shared affine restrictions preserve the complete fold operation. -/
+@[csimp] theorem foldMessageOne_code : @foldMessageOne = @foldMessageCached := by
+  funext E inst lanes vars f r
+  exact (cacheTable_eq _).symm
 
 /-- One affine fold over the row alphabet, with an entire column as one code symbol. -/
 def foldRowsOne {E : Type} [CommRing E] {lanes columns : ℕ}
