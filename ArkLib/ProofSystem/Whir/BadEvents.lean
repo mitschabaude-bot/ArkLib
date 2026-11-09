@@ -149,22 +149,25 @@ def BadMCA (ι : K →+* E) (γ : ℝ)
         word x = some (enc.interleave ι g x)
 
 /-- Masked MCA checks every folded candidate and its joint old-list extensions. -/
-def checkBadMCA (ι : K →+* E)
+def checkBadMCA
     (before : ListDecoder (E := E) enc (lanes + 1)) (after : ListDecoder (E := E) enc lanes)
     (word : MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate))) (r : E) : Bool :=
   (after.decode (foldMaskedRowsOne word r)).any fun f =>
-    !(before.decode word).any fun g => decide
-      (∀ x ∈ agreement (foldMaskedRowsOne word r) (enc.interleave ι f),
-        word x = some (enc.interleave ι g x))
+    let foldedColumns := after.encodeColumns f
+    !(before.decode word).any fun g =>
+      let oldColumns := before.encodeColumns g
+      decide (∀ x, foldMaskedRowsOne word r x = some (foldedColumns[x.val]) →
+        word x = some (oldColumns[x.val]))
 
 /-- The MCA checker decides the subset event through the two certified masked decoders. -/
 theorem checkBadMCA_iff (ι : K →+* E) (γ L : ℝ)
     (before : ListDecoder (E := E) enc (lanes + 1)) (after : ListDecoder (E := E) enc lanes)
     (hc : before.Correct ι γ L) (hc' : after.Correct ι γ L)
     (word : MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate))) (r : E) :
-    checkBadMCA ι before after word r = true ↔ BadMCA ι γ word r := by
+    checkBadMCA before after word r = true ↔ BadMCA ι γ word r := by
   simp only [checkBadMCA, List.any_eq_true, Bool.not_eq_true', List.any_eq_false,
-    decide_eq_true_eq, hc'.mem_iff, BadMCA]
+    decide_eq_true_eq, hc.encodeColumns_eq, hc'.encodeColumns_eq, hc'.mem_iff, BadMCA,
+    agreement, Finset.mem_filter, Finset.mem_univ, true_and]
   constructor
   · rintro ⟨f, close, no⟩
     refine ⟨f, close, ?_⟩
@@ -174,7 +177,7 @@ theorem checkBadMCA_iff (ι : K →+* E) (γ L : ℝ)
       exact_mod_cast Finset.card_le_card (show agreement (foldMaskedRowsOne word r)
         (enc.interleave ι f) ⊆ agreement word (enc.interleave ι g) from by
           intro x hx
-          exact Finset.mem_filter.mpr ⟨Finset.mem_univ _, extension x hx⟩)
+          exact Finset.mem_filter.mpr ⟨Finset.mem_univ _, extension x (Finset.mem_filter.mp hx).2⟩)
     exact no g ((hc.mem_iff _ _).mpr oldclose) extension
   · rintro ⟨f, close, no⟩
     exact ⟨f, close, fun g _ extension => no ⟨g, extension⟩⟩
@@ -206,11 +209,11 @@ def BadFold (ι : K →+* E) (γ : ℝ)
   BadMCA ι γ word r ∨ BadFoldClaim ι γ word claim q r
 
 /-- The fold checker combines the certified MCA and claim-collision checkers. -/
-def checkBadFold (ι : K →+* E)
+def checkBadFold
     (before : ListDecoder (E := E) enc (lanes + 1)) (after : ListDecoder (E := E) enc lanes)
     (word : MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate)))
     (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E) (r : E) : Bool :=
-  checkBadMCA ι before after word r || checkBadFoldClaim before word claim q r
+  checkBadMCA before after word r || checkBadFoldClaim before word claim q r
 
 /-- Certified folded lists make the fold checker equivalent to its mathematical event. -/
 theorem checkBadFold_iff (ι : K →+* E) (γ L : ℝ)
@@ -218,7 +221,7 @@ theorem checkBadFold_iff (ι : K →+* E) (γ L : ℝ)
     (hc : before.Correct ι γ L) (hc' : after.Correct ι γ L)
     (word : MaskedWord E (lanes + 1) (2 ^ (vars + enc.rate)))
     (claim : Claim E ((lanes + 1) + vars)) (q : Quadratic E) (r : E) :
-    checkBadFold ι before after word claim q r = true ↔ BadFold ι γ word claim q r := by
+    checkBadFold before after word claim q r = true ↔ BadFold ι γ word claim q r := by
   simp only [checkBadFold, Bool.or_eq_true, checkBadMCA_iff ι γ L before after hc hc',
     checkBadFoldClaim_iff ι γ L before hc, BadFold]
 

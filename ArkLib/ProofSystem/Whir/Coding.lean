@@ -29,7 +29,8 @@ noncomputable def nearbyDecoder {K E : Type} [Semiring K] [Semiring E] [Fintype 
     [DecidableEq E] {vars : ℕ} (enc : Encoding K vars) (ι : K →+* E) (γ : ℝ)
     (lanes : ℕ) : ListDecoder (E := E) enc lanes := by
   classical
-  exact ⟨fun word => (Finset.univ.filter fun f => Close γ word (enc.interleave ι f)).toList⟩
+  exact ⟨fun word => (Finset.univ.filter fun f => Close γ word (enc.interleave ι f)).toList,
+    fun f => Vector.ofFn (enc.interleave ι f)⟩
 
 
 /-- Column proximity is the relative Hamming bound on whole columns. -/
@@ -235,7 +236,7 @@ theorem nearbyDecoder_correct {K E : Type} [Field K] [Field E] [DecidableEq E]
     (nearbyDecoder enc ι (radius enc sec) lanes).Correct ι
       (radius enc sec) (listBound enc sec) := by
   classical
-  refine ⟨fun _ => Finset.nodup_toList _, ?_, ?_⟩
+  refine ⟨fun _ => Finset.nodup_toList _, ?_, ?_, ?_⟩
   · intro word f
     simp only [nearbyDecoder, Finset.mem_toList, Finset.mem_filter, Finset.mem_univ, true_and]
   · intro word
@@ -271,5 +272,8 @@ theorem nearbyDecoder_correct {K E : Type} [Field K] [Field E] [DecidableEq E]
             ((Finset.mem_filter.mp hf).2).zeroFill⟩)
     rw [Finset.card_image_of_injective T (interleave_injective enc ι contract)] at hbound
     simpa only [nearbyDecoder, Finset.length_toList, T, listBound] using hbound
+  · intro f x
+    simp only [nearbyDecoder, Vector.getElem_ofFn]
+
 
 end Whir

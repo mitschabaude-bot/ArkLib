@@ -31,6 +31,8 @@ namespace Whir
 structure ListDecoder {K E : Type} {vars : ℕ} (enc : Encoding K vars) (lanes : ℕ) where
   /-- Candidate messages are ordered, so selection is a named deterministic operation. -/
   decode : MaskedWord E lanes (2 ^ (vars + enc.rate)) → List (Table E (lanes + vars))
+  /-- Materialize candidate encodings before comparing their columns. -/
+  encodeColumns : Table E (lanes + vars) → Vector (Cube lanes → E) (2 ^ (vars + enc.rate))
 
 /-- Exact list coverage, no duplicates, and the real Johnson cardinality bound. -/
 structure ListDecoder.Correct {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
@@ -42,12 +44,15 @@ structure ListDecoder.Correct {K E : Type} [Semiring K] [Semiring E] [DecidableE
   mem_iff : ∀ word f, f ∈ decoder.decode word ↔ Close γ word (enc.interleave ι f)
   /-- The list length is bounded without an interleaving row factor. -/
   length_le : ∀ word, ((decoder.decode word).length : ℝ) ≤ L
+  /-- Every materialized column equals the mathematical interleaved encoding. -/
+  encodeColumns_eq : ∀ f x, (decoder.encodeColumns f)[x.val] = enc.interleave ι f x
 
 /-- Filter a zero-filled decoder's output using an executable absolute agreement cutoff. -/
 def ListDecoder.ofZeroFill {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]
     {vars lanes : ℕ} {enc : Encoding K vars} (ι : K →+* E) (cutoff : ℕ)
     (decode : Word E lanes (2 ^ (vars + enc.rate)) → List (Table E (lanes + vars))) :
     ListDecoder (E := E) enc lanes where
+  encodeColumns f := Vector.ofFn (enc.interleave ι f)
   decode word := (decode (zeroFill word)).filter fun f =>
     decide (cutoff ≤ (agreement word (enc.interleave ι f)).card)
 
@@ -60,7 +65,7 @@ theorem ListDecoder.ofZeroFill_correct {K E : Type} [Semiring K] [Semiring E] [D
     (mem : ∀ word f, f ∈ decode word ↔ Close γ (fullWord word) (enc.interleave ι f))
     (length : ∀ word, ((decode word).length : ℝ) ≤ L) :
     (ListDecoder.ofZeroFill ι ⌈(1 - γ) * (2 ^ (vars + enc.rate) : ℕ)⌉₊ decode).Correct ι γ L := by
-  refine ⟨fun word => (nodup _).filter _, ?_, ?_⟩
+  refine ⟨fun word => (nodup _).filter _, ?_, ?_, ?_⟩
   · intro word f
     simp only [ListDecoder.ofZeroFill, List.mem_filter, decide_eq_true_eq, mem, ← close_iff_cutoff]
     exact ⟨fun h => h.2, fun h => ⟨Close.zeroFill h, h⟩⟩
@@ -69,6 +74,8 @@ theorem ListDecoder.ofZeroFill_correct {K E : Type} [Semiring K] [Semiring E] [D
         ⌈(1 - γ) * (2 ^ (vars + enc.rate) : ℕ)⌉₊ decode).decode word).length ≤
         (decode (zeroFill word)).length := List.length_filter_le _ _
     exact (Nat.cast_le.mpr h).trans (length (zeroFill word))
+  · intro f x
+    simp only [ListDecoder.ofZeroFill, Vector.getElem_ofFn]
 
 /-- Hiding columns only shrinks every certified decoder list. -/
 theorem ListDecoder.mem_mono {K E : Type} [Semiring K] [Semiring E] [DecidableEq E]

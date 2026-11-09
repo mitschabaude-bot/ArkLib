@@ -66,7 +66,7 @@ def foldSchema {K E : Type} [Field K] [Field E] [DecidableEq E]
     Whir.MaskLE small.1 large.1 ∧ small.2.1 = large.2.1
   Bad input r := input.2.2 = true ∧
     BadFold ι (radius enc sec.out) input.1 input.2.1.1 input.2.1.2 r
-  check input r := input.2.2 && checkBadFold ι (decoders (lanes + 1)) (decoders lanes)
+  check input r := input.2.2 && checkBadFold (decoders (lanes + 1)) (decoders lanes)
     input.1 input.2.1.1 input.2.1.2 r
   check_iff input r := by
     simp only [Bool.and_eq_true, checkBadFold_iff ι _ _ _ _ (correct _) (correct _)]

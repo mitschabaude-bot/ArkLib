@@ -68,9 +68,13 @@ private def closingPath (quadratic : ℚ) : (opening ℚ closingSchedule).tree.E
   ⟨(0 : ℚ), (fun u => if u 0 then 2 else 1), Fin.elim0, (0 : ℚ),
     ((1, fun _ => quadratic) : Quadratic ℚ), (2 : ℚ), PUnit.unit⟩
 
+/-- Ordered finite candidates with their materialized reference encodings. -/
+private def toyDecoder (vars lanes : ℕ) : ListDecoder (E := ℚ) (toyEncoding vars) lanes :=
+  ⟨fun _ => [0, 1], fun f => Vector.ofFn ((toyEncoding vars).interleave (RingHom.id ℚ) f)⟩
+
 /-- Ordered finite candidate lists for both levels and every fold row count. -/
 private def toyDecoders : DecoderFamily (E := ℚ) twoSchedule :=
-  (fun _ => ⟨fun _ => [0, 1]⟩, fun _ => ⟨fun _ => [0, 1]⟩)
+  (toyDecoder 1, toyDecoder 0)
 
 /-- A semantic polynomial model used only to index the retained knowledge predicate. -/
 private noncomputable def toySummand (_ : Nat) : Sumcheck.Spec.OracleStatement ℚ 1 2 () := 0
@@ -113,7 +117,7 @@ private def smoke : IO Unit := do
     (accepts (RingHom.id ℚ) closingSchedule (fullWord (fun _ _ => 0)) [⟨1, 3⟩] (closingPath 0))
   check "closing rejects a wrong transmitted quadratic coefficient"
     (!(accepts (RingHom.id ℚ) closingSchedule (fullWord (fun _ _ => 0)) [⟨1, 3⟩] (closingPath 1)))
-  let decoder : ListDecoder (E := ℚ) (toyEncoding 0) 1 := ⟨fun _ => [0, 1]⟩
+  let decoder := toyDecoder 0 1
   check "initial extractor selects the satisfying list member"
     (decide (initialExtractor decoder (RingHom.id ℚ) (fullWord (fun _ _ => 1)) [⟨1, 2⟩] = 1))
   check "initial extractor returns zero when no member satisfies the claim"
@@ -147,7 +151,7 @@ private def smoke : IO Unit := do
   let opening := openingExtractor (RingHom.id ℚ) twoSchedule
     (proximityFamily (RingHom.id ℚ) twoSchedule toySecurity)
     (openingState (RingHom.id ℚ) twoSchedule toySecurity (fullWord (fun _ _ => 1)) [⟨1, 4⟩]).holds
-    toyDecoders (fullWord (fun _ _ => 1)) [⟨1, 4⟩] ⟨fun _ => [0, 1]⟩
+    toyDecoders (fullWord (fun _ _ => 1)) [⟨1, 4⟩] (toyDecoder 1 1)
   check "full opening extraction executes the supplied decoder family"
     (decide ((show Table ℚ 2 from opening.extractWitness twoOnePath PUnit.unit) = 1))
   check "Sumcheck prefix equivalence executes its inverse after continuation"
