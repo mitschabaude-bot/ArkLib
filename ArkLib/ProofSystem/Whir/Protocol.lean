@@ -129,6 +129,18 @@ def nextClaims {K E : Type} [Semiring K] [CommRing E] {tail queries : ℕ}
   residual :: ⟨eqWeight z, answer⟩ ::
     List.ofFn (fun q => ⟨fun u => ι (enc.weight (xs q) u), folded (xs q)⟩)
 
+/-- Retain all boundary query weights before constructing their ordered consistency claims. -/
+def nextClaimsPrepared {K E : Type} [Semiring K] [CommRing E] {tail queries : ℕ}
+    (enc : Encoding K tail) (ι : K →+* E) (residual : Claim E tail)
+    (z : Fin tail → E) (answer : E) (xs : Fin queries → enc.Columns)
+    (folded : enc.Columns → E) : List (Claim E tail) :=
+  let weights := enc.queryWeights ι xs
+  residual :: ⟨eqWeight z, answer⟩ ::
+    List.ofFn (fun q => ⟨weights.weight q, folded (xs q)⟩)
+
+/-- Retained boundary weights preserve the exact ordered consistency claims. -/
+@[csimp] theorem nextClaims_code : @nextClaims = @nextClaimsPrepared := rfl
+
 /-- The verifier's transcript predicate, including the final plaintext evaluation check. -/
 def accepts {K E : Type} [Semiring K] [CommRing E] [DecidableEq E] (ι : K →+* E) :
     {n : ℕ} → (s : Schedule K n) → oracleMessage E s → List (Claim E n) →
