@@ -165,6 +165,56 @@ def Encoding.interleave {K E : Type} [Semiring K] [Semiring E] {vars lanes : ℕ
     Word E lanes (2 ^ (vars + enc.rate)) :=
   fun x u => enc.encode ι (fun v => f (Fin.addCases u v)) x
 
+/-- A prepared query weight retained as data before its Boolean coordinate lookups. -/
+structure QueryWeightCache (E : Type) (vars : ℕ) where
+  /-- The embedded encoding weight for one fixed query. -/
+  weight : Table E vars
+  /-- The source column whose encoding weight is retained. -/
+  column : ℕ
+
+/-- Build a query image before passing it to an opaque result consumer. -/
+@[noinline, nospecialize] def prepareQuery {A B C : Type}
+    (build : A → B) (read : B → C) (query : A) : C :=
+  read (build query)
+
+/-- Retain the encoding's query image before constructing its embedded weight function. -/
+@[macro_inline] def Encoding.queryWeightCache {K E : Type} [Semiring K] [Semiring E] {vars : ℕ}
+    (enc : Encoding K vars) (ι : K →+* E) (query : enc.Columns) : QueryWeightCache E vars :=
+  prepareQuery enc.weight (fun weight => ⟨fun u => ι (weight u), query.val⟩) query
+
+/-- The retained query weight is exactly the original embedded encoding weight. -/
+theorem Encoding.queryWeightCache_weight {K E : Type} [Semiring K] [Semiring E] {vars : ℕ}
+    (enc : Encoding K vars) (ι : K →+* E) (query : enc.Columns) :
+    (enc.queryWeightCache ι query).weight = fun u => ι (enc.weight query u) := rfl
+
+/-- A retained family of query weights for the final plaintext round. -/
+structure QueryWeightsCache (E : Type) (vars queries : ℕ) where
+  /-- The embedded encoding weight for each final query. -/
+  weight : Fin queries → Table E vars
+  /-- The number of prepared source queries. -/
+  count : ℕ
+
+/-- Embedded weights for the fixed queries of a final plaintext round. -/
+def Encoding.queryWeights {K E : Type} [Semiring K] [Semiring E] {vars queries : ℕ}
+    (enc : Encoding K vars) (ι : K →+* E) (xs : Fin queries → enc.Columns) :
+    QueryWeightsCache E vars queries :=
+  ⟨fun q u => ι (enc.weight (xs q) u), queries⟩
+
+/-- Prepare every query weight before retaining the lookup function as data. -/
+def Encoding.queryWeightsCached {K E : Type} [Semiring K] [Semiring E] {vars queries : ℕ}
+    (enc : Encoding K vars) (ι : K →+* E) (xs : Fin queries → enc.Columns) :
+    QueryWeightsCache E vars queries :=
+  prepareQuery (fun qs => Vector.ofFn fun q : Fin queries => enc.queryWeightCache ι (qs q))
+    (fun weights => ⟨fun q => weights[q].weight, queries⟩) xs
+
+/-- Retaining prepared weights preserves the complete family of final query tables. -/
+@[csimp] theorem Encoding.queryWeights_code :
+    @Encoding.queryWeights = @Encoding.queryWeightsCached := by
+  funext K E _ _ vars queries enc ι xs
+  apply congrArg (fun weights => QueryWeightsCache.mk weights queries)
+  funext q u
+  simp only [Fin.getElem_fin, Vector.getElem_ofFn, Encoding.queryWeightCache_weight]
+
 /-- Enumerate a binary subspace using the first `i` vectors of an ordered 64-vector basis. -/
 def binarySpanValue {K : Type} [AddCommMonoid K] (basis : Fin 64 → K) (i : Fin 64)
     (u : Cube i.val) : K :=

@@ -121,10 +121,11 @@ def lastExtractor {K E : Type} [Semiring K] [CommRing E] [DecidableEq E]
     ⟨plaintextProximityState enc nearby word claim candidate active,
       (fun _ => listLift candidates
         (castTable (Nat.zero_add tail)) claim.Holds candidate), fun xs =>
+      let weights := enc.queryWeights ι xs
       let claims : List (Claim E tail) :=
         ⟨castTable (Nat.zero_add tail) claim.weight, claim.value⟩ ::
           List.ofFn (fun q : Fin queries =>
-            ⟨fun u => ι (enc.weight (xs q) u), zeroFill word (xs q) Fin.elim0⟩)
+            ⟨weights.weight q, zeroFill word (xs q) Fin.elim0⟩)
       ⟨plaintextState candidate claims (active && queriesKnown word xs), (fun _ => PUnit.unit),
         finalBatchExtractor candidate claims (active && queriesKnown word xs)⟩⟩
 

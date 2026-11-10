@@ -59,9 +59,10 @@ def lastAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
       (lastExtractor lanes queries enc ι
         (fun w f => Close (radius enc sec.out) w (enc.interleave ι f)) decoder word claim active) :=
   fun candidate => ⟨PUnit.unit, ⟨fun _ impossible _ => Bool.noConfusion impossible, fun xs =>
+    let weights := enc.queryWeights ι xs
     let pre : PlaintextPrefix E tail (2 ^ (tail + enc.rate)) queries :=
       ⟨⟨candidate, [⟨castTable (Nat.zero_add tail) claim.weight, claim.value⟩],
-        (fun q u => ι (enc.weight (xs q) u)), xs⟩, word⟩
+        (fun q => weights.weight q), xs⟩, word⟩
     ⟨⟨pre, rfl⟩, ⟨fun r _ escape =>
       ⟨(Bool.and_eq_true_iff.mp escape.choose_spec.2.1).2,
         finalBatch_escape_subset_bad candidate pre.claims (active && pre.known) r escape⟩,
