@@ -65,7 +65,7 @@ def openingAnnotation {K E : Type} [Field K] [Field E]
         exact ⟨rfl, initial_batch_escape_subset_bad enc ι valid.2.2.1 valid.2.2.2 sec.out valid.2.1
           decoder correct word claims r escape⟩
       · exact (levelAnnotation ι (.last lanes tail enc queries) sec decoders familyCorrect
-          valid (mapMasked ι word) claims true).2.2
+          valid (mapMasked ι word) claims true count length).2.2
   | more lanes enc queries rest =>
       refine ⟨⟨mapMasked ι word, ⟨claims, length⟩, true⟩, ⟨?_, ?_⟩⟩
       · intro r _ escape
@@ -74,7 +74,7 @@ def openingAnnotation {K E : Type} [Field K] [Field E]
           initial_batch_escape_subset_bad enc ι valid.2.2.1 valid.2.2.2.1 sec.out.1 valid.2.1
             decoder correct word claims r escape
       · exact (levelAnnotation ι (.more lanes enc queries rest) sec decoders familyCorrect
-          valid (mapMasked ι word) claims true).2.2
+          valid (mapMasked ι word) claims true count length).2.2
 
 /-- The opening annotation uses the certificate's exact security-indexed input state. -/
 def fixedOpeningAnnotation {K E : Type} [Field K] [Field E]

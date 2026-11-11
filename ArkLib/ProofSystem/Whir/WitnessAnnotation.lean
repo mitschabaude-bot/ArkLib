@@ -181,11 +181,12 @@ def levelAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
     (sec : Erased (SecurityParameters s)) → (decoders : DecoderFamily (E := E) s) →
     (correct : DecoderFamily.Correct ι s decoders sec.out) → (valid : s.Valid ι sec.out) →
     (word : oracleMessage E s) → (claims : List (Claim E n)) → (active : Bool) →
-    BadAnnotation (openingPublicCoin s)
-      (openingSchemas ι s sec decoders correct valid claims.length)
+    (count : ℕ) → claims.length ≤ count → BadAnnotation (openingPublicCoin s)
+      (openingSchemas ι s sec decoders correct valid count)
       (levelExtractor ι s (proximityFamily ι s sec.out) decoders word claims active)
-  | _, .last lanes tail enc queries, sec, decoders, correct, valid, word, claims, active =>
-      ⟨⟨word, ⟨claims, le_rfl⟩, active⟩, ⟨fun r _ escape => ⟨escape.choose_spec.2.1,
+  | _, .last lanes tail enc queries, sec, decoders, correct, valid, word, claims, active,
+      count, length =>
+      ⟨⟨word, ⟨claims, length⟩, active⟩, ⟨fun r _ escape => ⟨escape.choose_spec.2.1,
         batch_escape_subset_bad ι _ _ _ (correct lanes) word claims active r
           ⟨escape.choose, escape.choose_spec.2, escape.choose_spec.1⟩⟩,
         fun r => foldAnnotation enc ι sec valid.2.2.2 valid.2.1 decoders correct _ _
@@ -193,8 +194,9 @@ def levelAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
             (fun w f => Close (radius enc sec.out) w (enc.interleave ι f)) (decoders 0))
           (lastAnnotation lanes queries enc ι sec (decoders 0)) lanes word (batch claims r)
           active⟩⟩
-  | _, .more lanes enc queries rest, sec, decoders, correct, valid, word, claims, active =>
-      ⟨⟨word, ⟨claims, le_rfl⟩, active⟩, ⟨fun r _ escape => ⟨escape.choose_spec.2.1,
+  | _, .more lanes enc queries rest, sec, decoders, correct, valid, word, claims, active,
+      count, length =>
+      ⟨⟨word, ⟨claims, length⟩, active⟩, ⟨fun r _ escape => ⟨escape.choose_spec.2.1,
         by simpa only [Erased.out_mk] using
           batch_escape_subset_bad ι _ _ _ (correct.1 lanes) word claims active r
             ⟨escape.choose, escape.choose_spec.2, escape.choose_spec.1⟩⟩,
@@ -213,11 +215,11 @@ def levelAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
                 rest (Erased.mk sec.out.2) decoders.2
                 (by simpa only [Erased.out_mk] using correct.2)
                 (by simpa only [Erased.out_mk] using valid.2.2.2.2)
-                (fun word claims active length => by
-                  simpa only [length] using
-                    levelAnnotation ι rest (Erased.mk sec.out.2) decoders.2
+                (fun word claims active length =>
+                  levelAnnotation ι rest (Erased.mk sec.out.2) decoders.2
                       (by simpa only [Erased.out_mk] using correct.2)
-                      (by simpa only [Erased.out_mk] using valid.2.2.2.2) word claims active))
+                      (by simpa only [Erased.out_mk] using valid.2.2.2.2) word claims active
+                      (queries + 2) (Nat.le_of_eq length)))
               lanes word (batch claims r) active using 1
           congr 3 <;> rw [Erased.out_mk]⟩⟩
 
