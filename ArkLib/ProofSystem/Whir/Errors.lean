@@ -13,9 +13,12 @@ public import ArkLib.Data.CodingTheory.ProximityGenerator.Interleaving
 /-!
 # Annex B local errors and the corresponding fresh-challenge schedule
 
-The Johnson list bound uses the dimension rate. The MCA numerator uses the reduced rate
-`(dimension - 1) / blockLength` and its adjusted slack at the same radius. These are distinct
-parameters. `challenges` describes the samplers and errors, without asserting a knowledge bound.
+Every Johnson parameter is measured against the reduced rate `ρ⁻ = (dimension - 1) / blockLength`:
+radius `1 - √ρ⁻ - slack`, list bound `1 / (2 · slack · √ρ⁻)` and MCA slack `slack`. Annex B writes
+its Johnson theorems at the dimension rate `dimension / blockLength`; both are instances of the
+pairwise-agreement counting bound `Code.card_le_of_pairwise_agree_le`, and distinct codewords of a
+Reed–Solomon code agree in at most `dimension - 1` positions. `challenges` describes the samplers
+and errors, without asserting a knowledge bound.
 -/
 
 @[expose] public section
@@ -26,39 +29,34 @@ namespace Whir
 
 /-- The Johnson slack at one encoded level. -/
 structure LevelSecurity where
-  /-- Slack relative to the square root of the dimension rate. -/
+  /-- Slack below the reduced-rate Johnson radius `1 - √ρ⁻`. -/
   slack : ℝ
 
-/-- The dimension rate of the code. -/
-noncomputable def dimensionRate {K : Type} {vars : ℕ} (enc : Encoding K vars) : ℝ :=
-  (2 ^ vars : ℝ) / 2 ^ (vars + enc.rate)
+/-- The reduced rate `(2^vars - 1) / 2^(vars + rate)`, positive for `vars > 0`. -/
+noncomputable def reducedRate {K : Type} {vars : ℕ} (enc : Encoding K vars) : ℝ :=
+  ((2 ^ vars - 1 : ℕ) : ℝ) / 2 ^ (vars + enc.rate)
 
-/-- The analysis radius, using the dimension rate as in Annex B's RBR theorem. -/
+/-- The analysis radius `1 - √ρ⁻ - slack`. -/
 noncomputable def radius {K : Type} {vars : ℕ} (enc : Encoding K vars)
     (sec : LevelSecurity) : ℝ :=
-  1 - Real.sqrt (dimensionRate enc) - sec.slack
+  1 - Real.sqrt (reducedRate enc) - sec.slack
 
-/-- The real Johnson list bound; rounding it up would weaken Annex B's constants. -/
+/-- The real Johnson list bound `1 / (2 · slack · √ρ⁻)`. -/
 noncomputable def listBound {K : Type} {vars : ℕ} (enc : Encoding K vars)
     (sec : LevelSecurity) : ℝ :=
-  1 / (2 * sec.slack * Real.sqrt (dimensionRate enc))
+  1 / (2 * sec.slack * Real.sqrt (reducedRate enc))
 
 /-- The Johnson regime and the binary encoder's parameter range. -/
 def LevelSecurity.Valid {K : Type} {vars : ℕ} (sec : LevelSecurity)
     (enc : Encoding K vars) : Prop :=
   0 < vars ∧ 0 < enc.rate ∧ vars + enc.rate ≤ 64 ∧
-    0 < sec.slack ∧ sec.slack < 1 - Real.sqrt (dimensionRate enc)
+    0 < sec.slack ∧ sec.slack < 1 - Real.sqrt (reducedRate enc)
 
-/-- The slightly reduced rate used by the MCA theorem, which is positive only for `vars > 0`. -/
-noncomputable def reducedRate {K : Type} {vars : ℕ} (enc : Encoding K vars) : ℝ :=
-  ((2 ^ vars - 1 : ℕ) : ℝ) / 2 ^ (vars + enc.rate)
-
-/-- Annex B's MCA numerator, at the same radius as its dimension-rate Johnson list. -/
+/-- Annex B's MCA numerator at the level's radius, with Johnson slack `η = slack`. -/
 noncomputable def mcaNumerator {K : Type} {vars : ℕ} (enc : Encoding K vars)
     (sec : LevelSecurity) : ℝ :=
   let ρ := reducedRate enc
-  let η := 1 - Real.sqrt ρ - radius enc sec
-  let θ : ℝ := max ⌈Real.sqrt ρ / η⌉₊ 3
+  let θ : ℝ := max ⌈Real.sqrt ρ / sec.slack⌉₊ 3
   ((2 * (θ + 1 / 2) ^ 5 + 3 * (θ + 1 / 2) * radius enc sec * ρ) /
     (3 * (Real.sqrt ρ) ^ 3)) * 2 ^ (vars + enc.rate) +
     (θ + 1 / 2) / Real.sqrt ρ

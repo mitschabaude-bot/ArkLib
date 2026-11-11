@@ -244,7 +244,7 @@ theorem nearbyDecoder_correct {K E : Type} [Field K] [Field E] [DecidableEq E]
     let C := (ReedSolomon.code (enc.extendedDomain ι) (2 ^ vars))^⋈(Cube lanes)
     have pairwise : ∀ c ∈ (C : Set (enc.Columns → Cube lanes → E)),
         ∀ c' ∈ (C : Set (enc.Columns → Cube lanes → E)), c ≠ c' →
-        (Code.agree c c' : ℝ) ≤ Real.sqrt (dimensionRate enc) ^ 2 *
+        (Code.agree c c' : ℝ) ≤ Real.sqrt (reducedRate enc) ^ 2 *
           Fintype.card enc.Columns := by
       intro c hc c' hc' hne
       obtain ⟨x, hx⟩ := Function.ne_iff.mp hne
@@ -257,12 +257,13 @@ theorem nearbyDecoder_correct {K E : Type} [Field K] [Field E] [DecidableEq E]
         simp only [Finset.mem_filter, Finset.mem_univ, true_and] at hx ⊢
         exact congrFun hx u
       have hlt := ReedSolomon.agree_lt_of_mem_code (hc u) (hc' u) row_ne
-      have hbound : (Code.agree c c' : ℝ) ≤ 2 ^ vars := by exact_mod_cast hle.trans hlt.le
-      rw [Real.sq_sqrt (dimensionRate_pos enc).le]
-      simpa only [dimensionRate, Fintype.card_fin, Nat.cast_pow, Nat.cast_ofNat,
+      have hbound : (Code.agree c c' : ℝ) ≤ ((2 ^ vars - 1 : ℕ) : ℝ) := by
+        exact_mod_cast Nat.le_sub_one_of_lt (hle.trans_lt hlt)
+      rw [Real.sq_sqrt (reducedRate_pos enc valid.1).le]
+      simpa only [reducedRate, Fintype.card_fin, Nat.cast_pow, Nat.cast_ofNat,
         div_mul_cancel₀ _ (by positivity : (2 ^ (vars + enc.rate) : ℝ) ≠ 0)] using hbound
     have hbound := Code.card_le_of_pairwise_agree_le
-      (Real.sqrt_pos.mpr (dimensionRate_pos enc)) valid.2.2.2.1 pairwise
+      (Real.sqrt_pos.mpr (reducedRate_pos enc valid.1)) valid.2.2.2.1 pairwise
       (zeroFill word) (T.image (enc.interleave ι)) (by
         rintro c hc
         obtain ⟨f, hf, rfl⟩ := Finset.mem_image.mp hc
