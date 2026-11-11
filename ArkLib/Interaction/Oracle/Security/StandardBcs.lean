@@ -535,15 +535,19 @@ theorem prefixConsistent_of_escape {Com : Type} [DecidableEq Com] {protocol : Pr
           simp only [prefixConsistent, Bool.and_eq_true, decide_eq_true_eq]
           exact ⟨escape.1, ih (extractor path.1).2.2 path.2 messages _ _ r _ hs escape.2⟩
 
-/-- A falsifiable algebraic relation authenticates masked prefixes and classifies query keys. -/
+/-- A falsifiable relation authenticates masked prefixes and classifies query keys. A query key's
+event is monotone only on complete prefixes, whose committed words reveal every column. -/
 structure WitnessCIRelation {Statement Com : Type} [DecidableEq Com]
     {protocol : Statement → Protocol}
     (coin : (statement : Statement) → PublicCoin (protocol statement)) where
   /-- Executable challenge equality is supplied for every typed compiled key. -/
   challengeEq : (key : Key Statement PUnit (fun s => compiledCoin Com (coin s))) →
     DecidableEq key.Challenge
-  /-- Query keys retain the extractor-relative escape relation. -/
+  /-- Query keys enter the witness game only on complete prefixes. -/
   isQuery : Key Statement PUnit (fun s => compiledCoin Com (coin s)) → Bool
+  /-- Every committed word read by this key's event reveals all of its columns. -/
+  complete : (key : Key Statement PUnit (fun s => compiledCoin Com (coin s))) →
+    PrefixMessages (coin key.1) key.2 → Bool
   /-- The Merkle authentication carrier for this key's strict prefix. -/
   Authentication : Key Statement PUnit (fun s => compiledCoin Com (coin s)) → Type
   /-- Authentication checks the revealed columns against the commitments encoded in the key. -/
@@ -552,7 +556,7 @@ structure WitnessCIRelation {Statement Com : Type} [DecidableEq Com]
   /-- Hiding columns retains their known values throughout the strict prefix. -/
   MaskLE : (key : Key Statement PUnit (fun s => compiledCoin Com (coin s))) →
     PrefixMessages (coin key.1) key.2 → PrefixMessages (coin key.1) key.2 → Prop
-  /-- The mathematical algebraic bad event depends only on a masked prefix and target answer. -/
+  /-- The mathematical bad event depends only on a masked prefix and target answer. -/
   Bad : (key : Key Statement PUnit (fun s => compiledCoin Com (coin s))) →
     PrefixMessages (coin key.1) key.2 → key.Challenge → Prop
   /-- The bad-event checker is executable and reads no extractor. -/
@@ -560,16 +564,16 @@ structure WitnessCIRelation {Statement Com : Type} [DecidableEq Com]
     PrefixMessages (coin key.1) key.2 → key.Challenge → Bool
   /-- The executable checker decides the mathematical bad event. -/
   check_iff : ∀ key words α, check key words α = true ↔ Bad key words α
-  /-- Hiding columns cannot create an algebraic bad event. -/
+  /-- Hiding columns cannot create a bad event at an algebraic key or a complete query prefix. -/
   monotone : ∀ key small large, MaskLE key small large →
-    ∀ α, Bad key small α → Bad key large α
-  /-- The existing per-word algebraic error, without a mask or rate penalty. -/
+    (isQuery key = true → complete key small = true) → ∀ α, Bad key small α → Bad key large α
+  /-- The existing per-word error, without a mask or rate penalty. -/
   error : Key Statement PUnit (fun s => compiledCoin Com (coin s)) → Erased ℝ≥0∞
   /-- Each fixed masked prefix has its original uniform challenge bound. -/
-  bad_bound : ∀ key words, isQuery key = false →
+  bad_bound : ∀ key words,
     Pr{let α ← ($ᵗ key.Challenge : ProbComp key.Challenge)}[Bad key words α] ≤ (error key).out
 
-/-- A knowledge certificate whose algebraic escapes lie in authenticated monotone bad events. -/
+/-- A knowledge certificate whose local escapes lie in the authenticated bad events. -/
 structure WitnessKnowledgeCertificate {Statement Com : Type} [DecidableEq Com]
     {protocol : Statement → Protocol}
     (coin : (statement : Statement) → PublicCoin (protocol statement))
@@ -577,12 +581,11 @@ structure WitnessKnowledgeCertificate {Statement Com : Type} [DecidableEq Com]
     (certificate : (s : Statement) → KnowledgeCertificate
       (protocol s).tree (protocol s).roles (state s))
     extends WitnessCIRelation (Com := Com) coin where
-  /-- Every algebraic local escape is contained in the prefix's bad event on the same table. -/
+  /-- Every local escape is contained in the prefix's bad event on the same table. -/
   escape_subset : ∀ s (path : (compile Com (coin s)).tree.ExecutionPath)
     (messages : ExtractedMessages (coin s) path)
     (table : PrefixTable PUnit (compiledCoin Com (coin s))) r selected,
     selectedPrefix (coin s) path messages r = some selected →
-    isQuery ⟨s, selected.1⟩ = false →
     escapeAt (coin s) (certificate s).extractor path messages table r →
     Bad ⟨s, selected.1⟩ selected.2 (table selected.1)
 
@@ -594,7 +597,8 @@ abbrev WitnessCIOutput {Statement Com : Type} [DecidableEq Com]
   (key : Key Statement PUnit (fun s => compiledCoin Com (coin s))) ×
     PrefixMessages (coin key.1) key.2 × relation.Authentication key
 
-/-- Check the authenticated masked witness and earlier-challenge consistency at one compiled key. -/
+/-- Check the authenticated masked witness and earlier-challenge consistency at one compiled key;
+a query key additionally needs a complete prefix. -/
 def witnessCheck {Statement Com : Type} [DecidableEq Com]
     {protocol : Statement → Protocol} {coin : (s : Statement) → PublicCoin (protocol s)}
     (relation : WitnessCIRelation (Com := Com) coin)
@@ -602,7 +606,7 @@ def witnessCheck {Statement Com : Type} [DecidableEq Com]
     (output : Option (WitnessCIOutput relation)) : Bool :=
   match output with
     | none => false
-    | some ⟨key, words, auth⟩ => !relation.isQuery key &&
+    | some ⟨key, words, auth⟩ => (!relation.isQuery key || relation.complete key words) &&
         prefixConsistent (coin key.1) key.2 words (Table.fibre h key.1)
           (fun pre => relation.challengeEq ⟨key.1, pre⟩) &&
         relation.authenticate key words auth && relation.check key words (h key)
@@ -636,7 +640,7 @@ def reductionAdversary {Statement Com Openings Coins : Type} [DecidableEq Com]
   (selectedPrefix (coin (A c).1) (A c).2.1 (ext c) r).map fun ⟨pre, words⟩ =>
     ⟨⟨(A c).1, pre⟩, words, auth c pre⟩
 
-/-- Residual extractor-relative CI is restricted to keys classified as query rounds. -/
+/-- Residual extractor-relative CI is restricted to query keys with an incomplete prefix. -/
 def QueryEscape {Statement Com Openings Coins : Type} [DecidableEq Com]
     {protocol : Statement → Protocol} {coin : (s : Statement) → PublicCoin (protocol s)}
     (relation : WitnessCIRelation (Com := Com) coin)
@@ -647,11 +651,12 @@ def QueryEscape {Statement Com Openings Coins : Type} [DecidableEq Com]
     (ext : (c : Coins) → ExtractedMessages (coin (A c).1) (A c).2.1)
     (h : Table Statement PUnit (fun s => compiledCoin Com (coin s))) (r : ℕ) (c : Coins) : Prop :=
   (∃ selected, selectedPrefix (coin (A c).1) (A c).2.1 (ext c) r = some selected ∧
-    relation.isQuery ⟨(A c).1, selected.1⟩ = true) ∧
+    relation.isQuery ⟨(A c).1, selected.1⟩ = true ∧
+    relation.complete ⟨(A c).1, selected.1⟩ selected.2 = false) ∧
   escapeAt (coin (A c).1) (certificate (A c).1).extractor (A c).2.1 (ext c)
     (Table.fibre h (A c).1) r
 
-/-- Only query-round escapes contribute to the extractor-relative residual term. -/
+/-- Only query escapes on incomplete prefixes contribute to the extractor-relative residual. -/
 noncomputable def queryRel {Statement Com Openings Coins : Type} [DecidableEq Com]
     [SampleableType Coins] {protocol : Statement → Protocol}
     {coin : (s : Statement) → PublicCoin (protocol s)}
@@ -690,7 +695,8 @@ variable {Statement Com Openings Coins : Type} [DecidableEq Com] [SampleableType
     (count : ℕ) (bound : ChallengeBound (Com := Com) coin count)
 
 include transfer authenticated bound in
-/-- Accepted extraction failure lies in disagreement, authenticated algebraic CI, or query CI. -/
+/-- Accepted extraction failure lies in disagreement, the authenticated witness game, or a query
+escape on an incomplete prefix. -/
 theorem knowledgeSoundness_witness_union :
     Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
       verify coin h accept (A c) ∧ ¬ (state (A c).1).holds
@@ -698,13 +704,8 @@ theorem knowledgeSoundness_witness_union :
           c)] ≤
     Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
       Disagree c ∨ (∃ r ∈ Finset.range count,
-        ∃ output, reductionAdversary refinement.toWitnessCIRelation A ext auth r c = some output ∧
-          refinement.isQuery output.1 = false ∧
-          prefixConsistent (coin output.1.1) output.1.2 output.2.1
-            (Table.fibre h output.1.1)
-            (fun pre => refinement.challengeEq ⟨output.1.1, pre⟩) = true ∧
-          refinement.authenticate output.1 output.2.1 output.2.2 = true ∧
-          refinement.Bad output.1 output.2.1 (h output.1)) ∨
+        witnessCheck refinement.toWitnessCIRelation h
+          (reductionAdversary refinement.toWitnessCIRelation A ext auth r c) = true) ∨
       ∃ r ∈ Finset.range count,
         QueryEscape refinement.toWitnessCIRelation state certificate A ext h r c] := by
   apply prEvent_mono
@@ -716,19 +717,26 @@ theorem knowledgeSoundness_witness_union :
     · exact Or.inl hd
     obtain ⟨selected, hs⟩ := selectedPrefix_some_of_escape (coin (A c).1)
       (certificate (A c).1).extractor (A c).2.1 (ext c) _ r escape
-    cases hq : refinement.isQuery ⟨(A c).1, selected.1⟩ with
-    | true => exact Or.inr (Or.inr ⟨r, hr, ⟨⟨selected, hs, hq⟩, escape⟩⟩)
-    | false =>
-        refine Or.inr (Or.inl ⟨r, hr, ⟨⟨(A c).1, selected.1⟩, selected.2, auth c selected.1⟩,
-          ?_, hq, ?_, authenticated c r selected hs, ?_⟩)
-        · simp only [reductionAdversary, hs, Option.map_some]
-        · exact prefixConsistent_of_escape (coin (A c).1) (certificate (A c).1).extractor
-            (A c).2.1 (ext c) _ (fun pre => refinement.challengeEq ⟨(A c).1, pre⟩)
-            r selected hs escape
-        · exact refinement.escape_subset _ _ _ _ r selected hs hq escape
+    by_cases residual : refinement.isQuery ⟨(A c).1, selected.1⟩ = true ∧
+        refinement.complete ⟨(A c).1, selected.1⟩ selected.2 = false
+    · exact Or.inr (Or.inr ⟨r, hr, ⟨⟨selected, hs, residual⟩, escape⟩⟩)
+    · have admitted : (!refinement.isQuery ⟨(A c).1, selected.1⟩ ||
+          refinement.complete ⟨(A c).1, selected.1⟩ selected.2) = true := by
+        cases hq : refinement.isQuery ⟨(A c).1, selected.1⟩ <;>
+          cases hc : refinement.complete ⟨(A c).1, selected.1⟩ selected.2 <;>
+          simp_all
+      refine Or.inr (Or.inl ⟨r, hr, ?_⟩)
+      have consistent := prefixConsistent_of_escape (coin (A c).1)
+        (certificate (A c).1).extractor (A c).2.1 (ext c) _
+        (fun pre => refinement.challengeEq ⟨(A c).1, pre⟩) r selected hs escape
+      have bad := refinement.escape_subset _ _ _ _ r selected hs escape
+      simp only [reductionAdversary, hs, Option.map_some, witnessCheck, admitted, consistent,
+        authenticated c r selected hs, Bool.true_and, refinement.check_iff]
+      exact bad
 
 include transfer authenticated bound in
-/-- The rank sum has no algebraic mask penalty and leaves only query CI extractor-relative. -/
+/-- The rank sum has no algebraic mask penalty and leaves only incomplete query escapes
+extractor-relative. -/
 theorem knowledgeSoundness_witness :
     Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[
       verify coin h accept (A c) ∧ ¬ (state (A c).1).holds
@@ -739,26 +747,12 @@ theorem knowledgeSoundness_witness :
         (reductionAdversary refinement.toWitnessCIRelation A ext auth r)) +
       ∑ r ∈ Finset.range count,
         queryRel refinement.toWitnessCIRelation state certificate A ext h r := by
-  let algebraic := fun r c => ∃ output,
-    reductionAdversary refinement.toWitnessCIRelation A ext auth r c = some output ∧
-      refinement.isQuery output.1 = false ∧
-      prefixConsistent (coin output.1.1) output.1.2 output.2.1
-        (Table.fibre h output.1.1)
-        (fun pre => refinement.challengeEq ⟨output.1.1, pre⟩) = true ∧
-      refinement.authenticate output.1 output.2.1 output.2.2 = true ∧
-      refinement.Bad output.1 output.2.1 (h output.1)
-  have game (r : ℕ) : Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[algebraic r c] =
+  let won := fun r c => witnessCheck refinement.toWitnessCIRelation h
+    (reductionAdversary refinement.toWitnessCIRelation A ext auth r c) = true
+  have game (r : ℕ) : Pr{let c ← ($ᵗ Coins : ProbComp Coins)}[won r c] =
       witnessCI refinement.toWitnessCIRelation h
         (reductionAdversary refinement.toWitnessCIRelation A ext auth r) := by
-    simp only [witnessCI, witnessCIGame, witnessCheck, bind_pure_comp, prEvent_map]
-    apply prEvent_congr
-    intro c
-    cases he : reductionAdversary refinement.toWitnessCIRelation A ext auth r c with
-    | none => simp [algebraic, he]
-    | some output =>
-        simp only [algebraic, he, Option.some.injEq, Bool.and_eq_true,
-          Bool.not_eq_true', refinement.check_iff, and_assoc]
-        exact ⟨fun ⟨_, heq, rest⟩ => heq ▸ rest, fun rest => ⟨output, rfl, rest⟩⟩
+    simp only [won, witnessCI, witnessCIGame, bind_pure_comp, prEvent_map]
   refine (knowledgeSoundness_witness_union coin state certificate refinement A ext auth h
     accept terminalWitness Disagree transfer authenticated count bound).trans ?_
   refine (prEvent_or_le _ _ _).trans ?_
@@ -767,7 +761,7 @@ theorem knowledgeSoundness_witness :
   apply add_le_add
   · apply add_le_add le_rfl
     simpa only [game] using
-      prEvent_exists_finset_le (Finset.range count) ($ᵗ Coins : ProbComp Coins) algebraic
+      prEvent_exists_finset_le (Finset.range count) ($ᵗ Coins : ProbComp Coins) won
   · exact prEvent_exists_finset_le (Finset.range count) ($ᵗ Coins : ProbComp Coins) _
 
 end WitnessDecomposition

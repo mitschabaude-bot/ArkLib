@@ -16,14 +16,17 @@ open Interaction.Oracle.Security.StateRestoration
 
 namespace Interaction.Oracle.Security.StandardBcs
 
-/-- A local round has an executable bad relation on ordered masked inputs and its uniform bound. -/
+/-- A local round has an executable bad relation on ordered masked inputs and its uniform bound.
+A query round's event is monotone only on complete inputs, which reveal every committed column. -/
 structure BadSchema (Challenge : Type) [SampleableType Challenge] where
   /-- The masked data preceding this challenge. -/
   Input : Type
   /-- Challenge equality used by prefix consistency. -/
   equality : DecidableEq Challenge
-  /-- Query rounds retain their extractor-relative residual. -/
+  /-- Query rounds enter the witness game only on complete inputs. -/
   isQuery : Bool
+  /-- Every committed word read by a query round's event reveals all of its columns. -/
+  complete : Input → Bool := fun _ => true
   /-- Hiding order on this round's masked input. -/
   MaskLE : Input → Input → Prop
   /-- The mathematical bad event. -/
@@ -32,12 +35,13 @@ structure BadSchema (Challenge : Type) [SampleableType Challenge] where
   check : Input → Challenge → Bool
   /-- The checker is exact. -/
   check_iff : ∀ input α, check input α = true ↔ Bad input α
-  /-- Revealing consistent columns preserves badness. -/
-  monotone : ∀ small large, MaskLE small large → ∀ α, Bad small α → Bad large α
-  /-- The local algebraic error. -/
+  /-- Revealing consistent columns preserves badness, at a query round from a complete input. -/
+  monotone : ∀ small large, MaskLE small large → (isQuery = true → complete small = true) →
+    ∀ α, Bad small α → Bad large α
+  /-- The local error. -/
   error : Erased ENNReal
   /-- Each fixed masked input has the stated uniform bound. -/
-  bad_bound : ∀ input, isQuery = false → Pr{let α ←$ᵗ Challenge}[Bad input α] ≤ error.out
+  bad_bound : ∀ input, Pr{let α ←$ᵗ Challenge}[Bad input α] ≤ error.out
 
 /-- Round schemas follow public syntax and are independent of extracted oracle messages. -/
 def BadSchemas {protocol : Protocol} (coin : PublicCoin protocol) : Type 1 :=
@@ -56,7 +60,7 @@ def BadAnnotation : {protocol : Protocol} → (coin : PublicCoin protocol) → B
       (word : Messages) → BadAnnotation next schemas (extractor word).2.2
   | _, @PublicCoin.challenge _ _ _ next, schemas, _, extractor =>
       (input : schemas.1.Input) ×
-        PProd (∀ α, schemas.1.isQuery = false → extractor.badChallenge α → schemas.1.Bad input α)
+        PProd (∀ α, extractor.badChallenge α → schemas.1.Bad input α)
           ((α : _) → BadAnnotation next schemas.2 (extractor α).2.2)
 
 /-- The schema at a compiled key reads public syntax but no extracted words. -/
@@ -96,7 +100,6 @@ theorem annotated_escape_subset {Com : Type} [DecidableEq Com] {protocol : Proto
     (path : (compile Com coin).tree.ExecutionPath) (messages : ExtractedMessages coin path)
     (table : PrefixTable PUnit (compiledCoin Com coin)) (r : ℕ) selected
     (hs : selectedPrefix coin path messages r = some selected)
-    (hq : (schemaAt coin schemas selected.1).isQuery = false)
     (escape : escapeAt coin extractor path messages table r) :
     (schemaAt coin schemas selected.1).Bad
       (annotatedInput coin schemas extractor annotation selected.1 selected.2)
@@ -108,13 +111,13 @@ theorem annotated_escape_subset {Com : Type} [DecidableEq Com] {protocol : Proto
       obtain ⟨⟨pre, words⟩, hs, heq⟩ := hs
       cases heq
       exact ih path.1 (schemas path.1) (extractor path.1).2.2 (annotation path.1)
-        path.2 messages _ r _ hs hq escape
+        path.2 messages _ r _ hs escape
   | oracle next ih =>
       simp only [selectedPrefix, Option.map_eq_some_iff] at hs
       obtain ⟨⟨pre, words⟩, hs, heq⟩ := hs
       cases heq
       exact ih schemas (extractor (messages (.inl ()))).2.2 (annotation (messages (.inl ())))
-        path.2 (fun i => messages (.inr i)) _ r _ hs hq escape
+        path.2 (fun i => messages (.inr i)) _ r _ hs escape
   | challenge next ih =>
       cases r with
       | zero =>
@@ -122,13 +125,13 @@ theorem annotated_escape_subset {Com : Type} [DecidableEq Com] {protocol : Proto
           cases hs
           change schemas.1.Bad annotation.1 (table (.inl PUnit.unit))
           rw [← escape.1]
-          exact annotation.2.1 path.1 hq escape.2
+          exact annotation.2.1 path.1 escape.2
       | succ r =>
           simp only [selectedPrefix, Option.map_eq_some_iff] at hs
           obtain ⟨⟨pre, words⟩, hs, heq⟩ := hs
           cases heq
           exact ih schemas.2 (extractor path.1).2.2 (annotation.2.2 path.1)
-            path.2 messages _ r _ hs hq escape.2
+            path.2 messages _ r _ hs escape.2
 
 /-- Parse executable local inputs without carrying an analytical challenge schedule. -/
 def BadAnnotation.relation {Statement Com : Type} [DecidableEq Com]
@@ -143,6 +146,8 @@ def BadAnnotation.relation {Statement Com : Type} [DecidableEq Com]
     WitnessCIRelation (Com := Com) coin where
   challengeEq key := (schemaAt (coin key.1) (schemas key.1) key.2).equality
   isQuery key := (schemaAt (coin key.1) (schemas key.1) key.2).isQuery
+  complete key words := (schemaAt (coin key.1) (schemas key.1) key.2).complete
+    (annotatedInput (coin key.1) (schemas key.1) _ (annotation key.1) key.2 words)
   Authentication := Authentication
   authenticate := authenticate
   MaskLE key small large := (schemaAt (coin key.1) (schemas key.1) key.2).MaskLE
@@ -173,9 +178,9 @@ def BadAnnotation.certificate {Statement Com : Type} [DecidableEq Com]
     WitnessKnowledgeCertificate (Com := Com) coin state certificate.out where
   toWitnessCIRelation := BadAnnotation.relation coin state extractor schemas annotation
     Authentication authenticate
-  escape_subset s path messages table r selected hs hq escape := by
+  escape_subset s path messages table r selected hs escape := by
     rw [extractor_eq s] at escape
     exact annotated_escape_subset (coin s) (schemas s) _ (annotation s)
-      path messages table r selected hs hq escape
+      path messages table r selected hs escape
 
 end Interaction.Oracle.Security.StandardBcs

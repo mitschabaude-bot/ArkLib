@@ -61,14 +61,14 @@ def openingAnnotation {K E : Type} [Field K] [Field E]
   cases s with
   | last lanes tail enc queries =>
       refine ⟨⟨mapMasked ι word, ⟨claims, length⟩, true⟩, ⟨?_, ?_⟩⟩
-      · intro r _ escape
+      · intro r escape
         exact ⟨rfl, initial_batch_escape_subset_bad enc ι valid.2.2.1 valid.2.2.2 sec.out valid.2.1
           decoder correct word claims r escape⟩
       · exact (levelAnnotation ι (.last lanes tail enc queries) sec decoders familyCorrect
           valid (mapMasked ι word) claims true count length).2.2
   | more lanes enc queries rest =>
       refine ⟨⟨mapMasked ι word, ⟨claims, length⟩, true⟩, ⟨?_, ?_⟩⟩
-      · intro r _ escape
+      · intro r escape
         refine ⟨rfl, ?_⟩
         simpa only [Erased.out_mk] using
           initial_batch_escape_subset_bad enc ι valid.2.2.1 valid.2.2.2.1 sec.out.1 valid.2.1
@@ -123,10 +123,10 @@ def witnessCertificate {K E Com : Type} [Field K] [Field E]
     (fun _ => fixedOpeningAnnotation ι s sec decoders familyCorrect valid
       word claims decoder correct)
     Authentication (fun key messages auth => authenticate key word messages auth)
-  escape_subset _ path messages table r selected hs hq escape :=
+  escape_subset _ path messages table r selected hs escape :=
     annotated_escape_subset (openingPublicCoin s) _ _
       (fixedOpeningAnnotation ι s sec decoders familyCorrect valid word claims decoder correct)
-      path messages table r selected hs hq escape
+      path messages table r selected hs escape
 
 section Decomposition
 
@@ -150,7 +150,8 @@ local notation "cert" => (fun _ : PUnit =>
 local notation "refinement" => witnessCertificate ι s sec decoders familyCorrect valid
   word claims decoder correct Authentication authenticate
 
-/-- WHIR opening failure splits into disagreement, authenticated algebraic CI, and query CI. -/
+/-- WHIR opening failure splits into disagreement, the authenticated witness game, and query escapes
+on incomplete prefixes. -/
 theorem knowledgeSoundness_witness
     (A : Coins → FSProof PUnit Com Openings coin)
     (ext : (c : Coins) → ExtractedMessages (openingPublicCoin s) (A c).2.1)

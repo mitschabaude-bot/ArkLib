@@ -36,11 +36,11 @@ def batchSchema {K E : Type} [Field K] [Field E] [DecidableEq E]
   check input r := input.2.2 && checkBadBatch decoder input.1 input.2.1.val r
   check_iff input r := by
     simp only [Bool.and_eq_true, checkBadBatch_iff ι _ _ decoder correct]
-  monotone small large h r bad := by
+  monotone small large h _ r bad := by
     obtain ⟨active, mask, claims⟩ := h bad.1
     exact ⟨active, claims ▸ bad.2.mono mask⟩
   error := Erased.mk (batchError (E := E) enc sec.out count)
-  bad_bound input _ := by
+  bad_bound input := by
     simp only [Erased.out_mk]
     refine (prEvent_mono ($ᵗ E) _ _ (fun _ bad => bad.2)).trans ?_
     refine (prob_badBatch_le ι sec.out decoder correct input.1 input.2.1.val).trans ?_
@@ -70,12 +70,12 @@ def foldSchema {K E : Type} [Field K] [Field E] [DecidableEq E]
     input.1 input.2.1.1 input.2.1.2 r
   check_iff input r := by
     simp only [Bool.and_eq_true, checkBadFold_iff ι _ _ _ _ (correct _) (correct _)]
-  monotone small large h r bad := by
+  monotone small large h _ r bad := by
     obtain ⟨active, mask, data⟩ := h bad.1
     refine ⟨active, ?_⟩
     simpa only [← data] using bad.2.mono mask
   error := Erased.mk (foldError (E := E) enc sec.out)
-  bad_bound input _ := by
+  bad_bound input := by
     simp only [Erased.out_mk]
     exact (prEvent_mono ($ᵗ E) _ _ (fun _ bad => bad.2)).trans
       (prob_badFold_le ι contract sec.out valid (decoders _) (correct _)
@@ -95,24 +95,233 @@ def oodSchema {K E : Type} [Field K] [Field E] [DecidableEq E]
   Bad := BadOod ι (radius enc sec.out)
   check := checkBadOod decoder
   check_iff := checkBadOod_iff ι _ _ decoder correct
-  monotone _ _ h _ bad := bad.mono h
+  monotone _ _ h _ _ bad := bad.mono h
   error := Erased.mk (oodError (E := E) enc sec.out (lanes + vars))
-  bad_bound word _ := by
+  bad_bound word := by
     simpa only [Erased.out_mk] using prob_badOod_le ι sec.out valid decoder correct word
 
-/-- Query challenges retain their extractor-relative event in the decomposition. -/
-def querySchema (Challenge : Type) [SampleableType Challenge] [DecidableEq Challenge] :
-    BadSchema Challenge where
-  Input := PUnit
+/-- A masked word is complete when every column is revealed. -/
+def fullMask {F : Type} {lanes columns : ℕ} (word : MaskedWord F lanes columns) : Bool :=
+  (List.finRange columns).all fun x => (word x).isSome
+
+/-- A complete word has no strictly larger masked extension. -/
+theorem MaskLE.eq_of_fullMask {F : Type} {lanes columns : ℕ}
+    {small large : MaskedWord F lanes columns} (masks : Whir.MaskLE small large)
+    (full : fullMask small = true) : small = large := by
+  funext x
+  have known : (small x).isSome = true := List.all_eq_true.mp full x (List.mem_finRange x)
+  obtain ⟨column, hx⟩ := Option.isSome_iff_exists.mp known
+  rw [hx, masks x column hx]
+
+/-- The data fixed before a last-level column query: the word, residual, plaintext and activity. -/
+structure LastQueryInput (E : Type) (columns tail : ℕ) where
+  /-- The last committed masked word. -/
+  word : MaskedWord E 0 columns
+  /-- The residual claim on that word. -/
+  claim : Claim E (0 + tail)
+  /-- The plaintext candidate sent before the queries. -/
+  candidate : Table E tail
+  /-- Every preceding check accepted. -/
+  active : Bool
+
+/-- The residual and sampled column equations a last-level plaintext must satisfy. -/
+def lastQueryClaims {K E : Type} [Semiring K] [CommRing E] {tail queries : ℕ}
+    (enc : Encoding K tail) (ι : K →+* E) (input : LastQueryInput E (2 ^ (tail + enc.rate)) tail)
+    (xs : Fin queries → enc.Columns) : List (Claim E tail) :=
+  ⟨castTable (Nat.zero_add tail) input.claim.weight, input.claim.value⟩ ::
+    List.ofFn (fun q : Fin queries =>
+      ⟨(enc.queryWeights ι xs).weight q, zeroFill input.word (xs q) Fin.elim0⟩)
+
+/-- A fixed last-level plaintext fails its old relation yet passes every sampled column check. -/
+def LastQueryBad {K E : Type} [Semiring K] [CommRing E] [DecidableEq E] {tail queries : ℕ}
+    (enc : Encoding K tail) (ι : K →+* E) (γ : ℝ)
+    (input : LastQueryInput E (2 ^ (tail + enc.rate)) tail) (xs : Fin queries → enc.Columns) :
+    Prop :=
+  ¬ (input.active = true ∧
+      Close γ input.word (enc.interleave ι (castTable (Nat.zero_add tail).symm input.candidate)) ∧
+      ∀ c ∈ [input.claim], c.Holds (castTable (Nat.zero_add tail).symm input.candidate)) ∧
+    (input.active && queriesKnown input.word xs) = true ∧
+      ∀ c ∈ lastQueryClaims enc ι input xs, c.Holds input.candidate
+
+/-- Last-level column queries test one fixed plaintext against its committed word. -/
+def lastQuerySchema {K E : Type} [Field K] [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] {tail : ℕ} (queries : ℕ) (enc : Encoding K tail) (ι : K →+* E)
+    (sec : Erased LevelSecurity) (valid : sec.out.Valid enc) (decoder : ListDecoder (E := E) enc 0)
+    (correct : decoder.Correct ι (radius enc sec.out) (listBound enc sec.out)) :
+    BadSchema (Fin queries → enc.Columns) where
+  Input := LastQueryInput E (2 ^ (tail + enc.rate)) tail
   equality := inferInstance
   isQuery := true
-  MaskLE _ _ := True
-  Bad _ _ := False
-  check _ _ := false
-  check_iff _ _ := by simp only [Bool.false_eq_true]
-  monotone _ _ _ _ bad := bad.elim
-  error := Erased.mk (0)
-  bad_bound _ impossible := Bool.noConfusion impossible
+  complete input := fullMask input.word
+  MaskLE small large := small.active = true → large.active = true ∧
+    Whir.MaskLE small.word large.word ∧ small.claim = large.claim ∧
+      small.candidate = large.candidate
+  Bad := LastQueryBad enc ι (radius enc sec.out)
+  check input xs :=
+    let f := castTable (Nat.zero_add tail).symm input.candidate
+    !(input.active && decide (f ∈ decoder.decode input.word) && decide (input.claim.Holds f)) &&
+      (input.active && queriesKnown input.word xs) &&
+      decide (∀ c ∈ lastQueryClaims enc ι input xs, c.Holds input.candidate)
+  check_iff input xs := by
+    have close := correct.mem_iff input.word (castTable (Nat.zero_add tail).symm input.candidate)
+    simp only [LastQueryBad, List.forall_mem_singleton, Bool.and_eq_true, decide_eq_true_eq,
+      Bool.not_eq_true', Bool.and_eq_false_iff, decide_eq_false_iff_not, ← close]
+    constructor
+    · rintro ⟨⟨old, known⟩, claims⟩
+      refine ⟨?_, known, claims⟩
+      rintro ⟨active, member, claim⟩
+      rcases old with (inactive | absent) | false
+      · rw [active] at inactive
+        exact Bool.noConfusion inactive
+      · exact absent member
+      · exact false claim
+    · rintro ⟨old, known, claims⟩
+      refine ⟨⟨?_, known⟩, claims⟩
+      by_cases active : input.active = true
+      · by_cases member : castTable (Nat.zero_add tail).symm input.candidate ∈
+            decoder.decode input.word
+        · exact Or.inr (fun claim => old ⟨active, member, claim⟩)
+        · exact Or.inl (Or.inr member)
+      · exact Or.inl (Or.inl (Bool.eq_false_iff.mpr active))
+  monotone small large h complete xs bad := by
+    obtain ⟨live, masks, claim, candidate⟩ := h (Bool.and_eq_true_iff.mp bad.2.1).1
+    have word := MaskLE.eq_of_fullMask masks (complete rfl)
+    rcases small with ⟨w, c, f, a⟩
+    rcases large with ⟨w', c', f', a'⟩
+    dsimp only at word claim candidate live bad ⊢
+    subst word claim candidate
+    have activeTrue := (Bool.and_eq_true_iff.mp bad.2.1).1
+    subst activeTrue
+    subst live
+    exact bad
+  error := Erased.mk (queryError enc sec.out queries)
+  bad_bound input := by
+    simp only [Erased.out_mk]
+    refine (prEvent_mono ($ᵗ (Fin queries → enc.Columns)) _ _ ?_).trans
+      (last_query_local_bound 0 queries enc ι sec.out decoder valid input.word input.claim
+        input.candidate input.active)
+    intro xs bad
+    exact ⟨PUnit.unit, bad⟩
+
+/-- The data fixed before a boundary column query: both words, the OOD exchange and activity. -/
+structure BoundaryQueryInput {K : Type} (E : Type) {tail : ℕ} (columns : ℕ)
+    (rest : Schedule K tail) where
+  /-- The current level's committed masked word. -/
+  word : MaskedWord E 0 columns
+  /-- The residual claim on that word. -/
+  claim : Claim E (0 + tail)
+  /-- The next level's committed masked word. -/
+  nextWord : oracleMessage E rest
+  /-- The OOD point. -/
+  z : Fin tail → E
+  /-- The OOD answer. -/
+  answer : E
+  /-- Every preceding check accepted. -/
+  active : Bool
+
+/-- The boundary query lift fails for some next-level candidate passing every new claim. -/
+def BoundaryQueryBad {K E : Type} [Field K] [Field E] [DecidableEq E] {tail queries : ℕ}
+    (enc : Encoding K tail) (ι : K →+* E) (sec : LevelSecurity)
+    (decoder : ListDecoder (E := E) enc 0) (rest : Schedule K tail)
+    (nextSec : SecurityParameters rest) (decoders : DecoderFamily (E := E) rest)
+    (input : BoundaryQueryInput E (2 ^ (tail + enc.rate)) rest)
+    (xs : Fin queries → enc.Columns) : Prop :=
+  ∃ f, ¬ (oodState (fun g => (candidateState enc ι (radius enc sec) input.word [input.claim]
+        input.active).holds (castTable (Nat.zero_add tail).symm g))
+        (levelList rest decoders input.nextWord) input.z input.active).holds
+      (boundaryLift (decoder.decode input.word) (castTable (Nat.zero_add tail))
+        input.claim.Holds (levelList rest decoders input.nextWord) input.z f) ∧
+    (levelState ι rest nextSec input.nextWord
+      (nextClaims enc ι ⟨castTable (Nat.zero_add tail) input.claim.weight, input.claim.value⟩
+        input.z input.answer xs (fun x => zeroFill input.word x Fin.elim0))
+      (input.active && queriesKnown input.word xs)).holds f
+
+/-- Decide the post-OOD state through the certified current-level decoder. -/
+def checkOodState {K E : Type} [Field K] [Field E] [DecidableEq E] {tail : ℕ}
+    (enc : Encoding K tail) (decoder : ListDecoder (E := E) enc 0)
+    (word : MaskedWord E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail))
+    (newList : List (Table E tail)) (z : Fin tail → E) (active : Bool) :
+    Sum (Table E tail) (Table E tail × Table E tail) → Bool
+  | .inl f => active && decide (castTable (Nat.zero_add tail).symm f ∈ decoder.decode word) &&
+      decide (claim.Holds (castTable (Nat.zero_add tail).symm f))
+  | .inr (f, g) => active && decide (f ∈ newList ∧ g ∈ newList ∧ f ≠ g ∧ mle f z = mle g z)
+
+/-- The decoder-based post-OOD check decides the analytical state. -/
+theorem checkOodState_iff {K E : Type} [Field K] [Field E] [DecidableEq E] {tail : ℕ}
+    (enc : Encoding K tail) (ι : K →+* E) (γ L : ℝ) (decoder : ListDecoder (E := E) enc 0)
+    (correct : decoder.Correct ι γ L)
+    (word : MaskedWord E 0 (2 ^ (tail + enc.rate))) (claim : Claim E (0 + tail))
+    (newList : List (Table E tail)) (z : Fin tail → E) (active : Bool)
+    (w : Sum (Table E tail) (Table E tail × Table E tail)) :
+    checkOodState enc decoder word claim newList z active w = true ↔
+      (oodState (fun g => (candidateState enc ι γ word [claim] active).holds
+        (castTable (Nat.zero_add tail).symm g)) newList z active).holds w := by
+  rcases w with f | ⟨f, g⟩
+  · simp only [checkOodState, oodState, candidateState, Bool.and_eq_true, decide_eq_true_eq,
+      correct.mem_iff, List.forall_mem_singleton]
+    constructor
+    · rintro ⟨⟨active, close⟩, claim⟩
+      exact ⟨active, active, close, claim⟩
+    · rintro ⟨active, -, close, claim⟩
+      exact ⟨⟨active, close⟩, claim⟩
+  · simp only [checkOodState, oodState, Bool.and_eq_true, decide_eq_true_eq]
+
+/-- Boundary column queries test the candidate fixed by the OOD answer. -/
+def boundaryQuerySchema {K E : Type} [Field K] [Field E] [DecidableEq E]
+    [Finite E] [SampleableType E] {tail : ℕ} (queries : ℕ) (enc : Encoding K tail) (ι : K →+* E)
+    (sec : Erased LevelSecurity) (valid : sec.out.Valid enc) (decoder : ListDecoder (E := E) enc 0)
+    (correct : decoder.Correct ι (radius enc sec.out) (listBound enc sec.out))
+    (rest : Schedule K tail) (nextSec : Erased (SecurityParameters rest))
+    (decoders : DecoderFamily (E := E) rest)
+    (nextCorrect : DecoderFamily.Correct ι rest decoders nextSec.out) :
+    BadSchema (Fin queries → enc.Columns) where
+  Input := BoundaryQueryInput E (2 ^ (tail + enc.rate)) rest
+  equality := inferInstance
+  isQuery := true
+  complete input := fullMask input.word && fullMask input.nextWord
+  MaskLE small large := small.active = true → large.active = true ∧
+    Whir.MaskLE small.word large.word ∧ Whir.MaskLE small.nextWord large.nextWord ∧
+      small.claim = large.claim ∧ small.z = large.z ∧ small.answer = large.answer
+  Bad := BoundaryQueryBad enc ι sec.out decoder rest nextSec.out decoders
+  check input xs :=
+    let newList := levelList rest decoders input.nextWord
+    let claims := nextClaims enc ι
+      ⟨castTable (Nat.zero_add tail) input.claim.weight, input.claim.value⟩
+      input.z input.answer xs (fun x => zeroFill input.word x Fin.elim0)
+    (input.active && queriesKnown input.word xs) && newList.any fun f =>
+      decide (∀ c ∈ claims, c.Holds f) &&
+        !checkOodState enc decoder input.word input.claim newList input.z input.active
+          (boundaryLift (decoder.decode input.word) (castTable (Nat.zero_add tail))
+            input.claim.Holds newList input.z f)
+  check_iff input xs := by
+    simp only [BoundaryQueryBad, levelState_holds_iff ι rest nextSec.out decoders nextCorrect,
+      Bool.and_eq_true, List.any_eq_true, decide_eq_true_eq, Bool.not_eq_true',
+      ← Bool.not_eq_true, checkOodState_iff enc ι _ _ decoder correct]
+    constructor
+    · rintro ⟨active, f, member, claims, bad⟩
+      exact ⟨f, bad, active, member, claims⟩
+    · rintro ⟨f, bad, active, member, claims⟩
+      exact ⟨active, f, member, claims, bad⟩
+  monotone small large h complete xs bad := by
+    have good := bad.choose_spec.2
+    rw [levelState_holds_iff ι rest nextSec.out decoders nextCorrect] at good
+    obtain ⟨live, masks, nextMasks, claim, z, answer⟩ :=
+      h (Bool.and_eq_true_iff.mp good.1).1
+    obtain ⟨wordFull, nextFull⟩ := Bool.and_eq_true_iff.mp (complete rfl)
+    have word := MaskLE.eq_of_fullMask masks wordFull
+    have nextWord := MaskLE.eq_of_fullMask nextMasks nextFull
+    have activeTrue := (Bool.and_eq_true_iff.mp good.1).1
+    rcases small with ⟨w, c, n, z₀, a₀, act⟩
+    rcases large with ⟨w', c', n', z₁, a₁, act'⟩
+    dsimp only at word nextWord claim z answer live activeTrue bad ⊢
+    subst word nextWord claim z answer activeTrue live
+    exact bad
+  error := Erased.mk (queryError enc sec.out queries)
+  bad_bound input := by
+    simp only [Erased.out_mk]
+    exact (prEvent_mono _ _ _ fun _ bad => bad).trans
+      (boundary_query_local_bound enc ι sec.out valid decoder correct rest nextSec.out decoders
+        nextCorrect input.nextWord input.word input.claim input.z input.answer input.active)
 
 /-- Final batching retains earlier query activity and authenticates the current masked equations. -/
 def finalBatchSchema {E : Type} [Field E] [DecidableEq E]
@@ -124,11 +333,11 @@ def finalBatchSchema {E : Type} [Field E] [DecidableEq E]
   Bad input r := input.2 = true ∧ PrefixBadFinalBatch input.1.val r
   check input r := input.2 && checkPrefixBadFinalBatch input.1.val r
   check_iff input r := by simp only [Bool.and_eq_true, checkPrefixBadFinalBatch_iff]
-  monotone _ _ h _ bad := by
+  monotone _ _ h _ _ bad := by
     obtain ⟨active, masks⟩ := h bad.1
     exact ⟨active, BadFinalBatch.mask_mono masks bad.2⟩
   error := Erased.mk ((queries : ENNReal) / Fintype.card E)
-  bad_bound input _ := by
+  bad_bound input := by
     simp only [Erased.out_mk]
     refine (prEvent_mono ($ᵗ E) _ _ (fun _ bad => bad.2.2)).trans ?_
     have len : input.1.val.claims.length - 1 = queries := by
@@ -158,13 +367,13 @@ def closingSchema {E : Type} [Field E] [DecidableEq E]
   Bad input r := input.active = true ∧ PrefixBadClosing input.history input.pre input.quadratic r
   check input r := input.active && checkPrefixBadClosing input.history input.pre input.quadratic r
   check_iff input r := by simp only [Bool.and_eq_true, checkPrefixBadClosing_iff]
-  monotone small large h r bad := by
+  monotone small large h _ r bad := by
     rcases small with ⟨pre, history, q, active⟩
     rcases large with ⟨pre', history', q', active'⟩
     obtain ⟨live, masks, rfl, rfl⟩ := h bad.1
     exact ⟨live, BadClosing.mask_mono history masks bad.2⟩
   error := Erased.mk ((2 : ENNReal) / Fintype.card E)
-  bad_bound input _ := by
+  bad_bound input := by
     simp only [Erased.out_mk]
     exact (prEvent_mono ($ᵗ E) _ _ (fun _ bad => bad.2.2)).trans
       (prob_badClosing_le _ _ _)
@@ -221,7 +430,7 @@ def openingSchemas {K E : Type} [Field K] [Field E] [DecidableEq E]
         foldSchemas enc ι sec valid.2.2.2 valid.2.1 decoders correct
           (rest := transition E (.last lanes tail enc queries))
           (.sender fun _ => .challenge (.challenge (scalarRoundsPublicCoin tail .done)))
-          (fun _ => ⟨querySchema (Fin queries → enc.Columns),
+          (fun _ => ⟨lastQuerySchema queries enc ι sec valid.2.1 (decoders 0) (correct 0),
             ⟨finalBatchSchema tail (2 ^ (tail + enc.rate)) queries,
               closingSchemas tail (2 ^ (tail + enc.rate)) queries tail⟩⟩) lanes⟩
   | _, .more lanes enc queries rest, sec, decoders, correct, valid, count =>
@@ -235,7 +444,10 @@ def openingSchemas {K E : Type} [Field K] [Field E] [DecidableEq E]
           ⟨enteringOodSchema ι rest (Erased.mk sec.out.2) decoders.2
               (by simpa only [Erased.out_mk] using correct.2)
               (by simpa only [Erased.out_mk] using valid.2.2.2.2),
-            fun _ => ⟨querySchema (Fin queries → enc.Columns),
+            fun _ => ⟨boundaryQuerySchema queries enc ι (Erased.mk sec.out.1)
+                (by simpa only [Erased.out_mk] using valid.2.1) (decoders.1 0)
+                (by simpa only [Erased.out_mk] using correct.1 0) rest (Erased.mk sec.out.2)
+                decoders.2 (by simpa only [Erased.out_mk] using correct.2),
               openingSchemas ι rest (Erased.mk sec.out.2) decoders.2
               (by simpa only [Erased.out_mk] using correct.2)
               (by simpa only [Erased.out_mk] using valid.2.2.2.2) (queries + 2)⟩⟩ lanes⟩
