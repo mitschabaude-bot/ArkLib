@@ -31,8 +31,9 @@ def closingAnnotation {E : Type} [Field E] [DecidableEq E]
         (history pre.publicData.candidate pre.claims).2 active)
   | 0, _, _, _ => PUnit.unit
   | count + 1, history, active, known => fun q =>
-      ⟨⟨pre, history, q⟩, ⟨fun r _ escape =>
-        ⟨known (Bool.and_eq_true_iff.mp escape.choose_spec.2.1).1,
+      ⟨⟨pre, history, q, active⟩, ⟨fun r _ escape =>
+        ⟨(Bool.and_eq_true_iff.mp escape.choose_spec.2.1).1,
+          known (Bool.and_eq_true_iff.mp escape.choose_spec.2.1).1,
           closing_escape_subset_bad _ _ q active r escape⟩,
         fun r => closingAnnotation pre count (fun candidate claims =>
           let data := history candidate claims
@@ -63,8 +64,9 @@ def lastAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
     let pre : PlaintextPrefix E tail (2 ^ (tail + enc.rate)) queries :=
       ⟨⟨candidate, [⟨castTable (Nat.zero_add tail) claim.weight, claim.value⟩],
         (fun q => weights.weight q), xs⟩, word⟩
-    ⟨⟨pre, rfl⟩, ⟨fun r _ escape =>
-      ⟨(Bool.and_eq_true_iff.mp escape.choose_spec.2.1).2,
+    ⟨(⟨pre, rfl⟩, active), ⟨fun r _ escape =>
+      ⟨(Bool.and_eq_true_iff.mp escape.choose_spec.2.1).1,
+        (Bool.and_eq_true_iff.mp escape.choose_spec.2.1).2,
         finalBatch_escape_subset_bad candidate pre.claims (active && pre.known) r escape⟩,
       fun r => closingAnnotation pre tail (fun candidate claims => (candidate, batch claims r))
         (active && pre.known) (fun h => (Bool.and_eq_true_iff.mp h).2)⟩⟩⟩⟩

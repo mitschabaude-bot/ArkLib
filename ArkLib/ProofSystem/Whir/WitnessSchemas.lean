@@ -114,25 +114,27 @@ def querySchema (Challenge : Type) [SampleableType Challenge] [DecidableEq Chall
   error := Erased.mk (0)
   bad_bound _ impossible := Bool.noConfusion impossible
 
-/-- Final batching authenticates the masked prefix from which the sampled claims are read. -/
+/-- Final batching retains earlier query activity and authenticates the current masked equations. -/
 def finalBatchSchema {E : Type} [Field E] [DecidableEq E]
     [Finite E] [SampleableType E] (n columns queries : ℕ) : BadSchema E where
-  Input := {pre : PlaintextPrefix E n columns queries // pre.publicData.residual.length = 1}
+  Input := {pre : PlaintextPrefix E n columns queries // pre.publicData.residual.length = 1} × Bool
   equality := inferInstance
   isQuery := false
-  MaskLE small large := small.val.MaskLE large.val
-  Bad input := PrefixBadFinalBatch input.val
-  check input := checkPrefixBadFinalBatch input.val
-  check_iff input := checkPrefixBadFinalBatch_iff input.val
-  monotone _ _ h _ bad := BadFinalBatch.mask_mono h bad
+  MaskLE small large := small.2 = true → large.2 = true ∧ small.1.val.MaskLE large.1.val
+  Bad input r := input.2 = true ∧ PrefixBadFinalBatch input.1.val r
+  check input r := input.2 && checkPrefixBadFinalBatch input.1.val r
+  check_iff input r := by simp only [Bool.and_eq_true, checkPrefixBadFinalBatch_iff]
+  monotone _ _ h _ bad := by
+    obtain ⟨active, masks⟩ := h bad.1
+    exact ⟨active, BadFinalBatch.mask_mono masks bad.2⟩
   error := Erased.mk ((queries : ENNReal) / Fintype.card E)
   bad_bound input _ := by
     simp only [Erased.out_mk]
-    refine (prEvent_mono ($ᵗ E) _ _ (fun _ bad => bad.2)).trans ?_
-    have len : input.val.claims.length - 1 = queries := by
-      simp only [PlaintextPrefix.claims, List.length_append, List.length_ofFn, input.property]
+    refine (prEvent_mono ($ᵗ E) _ _ (fun _ bad => bad.2.2)).trans ?_
+    have len : input.1.val.claims.length - 1 = queries := by
+      simp only [PlaintextPrefix.claims, List.length_append, List.length_ofFn, input.1.property]
       omega
-    simpa only [len] using prob_badFinalBatch_le input.val.publicData.candidate input.val.claims
+    simpa only [len] using prob_badFinalBatch_le input.1.val.publicData.candidate input.1.val.claims
 
 /-- Closing data retains the original guarded prefix and its public scalar-history transform. -/
 structure ClosingInput (E : Type) (n columns queries count : ℕ) where
@@ -142,6 +144,8 @@ structure ClosingInput (E : Type) (n columns queries count : ℕ) where
   history : Table E n → List (Claim E n) → Table E (count + 1) × Claim E (count + 1)
   /-- The current compressed quadratic message. -/
   quadratic : Quadratic E
+  /-- Activity retains all preceding query-availability and scalar-acceptance checks. -/
+  active : Bool
 
 /-- Closing checks a guarded root event after applying only public scalar history. -/
 def closingSchema {E : Type} [Field E] [DecidableEq E]
@@ -149,20 +153,20 @@ def closingSchema {E : Type} [Field E] [DecidableEq E]
   Input := ClosingInput E n columns queries count
   equality := inferInstance
   isQuery := false
-  MaskLE small large := small.pre.MaskLE large.pre ∧ small.history = large.history ∧
-    small.quadratic = large.quadratic
-  Bad input := PrefixBadClosing input.history input.pre input.quadratic
-  check input := checkPrefixBadClosing input.history input.pre input.quadratic
-  check_iff input := checkPrefixBadClosing_iff input.history input.pre input.quadratic
+  MaskLE small large := small.active = true → large.active = true ∧
+    small.pre.MaskLE large.pre ∧ small.history = large.history ∧ small.quadratic = large.quadratic
+  Bad input r := input.active = true ∧ PrefixBadClosing input.history input.pre input.quadratic r
+  check input r := input.active && checkPrefixBadClosing input.history input.pre input.quadratic r
+  check_iff input r := by simp only [Bool.and_eq_true, checkPrefixBadClosing_iff]
   monotone small large h r bad := by
-    rcases small with ⟨pre, history, q⟩
-    rcases large with ⟨pre', history', q'⟩
-    obtain ⟨masks, rfl, rfl⟩ := h
-    exact BadClosing.mask_mono history masks bad
+    rcases small with ⟨pre, history, q, active⟩
+    rcases large with ⟨pre', history', q', active'⟩
+    obtain ⟨live, masks, rfl, rfl⟩ := h bad.1
+    exact ⟨live, BadClosing.mask_mono history masks bad.2⟩
   error := Erased.mk ((2 : ENNReal) / Fintype.card E)
   bad_bound input _ := by
     simp only [Erased.out_mk]
-    exact (prEvent_mono ($ᵗ E) _ _ (fun _ bad => bad.2)).trans
+    exact (prEvent_mono ($ᵗ E) _ _ (fun _ bad => bad.2.2)).trans
       (prob_badClosing_le _ _ _)
 
 /-- The closing block classifies every scalar round as a guarded quadratic root event. -/
