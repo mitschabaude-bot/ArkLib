@@ -129,7 +129,8 @@ theorem enteringOod_collision {K E : Type} [Field K] [Field E] [DecidableEq E]
 /-- Boundary annotations read the new oracle before OOD and fix the query input after the answer. -/
 def boundaryAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
     [Finite E] [SampleableType E] {tail : ℕ} (lanes queries : ℕ)
-    (enc : Encoding K tail) (ι : K →+* E) (sec : Erased LevelSecurity) (levelValid : sec.out.Valid enc)
+    (enc : Encoding K tail) (ι : K →+* E) (sec : Erased LevelSecurity)
+    (levelValid : sec.out.Valid enc)
     (decoder : ListDecoder (E := E) enc 0)
     (decoderCorrect : decoder.Correct ι (radius enc sec.out) (listBound enc sec.out))
     (rest : Schedule K tail) (nextSec : Erased (SecurityParameters rest))
@@ -144,8 +145,8 @@ def boundaryAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
     BadAnnotation (protocol := transition E (.more lanes enc queries rest))
       (.oracle (.challenge (.sender fun _ => .challenge (openingPublicCoin rest))))
       (enteringOodSchema ι rest nextSec decoders correct valid,
-        fun _ => (boundaryQuerySchema queries enc ι sec levelValid decoder decoderCorrect rest nextSec
-            decoders correct,
+        fun _ => (boundaryQuerySchema queries enc ι sec levelValid decoder decoderCorrect rest
+            nextSec decoders correct,
           openingSchemas ι rest nextSec decoders correct valid (queries + 2)))
       (boundaryExtractor lanes queries enc ι
         (fun w f => Close (radius enc sec.out) w (enc.interleave ι f))
@@ -219,7 +220,8 @@ def levelAnnotation {K E : Type} [Field K] [Field E] [DecidableEq E]
                   decoders.2))
               (boundaryAnnotation lanes queries enc ι (Erased.mk sec.out.1)
                 (by simpa only [Erased.out_mk] using valid.2.1) (decoders.1 0)
-                (by simpa only [Erased.out_mk] using correct.1 0) rest (Erased.mk sec.out.2) decoders.2
+                (by simpa only [Erased.out_mk] using correct.1 0) rest (Erased.mk sec.out.2)
+                decoders.2
                 (by simpa only [Erased.out_mk] using correct.2)
                 (by simpa only [Erased.out_mk] using valid.2.2.2.2)
                 (fun word claims active length =>
